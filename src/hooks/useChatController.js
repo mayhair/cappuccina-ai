@@ -1,8 +1,7 @@
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { sendStreaming } from '../api/chatClient'
-import { initialChats } from '../lib/seedChats'
 
-let nextId = 1
+const STORAGE_KEY = 'cappuccina-chats'
 
 export const EFFORTS = [
   { label: 'Light', value: 'low' },
@@ -11,9 +10,28 @@ export const EFFORTS = [
   { label: 'Extra High', value: 'xhigh' },
 ]
 
+export function makeChat() {
+  return {
+    id: `chat-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`,
+    title: 'New chat',
+    tag: null,
+    messages: [],
+  }
+}
+
+function loadChats() {
+  try {
+    const stored = JSON.parse(localStorage.getItem(STORAGE_KEY))
+    if (Array.isArray(stored) && stored.length > 0) return stored
+  } catch {
+    // ignore malformed storage
+  }
+  return [makeChat()]
+}
+
 export function useChatController() {
-  const [chats, setChats] = useState(() => initialChats.map((c) => ({ ...c })))
-  const [activeChatId, setActiveChatId] = useState(initialChats[0].id)
+  const [chats, setChats] = useState(loadChats)
+  const [activeChatId, setActiveChatId] = useState(() => chats[0].id)
   const [draft, setDraft] = useState('')
   const [query, setQuery] = useState('')
   const [effort, setEffort] = useState('Medium')
@@ -22,6 +40,17 @@ export function useChatController() {
   const inputRef = useRef(null)
 
   const activeChat = chats.find((c) => c.id === activeChatId) ?? chats[0]
+
+  useEffect(() => {
+    const t = setTimeout(() => {
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(chats))
+      } catch {
+        // storage full or unavailable
+      }
+    }, 300)
+    return () => clearTimeout(t)
+  }, [chats])
 
   const patchMessages = useCallback((chatId, fn) => {
     setChats((all) => all.map((c) => (c.id === chatId ? { ...c, messages: fn(c.messages) } : c)))
@@ -101,17 +130,9 @@ export function useChatController() {
   }, [draft, status, activeChatId, activeChat, effort, patchMessages, patchAssistant])
 
   const newChat = useCallback(() => {
-    const id = `chat-${nextId++}`
-    setChats((all) => [
-      {
-        id,
-        title: 'New chat',
-        tag: null,
-        messages: [],
-      },
-      ...all,
-    ])
-    setActiveChatId(id)
+    const chat = makeChat()
+    setChats((all) => [chat, ...all])
+    setActiveChatId(chat.id)
     setDraft('')
     setStatus('idle')
     inputRef.current?.focus()
