@@ -7,7 +7,7 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 BRAVE_API_KEY = os.getenv("BRAVE_API_KEY", "")
 MODEL_ID = os.getenv("MODEL_ID", "gpt-5.6-luna")
 
-REASONING_LEVELS = {"low", "medium", "high"}
+REASONING_LEVELS = {"none", "low", "medium", "high", "xhigh", "max"}
 
 CHAT_SYSTEM_PROMPT = """You are Cappuccina, a friendly AI embodied by Ballerina Cappuccina \
 (a cup-headed ballerina in a pink tutu). You chat with kids aged 11-15.
