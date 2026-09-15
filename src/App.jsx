@@ -32,6 +32,7 @@ export default function App() {
     inputRef,
     typingTitleId,
     sendMessage,
+    retryMessage,
     newChat,
     deleteChat,
     renameChat,
@@ -74,6 +75,7 @@ export default function App() {
           draft={draft}
           onDraft={setDraft}
           onSend={sendMessage}
+          onRetry={retryMessage}
           inputRef={inputRef}
           effort={effort}
           onEffort={setEffort}

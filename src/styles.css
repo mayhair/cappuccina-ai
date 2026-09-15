@@ -935,3 +935,10 @@ input { caret-color: var(--pink-strong); }
   color: #fff;
   box-shadow: 0 8px 18px rgba(214, 90, 160, 0.35);
 }
+.emoji {
+  width: 1em;
+  height: 1em;
+  margin: 0 0.06em;
+  vertical-align: -0.12em;
+  display: inline-block;
+}

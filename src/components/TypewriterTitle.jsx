@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { EmojiText } from '../lib/emoji'
 
 const CHAR_MS = 40
 
@@ -28,7 +29,9 @@ export function TypewriterTitle({ text, onDone }) {
 
   return (
     <span className="chat-title typewriter" aria-label={text}>
-      <span aria-hidden="true">{text.slice(0, count)}</span>
+      <span aria-hidden="true">
+        <EmojiText text={text.slice(0, count)} />
+      </span>
       {count < text.length && <span className="typewriter-caret" aria-hidden="true" />}
     </span>
   )

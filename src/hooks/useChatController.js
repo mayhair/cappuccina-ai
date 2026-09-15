@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { sendStreaming } from '../api/chatClient'
+import { loadStoredChats, saveStoredChats } from '../lib/chatStorage'
 
-const STORAGE_KEY = 'cappuccina-chats'
 const EFFORT_KEY = 'cappuccina-effort'
 const DEFAULT_TITLE = 'New chat'
 
@@ -31,27 +31,19 @@ export function makeChat() {
   }
 }
 
-function loadChats() {
-  try {
-    const stored = JSON.parse(localStorage.getItem(STORAGE_KEY))
-    if (Array.isArray(stored) && stored.length > 0) return stored
-  } catch {
-    // ignore malformed storage
-  }
-  return [makeChat()]
-}
-
 export function useChatController() {
-  const [chats, setChats] = useState(loadChats)
+  const [chats, setChats] = useState(() => [makeChat()])
   const [activeChatId, setActiveChatId] = useState(() => chats[0].id)
   const [draft, setDraft] = useState('')
   const [query, setQuery] = useState('')
   const [effort, setEffort] = useState(loadEffort)
   const [status, setStatus] = useState('idle')
   const [typingTitleId, setTypingTitleId] = useState(null)
+  const [storeReady, setStoreReady] = useState(false)
   const isStreaming = status === 'streaming'
   const inputRef = useRef(null)
   const chatsRef = useRef(chats)
+  const pristineId = useRef(chats[0].id)
   const streamSeq = useRef(0)
 
   const activeChat = chats.find((c) => c.id === activeChatId) ?? chats[0]
@@ -61,15 +53,44 @@ export function useChatController() {
   }, [chats])
 
   useEffect(() => {
-    const t = setTimeout(() => {
+    let cancelled = false
+    ;(async () => {
       try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(chats))
+        const stored = await loadStoredChats()
+        if (cancelled) return
+        if (Array.isArray(stored) && stored.length > 0) {
+          const current = chatsRef.current
+          const pristine =
+            current.length === 1 &&
+            current[0].id === pristineId.current &&
+            current[0].messages.length === 0
+          if (pristine) {
+            setChats(stored)
+            setActiveChatId((cur) =>
+              stored.some((c) => c.id === cur) ? cur : stored[0].id,
+            )
+          }
+        }
       } catch {
-        // storage full or unavailable
+        // IndexedDB unavailable — fall back to in-memory chats
+      } finally {
+        if (!cancelled) setStoreReady(true)
       }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!storeReady) return
+    const t = setTimeout(() => {
+      saveStoredChats(chats).catch(() => {
+        // quota or unavailable — keep in-memory chats
+      })
     }, 300)
     return () => clearTimeout(t)
-  }, [chats])
+  }, [chats, storeReady])
 
   useEffect(() => {
     try {
@@ -101,23 +122,13 @@ export function useChatController() {
 
   const clearTypingTitle = useCallback(() => setTypingTitleId(null), [])
 
-  const sendMessage = useCallback(() => {
-    const text = draft.trim()
-    if (!text || status !== 'idle') return
-    const chatId = activeChatId
-    const userMessage = { role: 'user', content: text }
-    const reasoning = EFFORTS.find((e) => e.label === effort)?.value ?? 'medium'
-
-    patchMessages(chatId, (messages) => [...messages, userMessage])
-    setDraft('')
+  const streamReply = useCallback((chatId, history, reasoning) => {
     setStatus('streaming')
-
-    const history = [...activeChat.messages, userMessage]
     const seq = ++streamSeq.current
     ;(async () => {
       patchMessages(chatId, (messages) => [
         ...messages,
-        { role: 'assistant', content: '', reasoning: '', tools: [], thinkingDone: false, thoughtSeconds: null },
+        { role: 'assistant', content: '', reasoning: '', tools: [], thinkingDone: false, thoughtSeconds: null, failed: false },
       ])
       const streamStart = Date.now()
       let thoughtEnd = null
@@ -164,14 +175,44 @@ export function useChatController() {
       patchMessages(chatId, (messages) =>
         messages.map((m, i) =>
           i === messages.length - 1 && m.role === 'assistant' && !m.content
-            ? { ...m, content: 'Oh no, my espresso machine hiccuped. Try again in a moment! 💕' }
+            ? { ...m, content: 'Oh no, my espresso machine hiccuped. Try again in a moment! 💕', failed: true }
             : m,
         ),
       )
     }).finally(() => {
       if (streamSeq.current === seq) setStatus('idle')
     })
-  }, [draft, status, activeChatId, activeChat, effort, patchMessages, patchAssistant, applyTitle])
+  }, [patchMessages, patchAssistant, applyTitle])
+
+  const sendMessage = useCallback(() => {
+    const text = draft.trim()
+    if (!text || status !== 'idle') return
+    const chatId = activeChatId
+    const userMessage = { role: 'user', content: text }
+    const reasoning = EFFORTS.find((e) => e.label === effort)?.value ?? 'medium'
+
+    patchMessages(chatId, (messages) => [...messages, userMessage])
+    setDraft('')
+    streamReply(chatId, [...activeChat.messages, userMessage], reasoning)
+  }, [draft, status, activeChatId, activeChat, effort, patchMessages, streamReply])
+
+  const retryMessage = useCallback(() => {
+    if (status !== 'idle') return
+    const messages = activeChat.messages
+    let lastUser = -1
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].role === 'user') {
+        lastUser = i
+        break
+      }
+    }
+    if (lastUser === -1) return
+    const chatId = activeChatId
+    const history = messages.slice(0, lastUser + 1)
+    const reasoning = EFFORTS.find((e) => e.label === effort)?.value ?? 'medium'
+    patchMessages(chatId, () => history)
+    streamReply(chatId, history, reasoning)
+  }, [status, activeChat, activeChatId, effort, patchMessages, streamReply])
 
   const newChat = useCallback(() => {
     const chat = makeChat()
@@ -217,6 +258,7 @@ export function useChatController() {
     inputRef,
     typingTitleId,
     sendMessage,
+    retryMessage,
     newChat,
     deleteChat,
     renameChat,

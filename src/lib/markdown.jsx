@@ -1,4 +1,5 @@
 import { Fragment } from 'react'
+import { renderEmoji } from './emoji'
 
 // Minimal, dependency-free markdown -> React elements. Rendering to elements
 // (never innerHTML) keeps untrusted model output injection-safe.
@@ -33,7 +34,7 @@ function renderInline(text, prefix) {
   let last = 0
   let n = 0
   for (const m of text.matchAll(INLINE)) {
-    if (m.index > last) out.push(text.slice(last, m.index))
+    if (m.index > last) out.push(...renderEmoji(text.slice(last, m.index), `${prefix}-${n++}`))
     const key = `${prefix}-${n++}`
     if (m[1] !== undefined) {
       out.push(
@@ -60,7 +61,7 @@ function renderInline(text, prefix) {
     }
     last = m.index + m[0].length
   }
-  if (last < text.length) out.push(text.slice(last))
+  if (last < text.length) out.push(...renderEmoji(text.slice(last), `${prefix}-${n++}`))
   return out
 }
 

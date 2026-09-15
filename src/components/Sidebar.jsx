@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { ChatIcon, TrashIcon, PlusIcon, SearchIcon, DotsIcon, PencilIcon } from './Icons'
 import { TypewriterTitle } from './TypewriterTitle'
+import { EmojiText } from '../lib/emoji'
 
 export function Sidebar({ chats, activeChatId, onSelect, onNewChat, onDelete, onRename, query, onQuery, typingTitleId, onTitleTyped }) {
   const [pendingDelete, setPendingDelete] = useState(null)
@@ -102,7 +103,9 @@ export function Sidebar({ chats, activeChatId, onSelect, onNewChat, onDelete, on
               ) : c.id === typingTitleId ? (
                 <TypewriterTitle text={c.title} onDone={onTitleTyped} />
               ) : (
-                <span className="chat-title">{c.title}</span>
+                <span className="chat-title">
+                  <EmojiText text={c.title} />
+                </span>
               )}
               {c.tag && <span className="tag">{c.tag}</span>}
               {!editing && (
@@ -154,7 +157,9 @@ export function Sidebar({ chats, activeChatId, onSelect, onNewChat, onDelete, on
         })}
       </nav>
 
-      <p className="side-note">Cappuccina is an AI character — not a person, but she loves to help. 💕</p>
+      <p className="side-note">
+        <EmojiText text="Cappuccina is an AI character — not a person, but she loves to help. 💕" />
+      </p>
     </aside>
 
       {target && (
@@ -163,9 +168,11 @@ export function Sidebar({ chats, activeChatId, onSelect, onNewChat, onDelete, on
             <div className="modal-avatar">
               <img src="/plates/msg-avatar.png" alt="" />
             </div>
-            <h2 id="delete-title">Sip—one moment! ☕</h2>
+            <h2 id="delete-title">
+              <EmojiText text="Sip—one moment! ☕" />
+            </h2>
             <p>
-              Are you <i>sure</i> you want to pour <strong>“{target.title}”</strong> down the drain? That chat will be gone <em>forever</em> — I can't get it back. 💔
+              Are you <i>sure</i> you want to pour <strong>“{target.title}”</strong> down the drain? That chat will be gone <em>forever</em> — I can't get it back. <EmojiText text="💔" />
             </p>
             <div className="modal-actions">
               <button type="button" className="btn-keep" onClick={() => setPendingDelete(null)}>

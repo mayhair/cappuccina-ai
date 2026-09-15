@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
-import { PersonIcon, SendIcon, ChevronIcon, WrenchIcon, CopyIcon, CheckIcon } from './Icons'
+import { PersonIcon, SendIcon, ChevronIcon, WrenchIcon, CopyIcon, CheckIcon, RetryIcon } from './Icons'
 import { EffortSelector } from './EffortSelector'
 import { Markdown } from '../lib/markdown'
+import { EmojiText } from '../lib/emoji'
 
 export function StreamingDots({ label = 'Cappuccina is typing' }) {
   return (
@@ -39,14 +40,18 @@ function ThinkingBlock({ message }) {
       </button>
       {open && (
         <div className="thinking-body">
-          {reasoning && <p className="thinking-reasoning">{reasoning}</p>}
+          {reasoning && (
+            <p className="thinking-reasoning">
+              <EmojiText text={reasoning} />
+            </p>
+          )}
           {tools.map((t) => (
             <div key={t.id} className="tool-call">
               <WrenchIcon />
               <div className="tool-detail">
                 <div className="tool-title">Called Tool: {t.display || t.name}</div>
                 <div className="tool-result">
-                  {t.result ?? 'Running…'}
+                  <EmojiText text={t.result ?? 'Running…'} />
                   {t.ok === false && ' (failed)'}
                 </div>
               </div>
@@ -99,7 +104,21 @@ function CopyMessageButton({ text }) {
   )
 }
 
-export function ChatWindow({ chat, isStreaming, draft, onDraft, onSend, inputRef, effort, onEffort }) {
+function RetryMessageButton({ onRetry }) {
+  return (
+    <button
+      type="button"
+      className="copy-msg"
+      onClick={onRetry}
+      aria-label="Try again now"
+    >
+      <RetryIcon />
+      <span>Try again now</span>
+    </button>
+  )
+}
+
+export function ChatWindow({ chat, isStreaming, draft, onDraft, onSend, onRetry, inputRef, effort, onEffort }) {
   const listRef = useRef(null)
   const scrollSig = chat.messages.map((m) => `${m.role}${m.content?.length ?? 0}`).join('|')
 
@@ -145,11 +164,15 @@ export function ChatWindow({ chat, isStreaming, draft, onDraft, onSend, inputRef
                       <p>…</p>
                     )}
                   </div>
-                  {m.content && !isActiveStream && <CopyMessageButton text={m.content} />}
+                  {m.content && !isActiveStream && (m.failed
+                    ? <RetryMessageButton onRetry={onRetry} />
+                    : <CopyMessageButton text={m.content} />)}
                 </div>
               ) : (
                 <div className="bubble">
-                  <p>{m.content || '…'}</p>
+                  <p>
+                    <EmojiText text={m.content || '…'} />
+                  </p>
                 </div>
               )}
             </div>
