@@ -4,6 +4,7 @@ import { ChevronIcon } from './Icons'
 
 export function EffortSelector({ effort, onChange, disabled }) {
   const [open, setOpen] = useState(false)
+  const [helpOpen, setHelpOpen] = useState(false)
   const index = Math.max(0, EFFORTS.findIndex((e) => e.label === effort))
   const percent = (index / (EFFORTS.length - 1)) * 100
 
@@ -36,9 +37,17 @@ export function EffortSelector({ effort, onChange, disabled }) {
           <div className="effort-pop" role="dialog" aria-label="Select reasoning effort">
             <div className="effort-name">
               <span>{effort}</span>
-              <ChevronIcon />
             </div>
-            <div className="effort-sub">Reasoning effort</div>
+            <div className="effort-sub">
+              <span>Reasoning effort</span>
+              <button
+                type="button"
+                className="effort-help"
+                onClick={() => setHelpOpen(true)}
+              >
+                (What is this?)
+              </button>
+            </div>
             <input
               type="range"
               className="effort-range"
@@ -69,6 +78,31 @@ export function EffortSelector({ effort, onChange, disabled }) {
             </div>
           </div>
         </>
+      )}
+
+      {helpOpen && (
+        <div
+          className="modal-veil"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="effort-help-title"
+          onMouseDown={(e) => e.target === e.currentTarget && setHelpOpen(false)}
+        >
+          <div className="modal">
+            <div className="modal-avatar">
+              <img src="/plates/msg-avatar.png" alt="" />
+            </div>
+            <h2 id="effort-help-title">Let me think about that ☕</h2>
+            <p>
+              Reasoning effort is how long I let myself think before I answer. Turn it up and I&apos;ll take my time — fewer silly mistakes, and usually a smarter, more helpful reply. Turn it down and I&apos;ll answer quickly, which is perfect for little things like &ldquo;what&apos;s 2+2?&rdquo;. For tricky questions — math, code, planning — give me a bit more effort and I&apos;ll do a much better job. The lazier the question, the lighter I can go! 💕
+            </p>
+            <div className="modal-actions">
+              <button type="button" className="btn-gotit" onClick={() => setHelpOpen(false)}>
+                Got it, grazie!
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )

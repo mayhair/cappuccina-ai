@@ -702,6 +702,19 @@ input { caret-color: var(--pink-strong); }
   font-size: 14px;
   color: var(--ink-soft);
 }
+.effort-help {
+  border: none;
+  background: none;
+  padding: 0 0 0 0.3rem;
+  font-family: var(--font-body);
+  font-size: 14px;
+  font-weight: 800;
+  color: var(--pink-ink);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+.effort-help:hover { filter: brightness(1.1); }
 .effort-range {
   -webkit-appearance: none;
   appearance: none;
@@ -837,4 +850,10 @@ input { caret-color: var(--pink-strong); }
   background: linear-gradient(140deg, #d43a5c, #e05a7a);
   color: #fff;
   box-shadow: 0 8px 18px rgba(212, 58, 92, 0.35);
+}
+.btn-gotit {
+  border: none;
+  background: linear-gradient(140deg, var(--pink-strong), #f0a0c0);
+  color: #fff;
+  box-shadow: 0 8px 18px rgba(214, 90, 160, 0.35);
 }
