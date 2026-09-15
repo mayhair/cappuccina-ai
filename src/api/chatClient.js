@@ -3,14 +3,16 @@
 // POST /api/v1/chat/stream SSE -> event: start | token {content} | reasoning {content}
 //                                 | tool_call {id,name,display,args,label}
 //                                 | tool_result {id,name,content,ok} | done
+//                                 | title {title} (first message only, after done)
 
-function buildRequest({ chatId, messages, reasoning, mode, subject }) {
+function buildRequest({ chatId, messages, reasoning, mode, subject, generateTitle }) {
   return {
     chatId,
     messages,
     reasoning: reasoning ?? 'medium',
     mode: mode ?? 'chat',
     subject: subject ?? null,
+    generateTitle: generateTitle ?? false,
   }
 }
 
@@ -24,13 +26,13 @@ export async function send({ chatId, messages, reasoning, mode, subject }) {
   return res.json()
 }
 
-// handlers: { onToken, onReasoning, onToolCall, onToolResult }
-export async function sendStreaming({ chatId, messages, reasoning, mode, subject }, handlers = {}) {
-  const { onToken, onReasoning, onToolCall, onToolResult } = handlers
+// handlers: { onToken, onReasoning, onToolCall, onToolResult, onTitle, onDone }
+export async function sendStreaming({ chatId, messages, reasoning, mode, subject, generateTitle }, handlers = {}) {
+  const { onToken, onReasoning, onToolCall, onToolResult, onTitle, onDone } = handlers
   const res = await fetch('/api/v1/chat/stream', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(buildRequest({ chatId, messages, reasoning, mode, subject })),
+    body: JSON.stringify(buildRequest({ chatId, messages, reasoning, mode, subject, generateTitle })),
   })
   if (!res.ok || !res.body) throw new Error(`chat stream failed: ${res.status}`)
 
@@ -49,6 +51,10 @@ export async function sendStreaming({ chatId, messages, reasoning, mode, subject
     for (const block of blocks) {
       const event = block.match(/^event: (.+)$/m)?.[1]
       const data = block.match(/^data: (.+)$/m)?.[1]
+      if (event === 'done') {
+        onDone?.()
+        continue
+      }
       if (!data || data === '{}') continue
       const payload = JSON.parse(data)
       if (event === 'token') {
@@ -63,6 +69,8 @@ export async function sendStreaming({ chatId, messages, reasoning, mode, subject
         onToolCall?.(payload)
       } else if (event === 'tool_result') {
         onToolResult?.(payload)
+      } else if (event === 'title') {
+        onTitle?.(payload.title ?? '')
       }
     }
   }

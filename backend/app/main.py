@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sse_starlette.sse import EventSourceResponse
 
 from agent.graph import GRAPH
+from agent.title import generate_title
 from agent.tools import TOOL_DISPLAY_NAMES
 from app.schemas import ChatRequest, ChatResponse, ToolCall
 
@@ -107,13 +108,17 @@ async def chat(req: ChatRequest) -> ChatResponse:
 async def chat_stream(req: ChatRequest):
     async def events():
         yield {"event": "start", "data": "{}"}
+        final_text = ""
         async for event in GRAPH.astream_events(_state(req), version="v2"):
             kind = event["event"]
-            if kind == "on_chat_model_stream":
+            if kind == "on_chat_model_start":
+                final_text = ""
+            elif kind == "on_chat_model_stream":
                 chunk = event["data"]["chunk"]
                 content = getattr(chunk, "content", "")
                 text = _text(content)
                 if text:
+                    final_text += text
                     yield {"event": "token", "data": json.dumps({"content": text})}
                 reasoning = _reasoning_text(content)
                 if reasoning:
@@ -166,5 +171,9 @@ async def chat_stream(req: ChatRequest):
                     ),
                 }
         yield {"event": "done", "data": "{}"}
+        if req.generate_title and req.messages:
+            title = await generate_title(req.messages[0].content, final_text)
+            if title:
+                yield {"event": "title", "data": json.dumps({"title": title})}
 
     return EventSourceResponse(events(), ping=15)

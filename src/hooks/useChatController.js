@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { sendStreaming } from '../api/chatClient'
 
 const STORAGE_KEY = 'cappuccina-chats'
+const DEFAULT_TITLE = 'New chat'
 
 export const EFFORTS = [
   { label: 'Light', value: 'low' },
@@ -13,7 +14,7 @@ export const EFFORTS = [
 export function makeChat() {
   return {
     id: `chat-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`,
-    title: 'New chat',
+    title: DEFAULT_TITLE,
     tag: null,
     messages: [],
   }
@@ -36,10 +37,17 @@ export function useChatController() {
   const [query, setQuery] = useState('')
   const [effort, setEffort] = useState('Medium')
   const [status, setStatus] = useState('idle')
+  const [typingTitleId, setTypingTitleId] = useState(null)
   const isStreaming = status === 'streaming'
   const inputRef = useRef(null)
+  const chatsRef = useRef(chats)
+  const streamSeq = useRef(0)
 
   const activeChat = chats.find((c) => c.id === activeChatId) ?? chats[0]
+
+  useEffect(() => {
+    chatsRef.current = chats
+  }, [chats])
 
   useEffect(() => {
     const t = setTimeout(() => {
@@ -64,6 +72,16 @@ export function useChatController() {
     )
   }, [patchMessages])
 
+  const applyTitle = useCallback((chatId, title) => {
+    const next = (title ?? '').trim()
+    const target = chatsRef.current.find((c) => c.id === chatId)
+    if (!next || !target || target.title !== DEFAULT_TITLE) return
+    setChats((all) => all.map((c) => (c.id === chatId ? { ...c, title: next } : c)))
+    setTypingTitleId(chatId)
+  }, [])
+
+  const clearTypingTitle = useCallback(() => setTypingTitleId(null), [])
+
   const sendMessage = useCallback(() => {
     const text = draft.trim()
     if (!text || status !== 'idle') return
@@ -76,6 +94,7 @@ export function useChatController() {
     setStatus('streaming')
 
     const history = [...activeChat.messages, userMessage]
+    const seq = ++streamSeq.current
     ;(async () => {
       patchMessages(chatId, (messages) => [
         ...messages,
@@ -89,7 +108,7 @@ export function useChatController() {
         const seconds = (thoughtEnd - streamStart) / 1000
         patchAssistant(chatId, () => ({ thinkingDone: true, thoughtSeconds: seconds }))
       }
-      await sendStreaming({ chatId, messages: history, reasoning }, {
+      await sendStreaming({ chatId, messages: history, reasoning, generateTitle: history.length === 1 }, {
         onToken: (word) => {
           finishThinking()
           patchAssistant(chatId, (m) => ({ content: m.content + word }))
@@ -115,6 +134,10 @@ export function useChatController() {
             ),
           }))
         },
+        onTitle: (title) => applyTitle(chatId, title),
+        onDone: () => {
+          if (streamSeq.current === seq) setStatus('idle')
+        },
       })
       finishThinking()
     })().catch((err) => {
@@ -126,8 +149,10 @@ export function useChatController() {
             : m,
         ),
       )
-    }).finally(() => setStatus('idle'))
-  }, [draft, status, activeChatId, activeChat, effort, patchMessages, patchAssistant])
+    }).finally(() => {
+      if (streamSeq.current === seq) setStatus('idle')
+    })
+  }, [draft, status, activeChatId, activeChat, effort, patchMessages, patchAssistant, applyTitle])
 
   const newChat = useCallback(() => {
     const chat = makeChat()
@@ -147,6 +172,13 @@ export function useChatController() {
     })
   }, [])
 
+  const renameChat = useCallback((id, title) => {
+    const next = title.trim()
+    if (!next) return
+    setTypingTitleId(null)
+    setChats((all) => all.map((c) => (c.id === id ? { ...c, title: next } : c)))
+  }, [])
+
   const q = query.trim().toLowerCase()
   const visibleChats = q
     ? chats.filter((c) => c.title.toLowerCase().includes(q))
@@ -164,9 +196,12 @@ export function useChatController() {
     setEffort,
     isStreaming,
     inputRef,
+    typingTitleId,
     sendMessage,
     newChat,
     deleteChat,
+    renameChat,
+    clearTypingTitle,
     selectChat: setActiveChatId,
   }
 }

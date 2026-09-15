@@ -30,9 +30,12 @@ export default function App() {
     setEffort,
     isStreaming,
     inputRef,
+    typingTitleId,
     sendMessage,
     newChat,
     deleteChat,
+    renameChat,
+    clearTypingTitle,
     selectChat,
   } = useChatController()
 
@@ -49,8 +52,11 @@ export default function App() {
         onSelect={selectChat}
         onNewChat={newChat}
         onDelete={deleteChat}
+        onRename={renameChat}
         query={query}
         onQuery={setQuery}
+        typingTitleId={typingTitleId}
+        onTitleTyped={clearTypingTitle}
       />
 
       <main className="main">

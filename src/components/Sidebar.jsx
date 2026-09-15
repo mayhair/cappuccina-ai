@@ -1,8 +1,12 @@
 import { useEffect, useState } from 'react'
-import { ChatIcon, TrashIcon, PlusIcon, SearchIcon } from './Icons'
+import { ChatIcon, TrashIcon, PlusIcon, SearchIcon, DotsIcon, PencilIcon } from './Icons'
+import { TypewriterTitle } from './TypewriterTitle'
 
-export function Sidebar({ chats, activeChatId, onSelect, onNewChat, onDelete, query, onQuery }) {
+export function Sidebar({ chats, activeChatId, onSelect, onNewChat, onDelete, onRename, query, onQuery, typingTitleId, onTitleTyped }) {
   const [pendingDelete, setPendingDelete] = useState(null)
+  const [menuFor, setMenuFor] = useState(null)
+  const [renaming, setRenaming] = useState(null)
+  const [draftTitle, setDraftTitle] = useState('')
 
   useEffect(() => {
     if (!pendingDelete) return
@@ -13,7 +17,28 @@ export function Sidebar({ chats, activeChatId, onSelect, onNewChat, onDelete, qu
     return () => window.removeEventListener('keydown', close)
   }, [pendingDelete])
 
+  useEffect(() => {
+    if (!menuFor) return
+    const close = (e) => {
+      if (e.target.closest?.('.chat-menu') || e.target.closest?.('.chat-menu-btn')) return
+      setMenuFor(null)
+    }
+    window.addEventListener('mousedown', close)
+    return () => window.removeEventListener('mousedown', close)
+  }, [menuFor])
+
   const target = chats.find((c) => c.id === pendingDelete)
+
+  const startRename = (c) => {
+    setMenuFor(null)
+    setRenaming(c.id)
+    setDraftTitle(c.title)
+  }
+
+  const commitRename = (id) => {
+    onRename(id, draftTitle)
+    setRenaming(null)
+  }
 
   return (
     <>
@@ -42,27 +67,91 @@ export function Sidebar({ chats, activeChatId, onSelect, onNewChat, onDelete, qu
       </label>
 
       <nav className="chat-list" aria-label="Chat history">
-        {chats.map((c) => (
-          <button
-            key={c.id}
-            type="button"
-            className={`chat-list-item${c.id === activeChatId ? ' active' : ''}`}
-            onClick={() => onSelect(c.id)}
-          >
-            <ChatIcon />
-            <span>{c.title}</span>
-            {c.tag && <span className="tag">{c.tag}</span>}
-            <TrashIcon
-              className="trash"
-              onClick={(e) => {
-                e.stopPropagation()
-                setPendingDelete(c.id)
+        {chats.map((c) => {
+          const editing = renaming === c.id
+          return (
+            <div
+              key={c.id}
+              role="button"
+              tabIndex={0}
+              className={`chat-list-item${c.id === activeChatId ? ' active' : ''}`}
+              onClick={() => !editing && onSelect(c.id)}
+              onKeyDown={(e) => {
+                if (editing || e.target !== e.currentTarget) return
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault()
+                  onSelect(c.id)
+                }
               }}
-              aria-label={`Delete chat: ${c.title}`}
-              title="Delete chat"
-            />
-          </button>
-        ))}
+            >
+              <ChatIcon />
+              {editing ? (
+                <input
+                  className="chat-rename-input"
+                  value={draftTitle}
+                  autoFocus
+                  onClick={(e) => e.stopPropagation()}
+                  onChange={(e) => setDraftTitle(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') commitRename(c.id)
+                    if (e.key === 'Escape') setRenaming(null)
+                  }}
+                  onBlur={() => commitRename(c.id)}
+                  aria-label="Rename chat"
+                />
+              ) : c.id === typingTitleId ? (
+                <TypewriterTitle text={c.title} onDone={onTitleTyped} />
+              ) : (
+                <span className="chat-title">{c.title}</span>
+              )}
+              {c.tag && <span className="tag">{c.tag}</span>}
+              {!editing && (
+                <button
+                  type="button"
+                  className="chat-menu-btn"
+                  aria-label={`Options for ${c.title}`}
+                  aria-haspopup="menu"
+                  aria-expanded={menuFor === c.id}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    setMenuFor(menuFor === c.id ? null : c.id)
+                  }}
+                >
+                  <DotsIcon />
+                </button>
+              )}
+              {menuFor === c.id && (
+                <div
+                  className="chat-menu"
+                  role="menu"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="chat-menu-item"
+                    onClick={() => startRename(c)}
+                  >
+                    <PencilIcon />
+                    Rename
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="chat-menu-item danger"
+                    onClick={() => {
+                      setMenuFor(null)
+                      setPendingDelete(c.id)
+                    }}
+                  >
+                    <TrashIcon />
+                    Delete
+                  </button>
+                </div>
+              )}
+            </div>
+          )
+        })}
       </nav>
 
       <p className="side-note">Cappuccina is an AI character — not a person, but she loves to help. 💕</p>
