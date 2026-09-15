@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { sendStreaming } from '../api/chatClient'
 
 const STORAGE_KEY = 'cappuccina-chats'
+const EFFORT_KEY = 'cappuccina-effort'
 const DEFAULT_TITLE = 'New chat'
 
 export const EFFORTS = [
@@ -10,6 +11,16 @@ export const EFFORTS = [
   { label: 'High', value: 'high' },
   { label: 'Extra High', value: 'xhigh' },
 ]
+
+function loadEffort() {
+  try {
+    const saved = localStorage.getItem(EFFORT_KEY)
+    if (EFFORTS.some((e) => e.label === saved)) return saved
+  } catch {
+    // storage unavailable
+  }
+  return 'Medium'
+}
 
 export function makeChat() {
   return {
@@ -35,7 +46,7 @@ export function useChatController() {
   const [activeChatId, setActiveChatId] = useState(() => chats[0].id)
   const [draft, setDraft] = useState('')
   const [query, setQuery] = useState('')
-  const [effort, setEffort] = useState('Medium')
+  const [effort, setEffort] = useState(loadEffort)
   const [status, setStatus] = useState('idle')
   const [typingTitleId, setTypingTitleId] = useState(null)
   const isStreaming = status === 'streaming'
@@ -59,6 +70,14 @@ export function useChatController() {
     }, 300)
     return () => clearTimeout(t)
   }, [chats])
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(EFFORT_KEY, effort)
+    } catch {
+      // storage full or unavailable
+    }
+  }, [effort])
 
   const patchMessages = useCallback((chatId, fn) => {
     setChats((all) => all.map((c) => (c.id === chatId ? { ...c, messages: fn(c.messages) } : c)))
