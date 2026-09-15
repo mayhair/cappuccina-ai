@@ -101,10 +101,11 @@ function CopyMessageButton({ text }) {
 
 export function ChatWindow({ chat, isStreaming, draft, onDraft, onSend, inputRef, effort, onEffort }) {
   const listRef = useRef(null)
+  const scrollSig = chat.messages.map((m) => `${m.role}${m.content?.length ?? 0}`).join('|')
 
   useEffect(() => {
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: 'smooth' })
-  }, [isStreaming, chat.messages])
+  }, [isStreaming, scrollSig])
 
   return (
     <>
