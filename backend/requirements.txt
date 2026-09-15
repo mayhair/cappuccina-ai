@@ -1,0 +1,10 @@
+fastapi>=0.115
+uvicorn[standard]>=0.32
+langgraph>=0.2.60
+langchain-openai>=0.2.14
+langchain-core>=0.3.28
+httpx>=0.28
+sympy>=1.13.3
+sse-starlette>=2.1
+pydantic>=2.10
+python-dotenv>=1.0

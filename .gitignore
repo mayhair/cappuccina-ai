@@ -1,0 +1,85 @@
+# ─── Dependencies ───
+node_modules/
+.pnp
+.pnp.js
+.pnpm-store/
+
+# ─── Frontend / Vite ───
+dist/
+dist-ssr/
+*.local
+vite.config.*.timestamp-*.mjs
+
+# ─── Playwright ───
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/
+
+# ─── Python backend ───
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+build/
+develop-eggs/
+downloads/
+eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+.venv/
+venv/
+ENV/
+env/
+.python-version
+
+# Caches / type checkers / linters
+.pytest_cache/
+.mypy_cache/
+.pyrefly/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+*.cover
+
+# ─── Env / secrets ───
+# ignore all env files, but keep examples/templates tracked
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# ─── Logs / temp / OS ───
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+*.tmp
+*.temp
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# ─── Editors / IDEs ───
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+*.swp
+*~
+
+# ─── Tooling scratch output ───
+.impeccable/build/

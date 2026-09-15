@@ -1,0 +1,6 @@
+project-includes = [
+    "**/*.py*",
+    "**/*.ipynb",
+]
+
+search-path = ["."]
