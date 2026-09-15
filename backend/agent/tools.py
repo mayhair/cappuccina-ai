@@ -35,3 +35,9 @@ def brave_search(query: str) -> str:
 
 
 ALL_TOOLS = [solve_equation, brave_search]
+
+# Human-friendly names for UI display ("Called Tool: ...").
+TOOL_DISPLAY_NAMES = {
+    "solve_equation": "Calculator",
+    "brave_search": "Web Search",
+}

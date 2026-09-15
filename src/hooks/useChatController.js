@@ -4,13 +4,20 @@ import { initialChats } from '../lib/seedChats'
 
 let nextId = 1
 
+export const EFFORTS = [
+  { label: 'Light', value: 'low' },
+  { label: 'Medium', value: 'medium' },
+  { label: 'High', value: 'high' },
+  { label: 'Extra High', value: 'xhigh' },
+]
+
 export function useChatController() {
   const [chats, setChats] = useState(() => initialChats.map((c) => ({ ...c })))
   const [activeChatId, setActiveChatId] = useState(initialChats[0].id)
   const [draft, setDraft] = useState('')
   const [query, setQuery] = useState('')
+  const [effort, setEffort] = useState('Medium')
   const [status, setStatus] = useState('idle')
-  const isTyping = status === 'typing'
   const isStreaming = status === 'streaming'
   const inputRef = useRef(null)
 
@@ -20,46 +27,78 @@ export function useChatController() {
     setChats((all) => all.map((c) => (c.id === chatId ? { ...c, messages: fn(c.messages) } : c)))
   }, [])
 
+  const patchAssistant = useCallback((chatId, fn) => {
+    patchMessages(chatId, (messages) =>
+      messages.map((m, i) =>
+        i === messages.length - 1 && m.role === 'assistant' ? { ...m, ...fn(m) } : m,
+      ),
+    )
+  }, [patchMessages])
+
   const sendMessage = useCallback(() => {
     const text = draft.trim()
     if (!text || status !== 'idle') return
     const chatId = activeChatId
     const userMessage = { role: 'user', content: text }
+    const reasoning = EFFORTS.find((e) => e.label === effort)?.value ?? 'medium'
 
     patchMessages(chatId, (messages) => [...messages, userMessage])
     setDraft('')
-    // Waiting pill first — simulates the model warming up before generation.
-    setStatus('typing')
+    setStatus('streaming')
 
     const history = [...activeChat.messages, userMessage]
-    // Simulated time-to-first-token, then stream the reply through the API boundary.
     ;(async () => {
-      await new Promise((r) => setTimeout(r, 900 + Math.random() * 700))
-      setStatus('streaming')
       patchMessages(chatId, (messages) => [
         ...messages,
-        { role: 'assistant', content: '' },
+        { role: 'assistant', content: '', reasoning: '', tools: [], thinkingDone: false, thoughtSeconds: null },
       ])
-      await sendStreaming({ chatId, messages: history }, (word) => {
-        patchMessages(chatId, (messages) =>
-          messages.map((m, i) =>
-            i === messages.length - 1 && m.role === 'assistant'
-              ? { ...m, content: m.content + word }
-              : m,
-          ),
-        )
+      const streamStart = Date.now()
+      let thoughtEnd = null
+      const finishThinking = () => {
+        if (thoughtEnd !== null) return
+        thoughtEnd = Date.now()
+        const seconds = (thoughtEnd - streamStart) / 1000
+        patchAssistant(chatId, () => ({ thinkingDone: true, thoughtSeconds: seconds }))
+      }
+      await sendStreaming({ chatId, messages: history, reasoning }, {
+        onToken: (word) => {
+          finishThinking()
+          patchAssistant(chatId, (m) => ({ content: m.content + word }))
+        },
+        onReasoning: (piece) => {
+          patchAssistant(chatId, (m) => ({ reasoning: (m.reasoning ?? '') + piece }))
+        },
+        onToolCall: (call) => {
+          patchAssistant(chatId, (m) => ({
+            tools: [...(m.tools ?? []), {
+              id: call.id,
+              name: call.name,
+              display: call.display || call.name,
+              result: null,
+              ok: null,
+            }],
+          }))
+        },
+        onToolResult: (result) => {
+          patchAssistant(chatId, (m) => ({
+            tools: (m.tools ?? []).map((t) =>
+              t.id === result.id ? { ...t, result: result.content, ok: result.ok } : t,
+            ),
+          }))
+        },
       })
+      finishThinking()
     })().catch((err) => {
       console.error('chat error', err)
       patchMessages(chatId, (messages) =>
         messages.map((m, i) =>
           i === messages.length - 1 && m.role === 'assistant' && !m.content
-            ? { ...m, content: 'Ohno, my espresso machine hiccuped. Try again in a moment! 💕' }
+            ? { ...m, content: 'Oh no, my espresso machine hiccuped. Try again in a moment! 💕' }
             : m,
         ),
       )
     }).finally(() => setStatus('idle'))
-  }, [draft, status, activeChatId, activeChat, patchMessages])
+  }, [draft, status, activeChatId, activeChat, effort, patchMessages, patchAssistant])
 
   const newChat = useCallback(() => {
     const id = `chat-${nextId++}`
@@ -100,7 +139,8 @@ export function useChatController() {
     setDraft,
     query,
     setQuery,
-    isTyping,
+    effort,
+    setEffort,
     isStreaming,
     inputRef,
     sendMessage,

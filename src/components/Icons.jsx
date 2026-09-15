@@ -73,3 +73,19 @@ export function SendIcon(props) {
     </svg>
   )
 }
+
+export function ChevronIcon(props) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <path d="m9 5 7 7-7 7" />
+    </svg>
+  )
+}
+
+export function WrenchIcon(props) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <path d="M14.7 6.3a4.5 4.5 0 0 0-6 6L3 18l3 3 5.7-5.7a4.5 4.5 0 0 0 6-6L14 13l-2.5-2.5 3.2-4.2Z" />
+    </svg>
+  )
+}

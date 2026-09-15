@@ -16,6 +16,15 @@ class ChatRequest(BaseModel):
     model_config = {"populate_by_name": True}
 
 
+class ToolCall(BaseModel):
+    name: str
+    display: str = ""
+    args: dict
+    result: str
+
+
 class ChatResponse(BaseModel):
     role: str = "assistant"
     content: str
+    reasoning: str = ""
+    tool_calls: list[ToolCall] = []

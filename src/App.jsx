@@ -26,7 +26,8 @@ export default function App() {
     setDraft,
     query,
     setQuery,
-    isTyping,
+    effort,
+    setEffort,
     isStreaming,
     inputRef,
     sendMessage,
@@ -63,12 +64,13 @@ export default function App() {
 
         <ChatWindow
           chat={activeChat}
-          isTyping={isTyping}
           isStreaming={isStreaming}
           draft={draft}
           onDraft={setDraft}
           onSend={sendMessage}
           inputRef={inputRef}
+          effort={effort}
+          onEffort={setEffort}
         />
       </main>
     </div>

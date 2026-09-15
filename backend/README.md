@@ -21,8 +21,8 @@ Then `npm run dev` at the repo root — Vite proxies `/api` to :8000.
 
 ## Endpoints
 
-- `POST /api/v1/chat` — JSON `{chatId, messages, reasoning, mode, subject}` -> `{role, content}`
-- `POST /api/v1/chat/stream` — same body, SSE stream (`start`/`token`/`done` events)
+- `POST /api/v1/chat` — JSON `{chatId, messages, reasoning, mode, subject}` -> `{role, content, reasoning, tool_calls}`
+- `POST /api/v1/chat/stream` — same body, SSE stream (`start`/`token`/`reasoning`/`tool_call`/`tool_result`/`done` events)
 
 `reasoning`: `low|medium|high`. `mode`: `chat|tutor` (tutor takes `subject`).
 

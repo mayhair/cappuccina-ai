@@ -6,7 +6,7 @@ Usage:
     .\\.venv\\Scripts\\python.exe chat_cli.py --no-stream   # full JSON reply, one shot
     .\\.venv\\Scripts\\python.exe chat_cli.py --reasoning high --mode tutor --subject fractions
 
-Commands inside the REPL: /mode, /reasoning, /subject, /reset, /quit
+Commands inside the REPL: /mode, /reasoning, /subject, /showreasoning, /reset, /quit
 """
 
 import argparse
@@ -36,7 +36,12 @@ sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 sys.stdin.reconfigure(encoding="utf-8", errors="replace")
 
 history = []
-settings = {"reasoning": args.reasoning, "mode": args.mode, "subject": args.subject}
+settings = {
+    "reasoning": args.reasoning,
+    "mode": args.mode,
+    "subject": args.subject,
+    "showreasoning": "on",
+}
 
 
 def request_body():
@@ -50,26 +55,71 @@ def request_body():
 
 
 def stream_reply(client):
+    show_reasoning = settings["showreasoning"] not in {"off", "0", "no"}
     reply = ""
+    thinking_open = False
     with client.stream("POST", "/api/v1/chat/stream", json=request_body()) as res:
         res.raise_for_status()
+        event_name = None
         for line in res.iter_lines():
+            if line.startswith("event: "):
+                event_name = line[7:]
+                continue
             if not line.startswith("data: "):
                 continue
-            payload = line[6:]
-            if payload == "{}":
-                continue
-            chunk = json.loads(payload).get("content", "")
-            reply += chunk
-            sys.stdout.write(chunk)
-            sys.stdout.flush()
+            payload = json.loads(line[6:])
+            kind, event_name = event_name, None
+            if kind == "token":
+                chunk = payload.get("content", "")
+                if thinking_open and chunk:
+                    print()
+                    thinking_open = False
+                reply += chunk
+                sys.stdout.write(chunk)
+                sys.stdout.flush()
+            elif kind == "reasoning":
+                if not show_reasoning:
+                    continue
+                chunk = payload.get("content", "")
+                if chunk:
+                    if not thinking_open:
+                        print("\n  [thinking] ", end="")
+                        thinking_open = True
+                    sys.stdout.write(chunk)
+                    sys.stdout.flush()
+            elif kind == "tool_call":
+                if thinking_open:
+                    print()
+                    thinking_open = False
+                print(f"\n  [tool] {payload.get('label', payload.get('name', ''))}")
+            elif kind == "tool_result":
+                if thinking_open:
+                    print()
+                    thinking_open = False
+                content = payload.get("content", "")
+                if len(content) > 400:
+                    content = content[:400] + "..."
+                status = "" if payload.get("ok", True) else " (failed)"
+                print(f"  [tool result]{status} {content}")
+        if thinking_open:
+            print()
     return reply
 
 
 def one_shot(client):
     res = client.post("/api/v1/chat", json=request_body())
     res.raise_for_status()
-    reply = res.json()["content"]
+    body = res.json()
+    if settings["showreasoning"] not in {"off", "0", "no"} and body.get("reasoning"):
+        print(f"\n  [thinking] {body['reasoning']}")
+    for call in body.get("tool_calls", []):
+        args = ", ".join(f"{k}={v!r}" for k, v in call.get("args", {}).items())
+        print(f"\n  [tool] {call.get('name', '')}({args})")
+        result = call.get("result", "")
+        if len(result) > 400:
+            result = result[:400] + "..."
+        print(f"  [tool result] {result}")
+    reply = body["content"]
     print(reply)
     return reply
 
@@ -92,7 +142,7 @@ def handle_command(text):
 
 print(f"Cappuccina CLI -> {args.url}  [stream={not args.no_stream}]")
 print(
-    f"reasoning={settings['reasoning']} mode={settings['mode']} subject={settings['subject']}"
+    f"reasoning={settings['reasoning']} mode={settings['mode']} subject={settings['subject']} showreasoning={settings['showreasoning']}"
 )
 print("Type a message, /help for commands, /quit to exit.\n")
 

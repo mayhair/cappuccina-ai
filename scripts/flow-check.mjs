@@ -13,9 +13,9 @@ const before = await page.locator(".bubble").count();
 await page.fill('input[aria-label="Message Cappuccina"]', "I have a math test tomorrow");
 await page.keyboard.press("Enter");
 
-// typing pill should show
-await page.waitForSelector(".typing-pill", { timeout: 3000 });
-console.log("typing pill: shown");
+// assistant placeholder (animated dots) should show while the reply streams
+await page.waitForSelector(".bubble-waiting .streaming", { timeout: 3000 });
+console.log("assistant placeholder: shown");
 
 // assistant stream completes (reply contains the tutor rule text)
 await page.waitForFunction(
