@@ -1,0 +1,191 @@
+import { Fragment } from 'react'
+
+// Minimal, dependency-free markdown -> React elements. Rendering to elements
+// (never innerHTML) keeps untrusted model output injection-safe.
+// ponytail: handles the common chat cases (bold, italic, code, code blocks,
+// lists, headings, quotes, links). If fuller CommonMark fidelity is ever
+// needed, swap this for react-markdown.
+const INLINE = new RegExp(
+  [
+    '(`+)([\\s\\S]*?)\\1', // 1,2  code span
+    '\\*\\*([^\\s*](?:[\\s\\S]*?[^\\s*])?)\\*\\*', // 3  **bold**
+    '~~([^\\s~](?:[\\s\\S]*?[^\\s~])?)~~', // 4  ~~strike~~
+    '\\*([^\\s*](?:[^*\\n]*?[^\\s*])?)\\*', // 5  *italic*
+    '\\[([^\\]]+)\\]\\(([^)\\s]+)\\)', // 6,7  [text](href)
+  ].join('|'),
+  'g',
+)
+
+const SAFE_HREF = /^(https?:\/\/|mailto:)/i
+
+const isBlockStart = (line) =>
+  /^\s*```/.test(line) ||
+  /^#{1,6}\s+/.test(line) ||
+  /^\s*(-{3,}|\*{3,}|_{3,})\s*$/.test(line) ||
+  /^\s*>\s?/.test(line) ||
+  /^\s*[-*+]\s+/.test(line) ||
+  /^\s*\d+[.)]\s+/.test(line)
+
+function renderInline(text, prefix) {
+  if (!text) return text
+  INLINE.lastIndex = 0
+  const out = []
+  let last = 0
+  let n = 0
+  for (const m of text.matchAll(INLINE)) {
+    if (m.index > last) out.push(text.slice(last, m.index))
+    const key = `${prefix}-${n++}`
+    if (m[1] !== undefined) {
+      out.push(
+        <code key={key} className="md-code">
+          {m[2]}
+        </code>,
+      )
+    } else if (m[3] !== undefined) {
+      out.push(<strong key={key}>{renderInline(m[3], key)}</strong>)
+    } else if (m[4] !== undefined) {
+      out.push(<del key={key}>{renderInline(m[4], key)}</del>)
+    } else if (m[5] !== undefined) {
+      out.push(<em key={key}>{renderInline(m[5], key)}</em>)
+    } else if (m[6] !== undefined) {
+      out.push(
+        SAFE_HREF.test(m[7]) ? (
+          <a key={key} href={m[7]} target="_blank" rel="noopener noreferrer">
+            {renderInline(m[6], key)}
+          </a>
+        ) : (
+          m[0]
+        ),
+      )
+    }
+    last = m.index + m[0].length
+  }
+  if (last < text.length) out.push(text.slice(last))
+  return out
+}
+
+function inlineWithBreaks(lines, prefix) {
+  const out = []
+  lines.forEach((line, i) => {
+    if (i) out.push(<br key={`${prefix}-br-${i}`} />)
+    out.push(<Fragment key={`${prefix}-ln-${i}`}>{renderInline(line, `${prefix}-${i}`)}</Fragment>)
+  })
+  return out
+}
+
+function renderBlocks(text, prefix) {
+  const lines = text.replace(/\r\n?/g, '\n').split('\n')
+  const out = []
+  let i = 0
+  let n = 0
+  const key = () => `${prefix}-${n++}`
+
+  while (i < lines.length) {
+    const line = lines[i]
+
+    if (/^\s*```(\w*)\s*$/.test(line)) {
+      const body = []
+      i++
+      while (i < lines.length && !/^\s*```\s*$/.test(lines[i])) {
+        body.push(lines[i])
+        i++
+      }
+      if (i < lines.length) i++
+      out.push(
+        <pre key={key()} className="md-pre">
+          <code>{body.join('\n')}</code>
+        </pre>,
+      )
+      continue
+    }
+
+    const heading = line.match(/^(#{1,6})\s+(.+?)\s*#*\s*$/)
+    if (heading) {
+      const Tag = `h${heading[1].length}`
+      const k = key()
+      out.push(
+        <Tag key={k} className="md-h">
+          {renderInline(heading[2], k)}
+        </Tag>,
+      )
+      i++
+      continue
+    }
+
+    if (/^\s*(-{3,}|\*{3,}|_{3,})\s*$/.test(line)) {
+      out.push(<hr key={key()} className="md-hr" />)
+      i++
+      continue
+    }
+
+    if (!line.trim()) {
+      i++
+      continue
+    }
+
+    if (/^\s*>\s?/.test(line)) {
+      const body = []
+      while (i < lines.length && /^\s*>\s?/.test(lines[i])) {
+        body.push(lines[i].replace(/^\s*>\s?/, ''))
+        i++
+      }
+      const k = key()
+      out.push(
+        <blockquote key={k} className="md-quote">
+          {inlineWithBreaks(body, k)}
+        </blockquote>,
+      )
+      continue
+    }
+
+    if (/^\s*[-*+]\s+/.test(line)) {
+      const items = []
+      while (i < lines.length && /^\s*[-*+]\s+/.test(lines[i])) {
+        items.push(lines[i].replace(/^\s*[-*+]\s+/, ''))
+        i++
+      }
+      const k = key()
+      out.push(
+        <ul key={k} className="md-ul">
+          {items.map((it, idx) => (
+            <li key={idx}>{renderInline(it, `${k}-${idx}`)}</li>
+          ))}
+        </ul>,
+      )
+      continue
+    }
+
+    if (/^\s*\d+[.)]\s+/.test(line)) {
+      const items = []
+      while (i < lines.length && /^\s*\d+[.)]\s+/.test(lines[i])) {
+        items.push(lines[i].replace(/^\s*\d+[.)]\s+/, ''))
+        i++
+      }
+      const k = key()
+      out.push(
+        <ol key={k} className="md-ol">
+          {items.map((it, idx) => (
+            <li key={idx}>{renderInline(it, `${k}-${idx}`)}</li>
+          ))}
+        </ol>,
+      )
+      continue
+    }
+
+    const para = [line]
+    i++
+    while (i < lines.length && lines[i].trim() && !isBlockStart(lines[i])) {
+      para.push(lines[i])
+      i++
+    }
+    const k = key()
+    out.push(<p key={k}>{inlineWithBreaks(para, k)}</p>)
+  }
+
+  return out
+}
+
+export function Markdown({ text }) {
+  if (!text) return null
+  return <>{renderBlocks(text, 'md')}</>
+}

@@ -352,6 +352,74 @@ body {
   min-height: 1.5em;
 }
 
+/* ---------- markdown ---------- */
+.bubble p + p { margin-top: 0.5rem; }
+.bubble .md-ul,
+.bubble .md-ol,
+.bubble .md-pre,
+.bubble .md-quote,
+.bubble .md-h,
+.bubble .md-hr {
+  margin: 0.5rem 0;
+}
+.bubble > :first-child { margin-top: 0; }
+.bubble > :last-child { margin-bottom: 0; }
+.bubble .md-ul,
+.bubble .md-ol { padding-left: 1.25rem; }
+.bubble .md-ul { list-style: disc; }
+.bubble .md-ol { list-style: decimal; }
+.bubble li { margin-top: 0.15rem; }
+.bubble .md-h { font-size: 1.05em; font-weight: 700; line-height: 1.3; }
+.bubble .md-hr { border: none; border-top: 1px solid var(--hairline); }
+.bubble .md-quote {
+  padding-left: 0.7rem;
+  border-left: 3px solid var(--pink);
+  color: var(--ink-soft);
+}
+.bubble .md-pre {
+  padding: 0.55rem 0.7rem;
+  border-radius: 10px;
+  background: rgba(44, 49, 81, 0.08);
+  overflow-x: auto;
+}
+.bubble .md-pre code,
+.bubble .md-code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.86em;
+}
+.bubble .md-pre code { white-space: pre; }
+.bubble .md-code {
+  padding: 0.1em 0.35em;
+  border-radius: 6px;
+  background: rgba(44, 49, 81, 0.1);
+}
+.bubble a { color: var(--pink-strong); text-decoration: underline; text-underline-offset: 2px; }
+[data-theme='dark'] .bubble .md-pre { background: rgba(0, 0, 0, 0.3); }
+[data-theme='dark'] .bubble .md-code { background: rgba(0, 0, 0, 0.32); }
+
+/* ---------- copy message ---------- */
+.copy-msg {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-top: -0.1rem;
+  padding: 0.2rem 0.45rem;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink-faint);
+  font-family: var(--font-body);
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 150ms ease, color 150ms ease;
+}
+.copy-msg:hover { color: var(--ink-soft); background: rgba(44, 49, 81, 0.07); }
+.copy-msg svg { width: 0.95rem; height: 0.95rem; flex: none; }
+.copy-msg.copied { color: var(--pink-strong); }
+[data-theme='dark'] .copy-msg:hover { background: rgba(255, 255, 255, 0.08); }
+
 .assistant-col {
   display: flex;
   flex-direction: column;

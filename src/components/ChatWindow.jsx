@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
-import { PersonIcon, SendIcon, ChevronIcon, WrenchIcon } from './Icons'
+import { PersonIcon, SendIcon, ChevronIcon, WrenchIcon, CopyIcon, CheckIcon } from './Icons'
 import { EffortSelector } from './EffortSelector'
+import { Markdown } from '../lib/markdown'
 
 export function StreamingDots({ label = 'Cappuccina is typing' }) {
   return (
@@ -57,6 +58,47 @@ function ThinkingBlock({ message }) {
   )
 }
 
+function CopyMessageButton({ text }) {
+  const [copied, setCopied] = useState(false)
+  const timer = useRef(null)
+
+  useEffect(() => () => clearTimeout(timer.current), [])
+
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(text)
+    } catch {
+      const ta = document.createElement('textarea')
+      ta.value = text
+      ta.setAttribute('readonly', '')
+      ta.style.position = 'fixed'
+      ta.style.opacity = '0'
+      document.body.appendChild(ta)
+      ta.select()
+      try {
+        document.execCommand('copy')
+      } finally {
+        ta.remove()
+      }
+    }
+    setCopied(true)
+    clearTimeout(timer.current)
+    timer.current = setTimeout(() => setCopied(false), 1200)
+  }
+
+  return (
+    <button
+      type="button"
+      className={`copy-msg${copied ? ' copied' : ''}`}
+      onClick={copy}
+      aria-label={copied ? 'Copied' : 'Copy message'}
+    >
+      {copied ? <CheckIcon /> : <CopyIcon />}
+      <span aria-live="polite">{copied ? 'Copied!' : 'Copy message'}</span>
+    </button>
+  )
+}
+
 export function ChatWindow({ chat, isStreaming, draft, onDraft, onSend, inputRef, effort, onEffort }) {
   const listRef = useRef(null)
 
@@ -78,6 +120,7 @@ export function ChatWindow({ chat, isStreaming, draft, onDraft, onSend, inputRef
           const prev = chat.messages[i - 1]
           const startsRun = !prev || prev.role !== m.role
           const awaitingReply = isStreaming && i === chat.messages.length - 1 && !m.content
+          const isActiveStream = isStreaming && i === chat.messages.length - 1
           return (
             <div key={i} className={`msg-row ${m.role}${startsRun ? ' starts' : ''}`}>
               {m.role === 'assistant' ? (
@@ -94,13 +137,14 @@ export function ChatWindow({ chat, isStreaming, draft, onDraft, onSend, inputRef
                   <ThinkingBlock message={m} />
                   <div className={`bubble${awaitingReply ? ' bubble-waiting' : ''}`}>
                     {m.content ? (
-                      <p>{m.content}</p>
+                      <Markdown text={m.content} />
                     ) : awaitingReply ? (
                       <StreamingDots />
                     ) : (
                       <p>…</p>
                     )}
                   </div>
+                  {m.content && !isActiveStream && <CopyMessageButton text={m.content} />}
                 </div>
               ) : (
                 <div className="bubble">
