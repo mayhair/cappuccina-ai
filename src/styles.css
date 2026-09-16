@@ -332,6 +332,11 @@ input { caret-color: var(--pink-strong); }
   background: var(--pink-soak);
   color: var(--pink-ink);
 }
+.tag.tutor {
+  border-radius: 8px;
+  background: var(--pink-strong);
+  color: #ffffff;
+}
 
 .side-note {
   margin-top: auto;
@@ -677,8 +682,43 @@ input { caret-color: var(--pink-strong); }
 .composer-meta {
   display: flex;
   justify-content: flex-end;
+  gap: 0.7rem;
   padding-right: 0.4rem;
 }
+
+.mode-switch {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  min-width: 0;
+}
+.mode-seg {
+  display: flex;
+  height: 40px;
+  border-radius: 999px;
+  border: 1px solid var(--hairline);
+  background: var(--glass-strong);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  overflow: hidden;
+  box-shadow: var(--shadow-sm);
+}
+.mode-seg .seg {
+  padding: 0 1.1rem;
+  border: none;
+  background: transparent;
+  color: var(--ink-faint);
+  font-family: var(--font-body);
+  font-weight: 800;
+  font-size: 14px;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition: background 180ms ease, color 180ms ease;
+}
+.mode-seg .seg:first-child { border-right: 1px solid var(--hairline); }
+.mode-seg .seg.active { background: var(--pink-strong); color: #ffffff; }
+.mode-seg .seg:focus-visible { outline: none; box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.65); }
+.mode-seg .seg:disabled { cursor: default; opacity: 0.6; }
 .input {
   flex: 1;
   display: flex;

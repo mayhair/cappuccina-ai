@@ -27,7 +27,18 @@ export function makeChat() {
     id: `chat-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`,
     title: DEFAULT_TITLE,
     tag: null,
+    mode: 'chat',
+    subject: null,
     messages: [],
+  }
+}
+
+function normalizeChat(c) {
+  return {
+    ...c,
+    mode: c.mode === 'tutor' ? 'tutor' : 'chat',
+    subject: c.subject ?? null,
+    tag: c.tag ?? null,
   }
 }
 
@@ -59,15 +70,17 @@ export function useChatController() {
         const stored = await loadStoredChats()
         if (cancelled) return
         if (Array.isArray(stored) && stored.length > 0) {
+          if (cancelled) return
+          const shaped = stored.map(normalizeChat)
           const current = chatsRef.current
           const pristine =
             current.length === 1 &&
             current[0].id === pristineId.current &&
             current[0].messages.length === 0
           if (pristine) {
-            setChats(stored)
+            setChats(shaped)
             setActiveChatId((cur) =>
-              stored.some((c) => c.id === cur) ? cur : stored[0].id,
+              shaped.some((c) => c.id === cur) ? cur : shaped[0].id,
             )
           }
         }
@@ -122,7 +135,7 @@ export function useChatController() {
 
   const clearTypingTitle = useCallback(() => setTypingTitleId(null), [])
 
-  const streamReply = useCallback((chatId, history, reasoning) => {
+  const streamReply = useCallback((chatId, history, reasoning, mode, subject) => {
     setStatus('streaming')
     const seq = ++streamSeq.current
     ;(async () => {
@@ -138,7 +151,14 @@ export function useChatController() {
         const seconds = (thoughtEnd - streamStart) / 1000
         patchAssistant(chatId, () => ({ thinkingDone: true, thoughtSeconds: seconds }))
       }
-      await sendStreaming({ chatId, messages: history, reasoning, generateTitle: history.length === 1 }, {
+      await sendStreaming({
+        chatId,
+        messages: history,
+        reasoning,
+        mode,
+        subject,
+        generateTitle: history.length === 1,
+      }, {
         onToken: (word) => {
           finishThinking()
           patchAssistant(chatId, (m) => ({ content: m.content + word }))
@@ -184,6 +204,21 @@ export function useChatController() {
     })
   }, [patchMessages, patchAssistant, applyTitle])
 
+  const setMode = useCallback((chatId, mode, subject) => {
+    setChats((all) =>
+      all.map((c) =>
+        c.id === chatId
+          ? {
+              ...c,
+              mode,
+              subject,
+              tag: mode === 'tutor' ? 'TUTOR' : null,
+            }
+          : c,
+      ),
+    )
+  }, [])
+
   const sendMessage = useCallback(() => {
     const text = draft.trim()
     if (!text || status !== 'idle') return
@@ -193,7 +228,7 @@ export function useChatController() {
 
     patchMessages(chatId, (messages) => [...messages, userMessage])
     setDraft('')
-    streamReply(chatId, [...activeChat.messages, userMessage], reasoning)
+    streamReply(chatId, [...activeChat.messages, userMessage], reasoning, activeChat.mode ?? 'chat', activeChat.subject ?? null)
   }, [draft, status, activeChatId, activeChat, effort, patchMessages, streamReply])
 
   const retryMessage = useCallback(() => {
@@ -211,7 +246,7 @@ export function useChatController() {
     const history = messages.slice(0, lastUser + 1)
     const reasoning = EFFORTS.find((e) => e.label === effort)?.value ?? 'medium'
     patchMessages(chatId, () => history)
-    streamReply(chatId, history, reasoning)
+    streamReply(chatId, history, reasoning, activeChat.mode ?? 'chat', activeChat.subject ?? null)
   }, [status, activeChat, activeChatId, effort, patchMessages, streamReply])
 
   const newChat = useCallback(() => {
@@ -254,6 +289,7 @@ export function useChatController() {
     setQuery,
     effort,
     setEffort,
+    setMode,
     isStreaming,
     inputRef,
     typingTitleId,

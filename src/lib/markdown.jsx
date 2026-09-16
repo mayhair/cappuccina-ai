@@ -159,14 +159,17 @@ function renderBlocks(text, prefix) {
     if (/^\s*\d+[.)]\s+/.test(line)) {
       const items = []
       while (i < lines.length && /^\s*\d+[.)]\s+/.test(lines[i])) {
-        items.push(lines[i].replace(/^\s*\d+[.)]\s+/, ''))
+        const m = lines[i].match(/^\s*(\d+)[.)]\s+(.*)$/)
+        items.push({ num: Number(m[1]), text: m[2] })
         i++
       }
       const k = key()
       out.push(
         <ol key={k} className="md-ol">
           {items.map((it, idx) => (
-            <li key={idx}>{renderInline(it, `${k}-${idx}`)}</li>
+            <li key={idx} value={it.num}>
+              {renderInline(it.text, `${k}-${idx}`)}
+            </li>
           ))}
         </ol>,
       )

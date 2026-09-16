@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { PersonIcon, SendIcon, ChevronIcon, WrenchIcon, CopyIcon, CheckIcon, RetryIcon } from './Icons'
 import { EffortSelector } from './EffortSelector'
+import { ModeSwitch } from './ModeSwitch'
 import { Markdown } from '../lib/markdown'
 import { EmojiText } from '../lib/emoji'
 
@@ -118,7 +119,7 @@ function RetryMessageButton({ onRetry }) {
   )
 }
 
-export function ChatWindow({ chat, isStreaming, draft, onDraft, onSend, onRetry, inputRef, effort, onEffort }) {
+export function ChatWindow({ chat, isStreaming, draft, onDraft, onSend, onRetry, inputRef, effort, onEffort, mode, subject, onMode }) {
   const listRef = useRef(null)
   const scrollSig = chat.messages.map((m) => `${m.role}${m.content?.length ?? 0}`).join('|')
 
@@ -133,7 +134,11 @@ export function ChatWindow({ chat, isStreaming, draft, onDraft, onSend, onRetry,
           <div className="welcome" role="status">
             <img className="welcome-hero" src="/plates/welcome-hero.png" alt="Ballerina Cappuccina waving hello" />
             <h1 className="welcome-title">Hi! I&apos;m Ballerina Cappuccina</h1>
-            <p className="welcome-sub">Your AI chat friend — ask me anything, or let&apos;s learn together</p>
+            {mode === 'tutor' ? (
+              <p className="welcome-sub">Pointe shoes on — tell me what you&apos;d like to learn</p>
+            ) : (
+              <p className="welcome-sub">Your AI chat friend — ask me anything, or let&apos;s learn together</p>
+            )}
           </div>
         )}
         {chat.messages.map((m, i) => {
@@ -191,7 +196,7 @@ export function ChatWindow({ chat, isStreaming, draft, onDraft, onSend, onRetry,
           <div className="input">
             <input
               type="text"
-              placeholder="Ask me anything..."
+              placeholder={mode === 'tutor' ? 'What shall we learn today?' : 'Ask me anything...'}
               aria-label="Message Cappuccina"
               value={draft}
               onChange={(e) => onDraft(e.target.value)}
@@ -203,6 +208,7 @@ export function ChatWindow({ chat, isStreaming, draft, onDraft, onSend, onRetry,
           </button>
         </div>
         <div className="composer-meta">
+          <ModeSwitch mode={mode} onMode={onMode} disabled={isStreaming} />
           <EffortSelector effort={effort} onChange={onEffort} disabled={isStreaming} />
         </div>
       </form>

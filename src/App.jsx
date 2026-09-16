@@ -28,6 +28,7 @@ export default function App() {
     setQuery,
     effort,
     setEffort,
+    setMode,
     isStreaming,
     inputRef,
     typingTitleId,
@@ -79,6 +80,9 @@ export default function App() {
           inputRef={inputRef}
           effort={effort}
           onEffort={setEffort}
+          mode={activeChat.mode ?? 'chat'}
+          subject={activeChat.subject}
+          onMode={(mode, subject) => setMode(activeChatId, mode, subject)}
         />
       </main>
     </div>

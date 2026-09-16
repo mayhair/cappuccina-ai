@@ -107,7 +107,9 @@ export function Sidebar({ chats, activeChatId, onSelect, onNewChat, onDelete, on
                   <EmojiText text={c.title} />
                 </span>
               )}
-              {c.tag && <span className="tag">{c.tag}</span>}
+              {c.tag && (
+                <span className={`tag${c.tag === 'TUTOR' ? ' tutor' : ''}`}>{c.tag}</span>
+              )}
               {!editing && (
                 <button
                   type="button"
