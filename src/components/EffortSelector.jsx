@@ -89,6 +89,14 @@ export function EffortSelector({ effort, onChange, disabled }) {
           onMouseDown={(e) => e.target === e.currentTarget && setHelpOpen(false)}
         >
           <div className="modal">
+            <button
+              type="button"
+              className="modal-x"
+              aria-label="Close"
+              onClick={() => setHelpOpen(false)}
+            >
+              ✕
+            </button>
             <div className="modal-avatar">
               <img src="/plates/msg-avatar.png" alt="" />
             </div>

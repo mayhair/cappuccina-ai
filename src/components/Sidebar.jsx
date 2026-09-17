@@ -251,6 +251,14 @@ export function Sidebar({ chats, activeChatId, onSelect, onNewChat, onDelete, on
       {target && (
         <div className="modal-veil" role="dialog" aria-modal="true" aria-labelledby="delete-title" onMouseDown={(e) => e.target === e.currentTarget && setPendingDelete(null)}>
           <div className="modal">
+            <button
+              type="button"
+              className="modal-x"
+              aria-label="Close"
+              onClick={() => setPendingDelete(null)}
+            >
+              ✕
+            </button>
             <div className="modal-avatar">
               <img src="/plates/msg-avatar.png" alt="" />
             </div>
