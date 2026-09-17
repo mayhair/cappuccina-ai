@@ -698,6 +698,15 @@ img.user-avatar {
   color: #ffffff;
   background: linear-gradient(140deg, var(--pink-strong), var(--lilac));
 }
+[data-theme='dark'] .msg-avatar,
+[data-theme='dark'] .msg-avatar.user {
+  background: var(--glass-strong);
+  border-color: var(--glass-strong);
+  color: var(--ink-soft);
+}
+[data-theme='dark'] .msg-avatar img {
+  background: var(--glass-strong);
+}
 
 .bubble {
   width: fit-content;
