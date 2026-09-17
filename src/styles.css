@@ -320,6 +320,7 @@ input { caret-color: var(--pink-strong); }
   .typewriter-caret { animation: none; }
   .sidebar { transition: none; }
   .sidebar-controls { animation: none; }
+  .modal { animation: none; }
 }
 .chat-menu-btn {
   margin-left: auto;
@@ -1279,6 +1280,38 @@ input { caret-color: var(--pink-strong); }
   color: #fff;
   box-shadow: 0 8px 18px rgba(214, 90, 160, 0.35);
 }
+
+/* ---------- alpha gate ---------- */
+.alpha-gate { width: min(440px, 92vw); }
+.alpha-gate-tag {
+  display: inline-block;
+  margin-bottom: 0.9rem;
+  padding: 0.3rem 0.75rem;
+  border-radius: 999px;
+  border: 1px solid var(--hairline);
+  background: var(--glass);
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.alpha-gate-title { font-size: 24px; }
+.alpha-gate-age {
+  padding: 0.75rem 0.9rem;
+  border-radius: 12px;
+  border: 1px solid var(--hairline);
+  background: var(--glass);
+  color: var(--ink);
+}
+.alpha-gate-age strong { color: var(--pink-strong); }
+.alpha-gate-button {
+  width: 100%;
+  margin-top: 0.3rem;
+  padding: 0.75rem 0;
+  font-size: 17px;
+}
+
 .emoji {
   width: 1em;
   height: 1em;

@@ -6,6 +6,7 @@ import { ThemeToggle } from './components/ThemeToggle'
 import { SparkleIcon } from './components/Icons'
 import { Sky, LandingPage } from './components/LandingPage'
 import { AuthView } from './components/AuthView'
+import { AlphaGate } from './components/AlphaGate'
 import { SettingsDialog } from './components/SettingsDialog'
 import { getMe, logout } from './api/authClient'
 import { useChatController } from './hooks/useChatController'
@@ -90,18 +91,21 @@ export default function App() {
             onSignedIn={handleSignedIn}
           />
         ) : (
-          <LandingPage
-            theme={theme}
-            onTheme={setTheme}
-            onStart={() => {
-              setAuthMode('signup')
-              setAuthPhase('auth')
-            }}
-            onLogin={() => {
-              setAuthMode('login')
-              setAuthPhase('auth')
-            }}
-          />
+          <>
+            <LandingPage
+              theme={theme}
+              onTheme={setTheme}
+              onStart={() => {
+                setAuthMode('signup')
+                setAuthPhase('auth')
+              }}
+              onLogin={() => {
+                setAuthMode('login')
+                setAuthPhase('auth')
+              }}
+            />
+            <AlphaGate />
+          </>
         )}
       </div>
     )
