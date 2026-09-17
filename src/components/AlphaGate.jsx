@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 
 const ACK_KEY = 'cappuccina-alpha-ack'
 const ACK_VERSION = 'v1'
@@ -7,15 +7,6 @@ export function AlphaGate() {
   const [open, setOpen] = useState(
     () => localStorage.getItem(ACK_KEY) !== ACK_VERSION,
   )
-
-  useEffect(() => {
-    if (!open) return
-    const esc = (e) => {
-      if (e.key === 'Escape') acknowledge()
-    }
-    window.addEventListener('keydown', esc)
-    return () => window.removeEventListener('keydown', esc)
-  }, [open])
 
   function acknowledge() {
     localStorage.setItem(ACK_KEY, ACK_VERSION)
@@ -30,7 +21,6 @@ export function AlphaGate() {
       role="dialog"
       aria-modal="true"
       aria-labelledby="alpha-gate-title"
-      onMouseDown={(e) => e.target === e.currentTarget && acknowledge()}
     >
       <div className="modal alpha-gate">
         <span className="alpha-gate-tag">Early alpha</span>

@@ -54,7 +54,7 @@ export function LandingPage({ theme, onTheme, error }) {
 
           <p className="landing-note">
             <SparkleIcon />
-            I&rsquo;m an AI chatbot, not a person
+            I'm an AI chatbot, not a person
           </p>
 
           <div className="landing-pills" aria-hidden="true">
