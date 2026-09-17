@@ -1,13 +1,35 @@
-import { useEffect, useState } from 'react'
-import { ChatIcon, TrashIcon, PlusIcon, SearchIcon, DotsIcon, PencilIcon } from './Icons'
+import { useEffect, useRef, useState } from 'react'
+import { ChatIcon, TrashIcon, PlusIcon, SearchIcon, DotsIcon, PencilIcon, LogoutIcon, GearIcon } from './Icons'
 import { TypewriterTitle } from './TypewriterTitle'
 import { EmojiText } from '../lib/emoji'
 
-export function Sidebar({ chats, activeChatId, onSelect, onNewChat, onDelete, onRename, query, onQuery, typingTitleId, onTitleTyped }) {
+export function Sidebar({ chats, activeChatId, onSelect, onNewChat, onDelete, onRename, query, onQuery, typingTitleId, onTitleTyped, user, onLogout }) {
   const [pendingDelete, setPendingDelete] = useState(null)
   const [menuFor, setMenuFor] = useState(null)
   const [renaming, setRenaming] = useState(null)
   const [draftTitle, setDraftTitle] = useState('')
+  const [accountMenu, setAccountMenu] = useState(false)
+  const userBarRef = useRef(null)
+  const isTouch = useState(
+    () => window.matchMedia?.('(pointer: coarse)').matches ?? false,
+  )[0]
+
+  useEffect(() => {
+    if (!accountMenu) return
+    const close = (e) => {
+      if (userBarRef.current?.contains(e.target)) return
+      setAccountMenu(false)
+    }
+    const esc = (e) => {
+      if (e.key === 'Escape') setAccountMenu(false)
+    }
+    window.addEventListener('mousedown', close)
+    window.addEventListener('keydown', esc)
+    return () => {
+      window.removeEventListener('mousedown', close)
+      window.removeEventListener('keydown', esc)
+    }
+  }, [accountMenu])
 
   useEffect(() => {
     if (!pendingDelete) return
@@ -159,9 +181,67 @@ export function Sidebar({ chats, activeChatId, onSelect, onNewChat, onDelete, on
         })}
       </nav>
 
-      <p className="side-note">
-        <EmojiText text="Cappuccina is an AI character — not a person, but she loves to help. 💕" />
-      </p>
+      <div
+        className="user-bar"
+        ref={userBarRef}
+        onMouseEnter={isTouch ? undefined : () => setAccountMenu(true)}
+        onMouseLeave={isTouch ? undefined : () => setAccountMenu(false)}
+      >
+        <div className="user-info">
+          <span className="user-avatar" aria-hidden="true">
+            {(user.displayName || '?').slice(0, 1).toUpperCase()}
+          </span>
+          <span className="user-details">
+            <span className="user-name">
+              <EmojiText text={user.displayName} />
+            </span>
+            <span className="user-email">{user.email}</span>
+          </span>
+        </div>
+        <button
+          type="button"
+          className="user-hint"
+          aria-haspopup="menu"
+          aria-expanded={accountMenu}
+          aria-label="Account options"
+          onFocus={() => {
+            if (!isTouch) setAccountMenu(true)
+          }}
+          onBlur={(e) => {
+            if (!userBarRef.current?.contains(e.relatedTarget)) setAccountMenu(false)
+          }}
+          onClick={() => {
+            if (isTouch) setAccountMenu((open) => !open)
+          }}
+        >
+          {isTouch ? 'Tap for options…' : 'Mouse over for options…'}
+        </button>
+        {accountMenu && (
+          <div className="user-menu" role="menu">
+            <button
+              type="button"
+              role="menuitem"
+              className="user-menu-item"
+              onClick={() => setAccountMenu(false)}
+            >
+              <GearIcon />
+              Settings
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              className="user-menu-item danger"
+              onClick={() => {
+                setAccountMenu(false)
+                onLogout()
+              }}
+            >
+              <LogoutIcon />
+              Log out
+            </button>
+          </div>
+        )}
+      </div>
     </aside>
 
       {target && (

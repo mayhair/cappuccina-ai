@@ -19,6 +19,7 @@ vite.config.*.timestamp-*.mjs
 # ─── Python backend ───
 __pycache__/
 *.py[cod]
+backend/data/
 *$py.class
 *.egg-info/
 .eggs/

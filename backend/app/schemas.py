@@ -29,3 +29,33 @@ class ChatResponse(BaseModel):
     content: str
     reasoning: str = ""
     tool_calls: list[ToolCall] = []
+
+
+class RegisterRequest(BaseModel):
+    email: str
+    password: str
+    display_name: str = Field(alias="displayName")
+
+    model_config = {"populate_by_name": True}
+
+
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+
+
+class UserResponse(BaseModel):
+    id: str
+    email: str
+    display_name: str = Field(alias="displayName")
+
+    model_config = {"populate_by_name": True}
+
+
+class CreateChatRequest(BaseModel):
+    mode: str = "chat"
+    subject: str | None = None
+
+
+class RenameChatRequest(BaseModel):
+    title: str

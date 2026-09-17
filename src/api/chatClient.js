@@ -20,6 +20,7 @@ export async function send({ chatId, messages, reasoning, mode, subject }) {
   const res = await fetch('/api/v1/chat', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
     body: JSON.stringify(buildRequest({ chatId, messages, reasoning, mode, subject })),
   })
   if (!res.ok) throw new Error(`chat failed: ${res.status}`)
@@ -32,6 +33,7 @@ export async function sendStreaming({ chatId, messages, reasoning, mode, subject
   const res = await fetch('/api/v1/chat/stream', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
     body: JSON.stringify(buildRequest({ chatId, messages, reasoning, mode, subject, generateTitle })),
   })
   if (!res.ok || !res.body) throw new Error(`chat stream failed: ${res.status}`)
@@ -76,3 +78,30 @@ export async function sendStreaming({ chatId, messages, reasoning, mode, subject
   }
   return { role: 'assistant', content: full, reasoning: thinking }
 }
+
+// ---------- chat CRUD (server-side storage) ----------
+
+async function jsonFetch(url, options = {}) {
+  const res = await fetch(url, { credentials: 'include', ...options })
+  if (!res.ok) throw new Error(`${url} failed: ${res.status}`)
+  return res.json()
+}
+
+export const listChats = () => jsonFetch('/api/v1/chats')
+
+export const createChatOnServer = (mode = 'chat', subject = null) =>
+  jsonFetch('/api/v1/chats', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ mode, subject }),
+  })
+
+export const renameChatOnServer = (chatId, title) =>
+  jsonFetch(`/api/v1/chats/${chatId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title }),
+  })
+
+export const deleteChatOnServer = (chatId) =>
+  jsonFetch(`/api/v1/chats/${chatId}`, { method: 'DELETE' })

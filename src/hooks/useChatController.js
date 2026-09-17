@@ -1,6 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { sendStreaming } from '../api/chatClient'
-import { loadStoredChats, saveStoredChats } from '../lib/chatStorage'
+import {
+  sendStreaming,
+  listChats,
+  createChatOnServer,
+  renameChatOnServer,
+  deleteChatOnServer,
+} from '../api/chatClient'
 
 const EFFORT_KEY = 'cappuccina-effort'
 const DEFAULT_TITLE = 'New chat'
@@ -38,72 +43,63 @@ function normalizeChat(c) {
     ...c,
     mode: c.mode === 'tutor' ? 'tutor' : 'chat',
     subject: c.subject ?? null,
-    tag: c.tag ?? null,
+    tag: c.tag ?? (c.mode === 'tutor' ? 'TUTOR' : null),
   }
 }
 
-export function useChatController() {
+export function useChatController(enabled) {
   const [chats, setChats] = useState(() => [makeChat()])
-  const [activeChatId, setActiveChatId] = useState(() => chats[0].id)
+  const [activeChatId, setActiveChatId] = useState(null)
   const [draft, setDraft] = useState('')
   const [query, setQuery] = useState('')
   const [effort, setEffort] = useState(loadEffort)
   const [status, setStatus] = useState('idle')
   const [typingTitleId, setTypingTitleId] = useState(null)
-  const [storeReady, setStoreReady] = useState(false)
   const isStreaming = status === 'streaming'
   const inputRef = useRef(null)
   const chatsRef = useRef(chats)
-  const pristineId = useRef(chats[0].id)
   const streamSeq = useRef(0)
-
-  const activeChat = chats.find((c) => c.id === activeChatId) ?? chats[0]
 
   useEffect(() => {
     chatsRef.current = chats
   }, [chats])
 
+  const adoptServerChat = useCallback((localId, created) => {
+    setChats((all) =>
+      all.map((c) =>
+        c.id === localId ? normalizeChat({ ...c, id: created.id, title: created.title }) : c,
+      ),
+    )
+    setActiveChatId((cur) => (cur === localId ? created.id : cur))
+  }, [])
+
+  // Load chat history from the server (source of truth when signed in).
   useEffect(() => {
+    if (!enabled) return
     let cancelled = false
     ;(async () => {
       try {
-        const stored = await loadStoredChats()
+        const stored = await listChats()
         if (cancelled) return
         if (Array.isArray(stored) && stored.length > 0) {
+          setChats(stored.map(normalizeChat))
+          setActiveChatId(stored[0].id)
+        } else {
+          // Fresh account: back the placeholder chat with a server-side one
+          const localId = chatsRef.current[0].id
+          const created = await createChatOnServer()
           if (cancelled) return
-          const shaped = stored.map(normalizeChat)
-          const current = chatsRef.current
-          const pristine =
-            current.length === 1 &&
-            current[0].id === pristineId.current &&
-            current[0].messages.length === 0
-          if (pristine) {
-            setChats(shaped)
-            setActiveChatId((cur) =>
-              shaped.some((c) => c.id === cur) ? cur : shaped[0].id,
-            )
-          }
+          adoptServerChat(localId, created)
         }
       } catch {
-        // IndexedDB unavailable — fall back to in-memory chats
-      } finally {
-        if (!cancelled) setStoreReady(true)
+        // Backend unreachable — fall back to in-memory chats
+        setActiveChatId((cur) => cur ?? chatsRef.current[0].id)
       }
     })()
     return () => {
       cancelled = true
     }
-  }, [])
-
-  useEffect(() => {
-    if (!storeReady) return
-    const t = setTimeout(() => {
-      saveStoredChats(chats).catch(() => {
-        // quota or unavailable — keep in-memory chats
-      })
-    }, 300)
-    return () => clearTimeout(t)
-  }, [chats, storeReady])
+  }, [enabled, adoptServerChat])
 
   useEffect(() => {
     try {
@@ -112,6 +108,8 @@ export function useChatController() {
       // storage full or unavailable
     }
   }, [effort])
+
+  const activeChat = chats.find((c) => c.id === activeChatId) ?? chats[0]
 
   const patchMessages = useCallback((chatId, fn) => {
     setChats((all) => all.map((c) => (c.id === chatId ? { ...c, messages: fn(c.messages) } : c)))
@@ -222,14 +220,14 @@ export function useChatController() {
   const sendMessage = useCallback(() => {
     const text = draft.trim()
     if (!text || status !== 'idle') return
-    const chatId = activeChatId
+    const chatId = activeChat.id
     const userMessage = { role: 'user', content: text }
     const reasoning = EFFORTS.find((e) => e.label === effort)?.value ?? 'medium'
 
     patchMessages(chatId, (messages) => [...messages, userMessage])
     setDraft('')
     streamReply(chatId, [...activeChat.messages, userMessage], reasoning, activeChat.mode ?? 'chat', activeChat.subject ?? null)
-  }, [draft, status, activeChatId, activeChat, effort, patchMessages, streamReply])
+  }, [draft, status, activeChat, effort, patchMessages, streamReply])
 
   const retryMessage = useCallback(() => {
     if (status !== 'idle') return
@@ -242,12 +240,12 @@ export function useChatController() {
       }
     }
     if (lastUser === -1) return
-    const chatId = activeChatId
+    const chatId = activeChat.id
     const history = messages.slice(0, lastUser + 1)
     const reasoning = EFFORTS.find((e) => e.label === effort)?.value ?? 'medium'
     patchMessages(chatId, () => history)
     streamReply(chatId, history, reasoning, activeChat.mode ?? 'chat', activeChat.subject ?? null)
-  }, [status, activeChat, activeChatId, effort, patchMessages, streamReply])
+  }, [status, activeChat, effort, patchMessages, streamReply])
 
   const newChat = useCallback(() => {
     const chat = makeChat()
@@ -256,13 +254,19 @@ export function useChatController() {
     setDraft('')
     setStatus('idle')
     inputRef.current?.focus()
-  }, [])
+    createChatOnServer()
+      .then((created) => adoptServerChat(chat.id, created))
+      .catch(() => {
+        // Creation failed — chat stays local-only and will 404 on send
+      })
+  }, [adoptServerChat])
 
   const deleteChat = useCallback((id) => {
     setChats((all) => {
       const remaining = all.filter((c) => c.id !== id)
       if (remaining.length === 0) return all
       setActiveChatId((current) => (current === id ? remaining[0].id : current))
+      deleteChatOnServer(id).catch(() => {})
       return remaining
     })
   }, [])
@@ -272,6 +276,7 @@ export function useChatController() {
     if (!next) return
     setTypingTitleId(null)
     setChats((all) => all.map((c) => (c.id === id ? { ...c, title: next } : c)))
+    renameChatOnServer(id, next).catch(() => {})
   }, [])
 
   const q = query.trim().toLowerCase()
@@ -282,7 +287,7 @@ export function useChatController() {
   return {
     chats: visibleChats,
     activeChat,
-    activeChatId,
+    activeChatId: activeChat?.id ?? null,
     draft,
     setDraft,
     query,
