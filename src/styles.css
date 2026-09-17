@@ -652,8 +652,11 @@ input { caret-color: var(--pink-strong); }
   overflow-y: auto;
   min-height: 0;
   padding: 1vh 1vw 2vh;
+  margin: -6px 0;
   scrollbar-width: thin;
   scrollbar-color: var(--scrollbar) transparent;
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 16px, #000 calc(100% - 16px), transparent 100%);
+  mask-image: linear-gradient(to bottom, transparent 0, #000 16px, #000 calc(100% - 16px), transparent 100%);
 }
 
 .msg-row {
