@@ -1,4 +1,5 @@
 import json
+import time
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
@@ -256,6 +257,8 @@ def _sync_history(chat_id: str, req: ChatRequest) -> None:
             "reasoning": m.reasoning or "",
             "tools": m.tools or [],
             "parts": m.parts or [],
+            "thinking_done": m.thinking_done,
+            "thought_seconds": m.thought_seconds,
         }
         for m in req.messages
     ]
@@ -275,7 +278,9 @@ def _serialize_tool_calls(tool_calls: list[ToolCall]) -> list[dict]:
 @app.post("/api/v1/chat")
 async def chat(req: ChatRequest, user=Depends(current_user)) -> ChatResponse:
     _owned_chat_or_404(user, req)
+    think_start = time.monotonic()
     result = await GRAPH.ainvoke(_state(req))
+    thought_seconds = time.monotonic() - think_start
     messages = result["messages"]
     reasoning, tool_calls, parts = _final_extras(messages)
     db.append_chat_message(
@@ -285,6 +290,8 @@ async def chat(req: ChatRequest, user=Depends(current_user)) -> ChatResponse:
         reasoning=reasoning,
         tools=_serialize_tool_calls(tool_calls),
         parts=parts,
+        thinking_done=True,
+        thought_seconds=thought_seconds,
     )
     return ChatResponse(
         content=_text(messages[-1].content),
@@ -300,6 +307,7 @@ async def chat_stream(req: ChatRequest, user=Depends(current_user)):
     async def events():
         _sync_history(req.chat_id, req)
         yield {"event": "start", "data": "{}"}
+        think_start = time.monotonic()
         final_text = ""
         reasoning_text = ""
         tools_by_id: dict[str, dict] = {}
@@ -417,6 +425,8 @@ async def chat_stream(req: ChatRequest, user=Depends(current_user)):
                 reasoning=reasoning_text,
                 tools=list(tools_by_id.values()),
                 parts=[json.loads(json.dumps(p)) for p in parts],
+                thinking_done=True,
+                thought_seconds=time.monotonic() - think_start,
             )
 
     return EventSourceResponse(events(), ping=15)

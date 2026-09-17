@@ -9,6 +9,10 @@ class Message(BaseModel):
     reasoning: str = ""
     tools: list = []
     parts: list = []
+    thinking_done: bool = Field(default=False, alias="thinkingDone")
+    thought_seconds: float | None = Field(default=None, alias="thoughtSeconds")
+
+    model_config = {"populate_by_name": True}
 
 
 class ChatRequest(BaseModel):

@@ -81,13 +81,21 @@ function ToolCallBlock({ tool }) {
   )
 }
 
-function ThinkingBlock({ message }) {
+function ThinkingBlock({ message, streaming }) {
   const [open, setOpen] = useState(false)
   const parts = thinkingParts(message)
   if (parts.length === 0) return null
 
-  const done = message.thinkingDone && message.thoughtSeconds != null
-  const label = done ? formatThought(message.thoughtSeconds) : 'Thinking...'
+  // thinkingDone/thoughtSeconds are set when the live stream finishes. After a
+  // reload the stream is over by definition, so anything not actively
+  // streaming counts as done (rows stored before durations were persisted
+  // simply show "Thought" without a duration).
+  const done = message.thinkingDone || !streaming
+  const label = !done
+    ? 'Thinking...'
+    : message.thoughtSeconds != null
+      ? formatThought(message.thoughtSeconds)
+      : 'Thought'
 
   return (
     <div className="thinking">
@@ -212,7 +220,7 @@ export function ChatWindow({ chat, isStreaming, draft, onDraft, onSend, onRetry,
               )}
               {m.role === 'assistant' ? (
                 <div className="assistant-col">
-                  <ThinkingBlock message={m} />
+                  <ThinkingBlock message={m} streaming={isActiveStream} />
                   <div className={`bubble${awaitingReply ? ' bubble-waiting' : ''}`}>
                     {m.content ? (
                       <Markdown text={m.content} />

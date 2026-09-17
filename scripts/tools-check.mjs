@@ -14,10 +14,12 @@ await page.route("**/api/v1/auth/me", async (route) => {
     body: JSON.stringify({ id: "check", email: "check@example.com", displayName: "Check" }),
   });
 });
+// mutable server state: empty until the stream "persists" a finished turn
+let savedChats = [];
 await page.route("**/api/v1/chats", async (route) => {
   const body =
     route.request().method() === "GET"
-      ? "[]"
+      ? JSON.stringify(savedChats)
       : JSON.stringify({ id: "chat-check", title: "New chat" });
   await route.fulfill({ status: 200, contentType: "application/json", body });
 });
@@ -93,7 +95,93 @@ console.log(
   (await page.locator(".thinking-body .tool-body").count()) === 0,
 );
 
+// 6. simulated restart: server now returns the finished turn with persisted
+// thinking flags; the header must read "Thought for ..." instead of "Thinking..."
+savedChats = [
+  {
+    id: "chat-check",
+    title: "New chat",
+    mode: "chat",
+    subject: null,
+    messages: [
+      { role: "user", content: "weather in both Londons" },
+      {
+        role: "assistant",
+        content: "Both Londons covered.",
+        reasoning: "First thought about the UK. Second thought about Ontario. ",
+        tools: [
+          {
+            id: "t1",
+            name: "web_search",
+            display: "Web Search",
+            args: { query: "London UK weather" },
+            result: "UK result: rain 21C",
+            ok: true,
+          },
+          {
+            id: "t2",
+            name: "web_search",
+            display: "Web Search",
+            args: { query: "London Ontario weather" },
+            result: "ON result: cloudy 24C",
+            ok: true,
+          },
+        ],
+        parts: [
+          { type: "reasoning", text: "First thought about the UK. " },
+          {
+            type: "tool",
+            id: "t1",
+            name: "web_search",
+            display: "Web Search",
+            args: { query: "London UK weather" },
+            result: "UK result: rain 21C",
+            ok: true,
+          },
+          { type: "reasoning", text: "Second thought about Ontario. " },
+          {
+            type: "tool",
+            id: "t2",
+            name: "web_search",
+            display: "Web Search",
+            args: { query: "London Ontario weather" },
+            result: "ON result: cloudy 24C",
+            ok: true,
+          },
+        ],
+        thinkingDone: true,
+        thoughtSeconds: 4.5,
+      },
+    ],
+  },
+];
+await page.reload({ waitUntil: "networkidle" });
+await page.waitForSelector(".thinking-head", { timeout: 5000 });
+const headText = await page.locator(".thinking-head").first().textContent();
+console.log("header after reload:", headText.trim());
+const keptDuration = headText.includes("Thought for 4.5 seconds");
+console.log("finished label survives reload:", keptDuration);
+
+// 7. interleaving also survives the reload
+await page.click(".thinking-head");
+const orderAfter = await page.evaluate(() =>
+  [...document.querySelectorAll(".thinking-body > *")].map((el) =>
+    el.classList.contains("thinking-reasoning")
+      ? "reasoning"
+      : el.classList.contains("tool-call")
+        ? "tool"
+        : el.className,
+  ),
+);
+const interleavedAfter =
+  orderAfter.length === 4 &&
+  orderAfter[0] === "reasoning" &&
+  orderAfter[1] === "tool" &&
+  orderAfter[2] === "reasoning" &&
+  orderAfter[3] === "tool";
+console.log("interleaved after reload:", interleavedAfter);
+
 console.log("console errors:", errors.length ? errors : "none");
 await browser.close();
 
-if (!interleaved || bodiesBefore !== 0) process.exit(1);
+if (!interleaved || bodiesBefore !== 0 || !keptDuration || !interleavedAfter) process.exit(1);

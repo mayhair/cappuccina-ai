@@ -68,6 +68,8 @@ def _init_schema(conn: sqlite3.Connection) -> None:
             reasoning TEXT NOT NULL DEFAULT '',
             tools TEXT NOT NULL DEFAULT '[]',
             parts TEXT NOT NULL DEFAULT '[]',
+            thinking_done INTEGER NOT NULL DEFAULT 0,
+            thought_seconds REAL,
             created_at TEXT NOT NULL
         );
 
@@ -78,6 +80,10 @@ def _init_schema(conn: sqlite3.Connection) -> None:
     cols = {row["name"] for row in conn.execute("PRAGMA table_info(messages)").fetchall()}
     if "parts" not in cols:
         conn.execute("ALTER TABLE messages ADD COLUMN parts TEXT NOT NULL DEFAULT '[]'")
+    if "thinking_done" not in cols:
+        conn.execute("ALTER TABLE messages ADD COLUMN thinking_done INTEGER NOT NULL DEFAULT 0")
+    if "thought_seconds" not in cols:
+        conn.execute("ALTER TABLE messages ADD COLUMN thought_seconds REAL")
     conn.commit()
 
 
@@ -227,7 +233,8 @@ def list_messages_by_chat(chat_ids: list[str]) -> dict[str, list[dict]]:
     conn = get_conn()
     placeholders = ",".join("?" for _ in chat_ids)
     rows = conn.execute(
-        f"SELECT chat_id, role, content, reasoning, tools, parts FROM messages"
+        "SELECT chat_id, role, content, reasoning, tools, parts,"
+        " thinking_done, thought_seconds FROM messages"
         f" WHERE chat_id IN ({placeholders}) ORDER BY id",
         chat_ids,
     ).fetchall()
@@ -244,6 +251,8 @@ def list_messages_by_chat(chat_ids: list[str]) -> dict[str, list[dict]]:
                 "reasoning": r["reasoning"],
                 "tools": json.loads(r["tools"]),
                 "parts": parts,
+                "thinkingDone": bool(r["thinking_done"]),
+                "thoughtSeconds": r["thought_seconds"],
             }
         )
     return grouped
@@ -279,8 +288,10 @@ def replace_chat_messages(chat_id: str, messages: list[dict]) -> None:
     conn = get_conn()
     conn.execute("DELETE FROM messages WHERE chat_id = :chat_id", {"chat_id": chat_id})
     conn.executemany(
-        "INSERT INTO messages (chat_id, role, content, reasoning, tools, parts, created_at)"
-        " VALUES (:chat_id, :role, :content, :reasoning, :tools, :parts, :created_at)",
+        "INSERT INTO messages (chat_id, role, content, reasoning, tools, parts,"
+        " thinking_done, thought_seconds, created_at)"
+        " VALUES (:chat_id, :role, :content, :reasoning, :tools, :parts,"
+        " :thinking_done, :thought_seconds, :created_at)",
         [
             {
                 "chat_id": chat_id,
@@ -289,6 +300,8 @@ def replace_chat_messages(chat_id: str, messages: list[dict]) -> None:
                 "reasoning": m.get("reasoning", ""),
                 "tools": json.dumps(m.get("tools", [])),
                 "parts": json.dumps(m.get("parts", [])),
+                "thinking_done": 1 if m.get("thinking_done", False) else 0,
+                "thought_seconds": m.get("thought_seconds"),
                 "created_at": _now(),
             }
             for m in messages
@@ -322,11 +335,15 @@ def update_chat_meta(chat_id: str, mode: str | None = None,
 
 def append_chat_message(chat_id: str, role: str, content: str,
                         reasoning: str = "", tools: list | None = None,
-                        parts: list | None = None) -> None:
+                        parts: list | None = None,
+                        thinking_done: bool = False,
+                        thought_seconds: float | None = None) -> None:
     conn = get_conn()
     conn.execute(
-        "INSERT INTO messages (chat_id, role, content, reasoning, tools, parts, created_at)"
-        " VALUES (:chat_id, :role, :content, :reasoning, :tools, :parts, :created_at)",
+        "INSERT INTO messages (chat_id, role, content, reasoning, tools, parts,"
+        " thinking_done, thought_seconds, created_at)"
+        " VALUES (:chat_id, :role, :content, :reasoning, :tools, :parts,"
+        " :thinking_done, :thought_seconds, :created_at)",
         {
             "chat_id": chat_id,
             "role": role,
@@ -334,6 +351,8 @@ def append_chat_message(chat_id: str, role: str, content: str,
             "reasoning": reasoning,
             "tools": json.dumps(tools or []),
             "parts": json.dumps(parts or []),
+            "thinking_done": 1 if thinking_done else 0,
+            "thought_seconds": thought_seconds,
             "created_at": _now(),
         },
     )
