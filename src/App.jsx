@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Sidebar } from './components/Sidebar'
+import { SidebarControls } from './components/SidebarControls'
 import { ChatWindow } from './components/ChatWindow'
 import { ThemeToggle } from './components/ThemeToggle'
 import { SparkleIcon } from './components/Icons'
@@ -20,6 +21,23 @@ export default function App() {
     document.documentElement.dataset.theme = theme
     localStorage.setItem('cappuccina-theme', theme)
   }, [theme])
+
+  const [collapsed, setCollapsed] = useState(
+    () => localStorage.getItem('cappuccina-sidebar-collapsed') === '1',
+  )
+
+  useEffect(() => {
+    localStorage.setItem('cappuccina-sidebar-collapsed', collapsed ? '1' : '0')
+  }, [collapsed])
+
+  const searchInputRef = useRef(null)
+
+  const toggleSidebar = () => setCollapsed((c) => !c)
+
+  const openSidebarAndSearch = () => {
+    setCollapsed(false)
+    requestAnimationFrame(() => searchInputRef.current?.focus())
+  }
 
   const [user, setUser] = useState(null)
   const [authPhase, setAuthPhase] = useState('checking') // checking | landing | auth
@@ -113,7 +131,7 @@ export default function App() {
   } = chat
 
   return (
-    <div className="app">
+    <div className={`app${collapsed ? ' is-collapsed' : ''}`}>
       <Sky theme={theme} />
 
       <Sidebar
@@ -125,6 +143,8 @@ export default function App() {
         onRename={renameChat}
         query={query}
         onQuery={setQuery}
+        searchInputRef={searchInputRef}
+        collapsed={collapsed}
         typingTitleId={typingTitleId}
         onTitleTyped={clearTypingTitle}
         user={user}
@@ -140,11 +160,21 @@ export default function App() {
 
       <main className="main">
         <header className="top-bar">
-          <ThemeToggle theme={theme} onChange={setTheme} />
-          <span className="ai-badge">
-            <SparkleIcon />
-            I'm an AI
-          </span>
+          <div className="top-bar-left">
+            <SidebarControls
+              collapsed={collapsed}
+              onToggle={toggleSidebar}
+              onSearch={openSidebarAndSearch}
+              onNewChat={newChat}
+            />
+          </div>
+          <div className="top-bar-right">
+            <ThemeToggle theme={theme} onChange={setTheme} />
+            <span className="ai-badge">
+              <SparkleIcon />
+              I'm an AI
+            </span>
+          </div>
         </header>
 
         <ChatWindow

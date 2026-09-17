@@ -3,13 +3,15 @@ import { ChatIcon, TrashIcon, PlusIcon, SearchIcon, DotsIcon, PencilIcon, Logout
 import { TypewriterTitle } from './TypewriterTitle'
 import { EmojiText } from '../lib/emoji'
 
-export function Sidebar({ chats, activeChatId, onSelect, onNewChat, onDelete, onRename, query, onQuery, typingTitleId, onTitleTyped, user, onLogout, onSettings }) {
+export function Sidebar({ chats, activeChatId, onSelect, onNewChat, onDelete, onRename, query, onQuery, searchInputRef, collapsed, typingTitleId, onTitleTyped, user, onLogout, onSettings }) {
   const [pendingDelete, setPendingDelete] = useState(null)
   const [menuFor, setMenuFor] = useState(null)
+  const [menuUp, setMenuUp] = useState(false)
   const [renaming, setRenaming] = useState(null)
   const [draftTitle, setDraftTitle] = useState('')
   const [accountMenu, setAccountMenu] = useState(false)
   const userBarRef = useRef(null)
+  const listRef = useRef(null)
   const isTouch = useState(
     () => window.matchMedia?.('(pointer: coarse)').matches ?? false,
   )[0]
@@ -63,9 +65,34 @@ export function Sidebar({ chats, activeChatId, onSelect, onNewChat, onDelete, on
     setRenaming(null)
   }
 
+  const MENU_HEIGHT = 96
+
+  const openMenu = (event, id) => {
+    if (menuFor === id) {
+      setMenuFor(null)
+      return
+    }
+    const list = listRef.current
+    const item = event.currentTarget.closest('.chat-list-item')
+    if (list && item) {
+      const listRect = list.getBoundingClientRect()
+      const itemRect = item.getBoundingClientRect()
+      const below = listRect.bottom - itemRect.bottom
+      const above = itemRect.top - listRect.top
+      setMenuUp(below < MENU_HEIGHT && (above >= MENU_HEIGHT || above > below))
+    } else {
+      setMenuUp(false)
+    }
+    setMenuFor(id)
+  }
+
   return (
     <>
-    <aside className="sidebar">
+    <aside
+      className={`sidebar${collapsed ? ' is-hidden' : ''}`}
+      inert={collapsed ? '' : undefined}
+      aria-hidden={collapsed || undefined}
+    >
       <div className="side-head">
         <div className="side-avatar">
           <img src="/plates/msg-avatar.png" alt="Ballerina Cappuccina, an AI character whose head is a coffee cup" />
@@ -81,6 +108,7 @@ export function Sidebar({ chats, activeChatId, onSelect, onNewChat, onDelete, on
       <label className="search">
         <SearchIcon />
         <input
+          ref={searchInputRef}
           type="search"
           placeholder="Search chats..."
           value={query}
@@ -89,10 +117,9 @@ export function Sidebar({ chats, activeChatId, onSelect, onNewChat, onDelete, on
         />
       </label>
 
-      <nav className="chat-list" aria-label="Chat history">
-        {chats.map((c, i) => {
+      <nav className="chat-list" aria-label="Chat history" ref={listRef}>
+        {chats.map((c) => {
           const editing = renaming === c.id
-          const menuUp = i >= chats.length - 3
           return (
             <div
               key={c.id}
@@ -142,7 +169,7 @@ export function Sidebar({ chats, activeChatId, onSelect, onNewChat, onDelete, on
                   aria-expanded={menuFor === c.id}
                   onClick={(e) => {
                     e.stopPropagation()
-                    setMenuFor(menuFor === c.id ? null : c.id)
+                    openMenu(e, c.id)
                   }}
                 >
                   <DotsIcon />

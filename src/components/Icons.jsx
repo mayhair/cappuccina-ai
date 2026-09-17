@@ -31,6 +31,15 @@ export function SearchIcon(props) {
   )
 }
 
+export function SidebarIcon(props) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <rect x="3" y="4" width="18" height="16" rx="3.4" />
+      <path d="M9.5 4v16" />
+    </svg>
+  )
+}
+
 export function TrashIcon(props) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>
