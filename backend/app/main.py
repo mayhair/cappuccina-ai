@@ -3,7 +3,8 @@ import time
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import RedirectResponse
+from fastapi.responses import FileResponse, RedirectResponse
+from langchain_core.runnables import RunnableConfig
 from sse_starlette.sse import EventSourceResponse
 
 from agent.graph import GRAPH
@@ -79,6 +80,35 @@ def _tool_result_text(output) -> str:
     return str(content)
 
 
+def _image_part_from_result(name: str, output_text: str) -> dict | None:
+    """An {"type": "image"} part for a successful generate_image result.
+
+    The part only references the saved image by id — the bytes live in
+    backend/data/images and are served by GET /api/v1/images/{id}, so they
+    never flow through the full-history sync payloads. Returns None for any
+    other tool or a failed/malformed result.
+    """
+    if name != "generate_image" or not output_text:
+        return None
+    try:
+        data = json.loads(output_text)
+    except (ValueError, TypeError):
+        return None
+    if (
+        not isinstance(data, dict)
+        or data.get("status") != "image_generated"
+        or not data.get("image_id")
+    ):
+        return None
+    return {
+        "type": "image",
+        "imageId": data["image_id"],
+        "prompt": data.get("prompt", ""),
+        "width": data.get("width"),
+        "height": data.get("height"),
+    }
+
+
 def _final_extras(messages) -> tuple[str, list[ToolCall], list[dict]]:
     """Reasoning, tool calls, and the ordered interleaving of the two."""
     reasoning = ""
@@ -110,12 +140,14 @@ def _final_extras(messages) -> tuple[str, list[ToolCall], list[dict]]:
             if call_id:
                 tools_by_part_id[call_id] = part
         if msg.__class__.__name__ == "ToolMessage":
-            results_by_id[getattr(msg, "tool_call_id", "") or ""] = _tool_result_text(
-                getattr(msg, "content", "")
-            )
+            output_text = _tool_result_text(getattr(msg, "content", ""))
+            results_by_id[getattr(msg, "tool_call_id", "") or ""] = output_text
             part = tools_by_part_id.get(getattr(msg, "tool_call_id", "") or "")
             if part is not None:
-                part["result"] = _tool_result_text(getattr(msg, "content", ""))
+                part["result"] = output_text
+                image_part = _image_part_from_result(part.get("name", ""), output_text)
+                if image_part is not None:
+                    parts.append(image_part)
     tool_calls = [
         ToolCall(
             name=name,
@@ -369,6 +401,21 @@ async def delete_chat(chat_id: str, user=Depends(current_user)) -> dict:
     return {"ok": True}
 
 
+@app.get("/api/v1/images/{image_id}")
+async def get_image(image_id: str, user=Depends(current_user)):
+    """Serve one generated image. Authorized per user (unlike a static mount)
+    so private chat images stay private; the session cookie is sent
+    automatically by same-origin <img> tags. FileResponse adds ETag /
+    Last-Modified caching, so revisiting a chat doesn't re-download images."""
+    row = db.get_image(user["id"], image_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Image not found")
+    path = db.image_file_path(row["id"], row["mime"])
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="Image not found")
+    return FileResponse(path, media_type=row["mime"])
+
+
 # ---------- chat completion ----------
 
 def _owned_chat_or_404(user, req: ChatRequest):
@@ -376,6 +423,12 @@ def _owned_chat_or_404(user, req: ChatRequest):
     if chat is None:
         raise HTTPException(status_code=404, detail="Chat not found")
     return chat
+
+
+def _graph_config(user, req: ChatRequest) -> RunnableConfig:
+    """Invisible tool context: user id (auth scoping) and chat id (so
+    generate_image can persist the picture against the current chat)."""
+    return {"configurable": {"user_id": user["id"], "chat_id": req.chat_id}}
 
 
 def _sync_history(chat_id: str, req: ChatRequest) -> None:
@@ -413,9 +466,7 @@ def _serialize_tool_calls(tool_calls: list[ToolCall]) -> list[dict]:
 async def chat(req: ChatRequest, user=Depends(current_user)) -> ChatResponse:
     _owned_chat_or_404(user, req)
     think_start = time.monotonic()
-    result = await GRAPH.ainvoke(
-        _state(req), config={"configurable": {"user_id": user["id"]}}
-    )
+    result = await GRAPH.ainvoke(_state(req), config=_graph_config(user, req))
     thought_seconds = time.monotonic() - think_start
     messages = result["messages"]
     reasoning, tool_calls, parts = _final_extras(messages)
@@ -451,7 +502,7 @@ async def chat_stream(req: ChatRequest, user=Depends(current_user)):
         parts_by_tool_id: dict[str, dict] = {}
         async for event in GRAPH.astream_events(
             _state(req),
-            config={"configurable": {"user_id": user["id"]}},
+            config=_graph_config(user, req),
             version="v2",
         ):
             kind = event["event"]
@@ -531,6 +582,12 @@ async def chat_stream(req: ChatRequest, user=Depends(current_user)):
                         }
                     ),
                 }
+                image_part = _image_part_from_result(
+                    event.get("name", ""), output_text
+                )
+                if image_part is not None:
+                    parts.append(image_part)
+                    yield {"event": "image", "data": json.dumps(image_part)}
             elif kind == "on_tool_error":
                 error_text = str(event["data"].get("error", ""))
                 if event.get("run_id", "") in tools_by_id:

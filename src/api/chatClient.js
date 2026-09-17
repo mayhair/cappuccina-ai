@@ -2,8 +2,9 @@
 // POST /api/v1/chat            -> { role, content, reasoning, tool_calls }
 // POST /api/v1/chat/stream SSE -> event: start | token {content} | reasoning {content}
 //                                 | tool_call {id,name,display,args,label}
-//                                 | tool_result {id,name,content,ok} | done
-//                                 | title {title} (first message only, after done)
+//                                 | tool_result {id,name,content,ok}
+//                                 | image {type,imageId,prompt,width,height}
+//                                 | done | title {title} (first message only, after done)
 
 function buildRequest({ chatId, messages, reasoning, mode, subject, generateTitle }) {
   return {
@@ -27,9 +28,9 @@ export async function send({ chatId, messages, reasoning, mode, subject }) {
   return res.json()
 }
 
-// handlers: { onToken, onReasoning, onToolCall, onToolResult, onTitle, onDone }
+// handlers: { onToken, onReasoning, onToolCall, onToolResult, onImage, onTitle, onDone }
 export async function sendStreaming({ chatId, messages, reasoning, mode, subject, generateTitle }, handlers = {}) {
-  const { onToken, onReasoning, onToolCall, onToolResult, onTitle, onDone } = handlers
+  const { onToken, onReasoning, onToolCall, onToolResult, onImage, onTitle, onDone } = handlers
   const res = await fetch('/api/v1/chat/stream', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -71,6 +72,8 @@ export async function sendStreaming({ chatId, messages, reasoning, mode, subject
         onToolCall?.(payload)
       } else if (event === 'tool_result') {
         onToolResult?.(payload)
+      } else if (event === 'image') {
+        onImage?.(payload)
       } else if (event === 'title') {
         onTitle?.(payload.title ?? '')
       }

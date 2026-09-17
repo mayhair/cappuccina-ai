@@ -1850,3 +1850,67 @@ a.settings-save { text-decoration: none; display: inline-flex; align-items: cent
 .draft-secondary:disabled { opacity: 0.5; cursor: default; }
 
 .draft-error { margin: 0.7rem 0.95rem 0; }
+
+/* ---------- generated image card ---------- */
+.image-card {
+  margin: 0.7rem 0 0;
+  max-width: 420px;
+  border: 1px solid var(--hairline);
+  border-radius: 14px;
+  background: var(--glass);
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+}
+.image-card-frame {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: zoom-in;
+}
+.image-card-frame img {
+  display: block;
+  width: 100%;
+  height: auto;
+  background: var(--glass-strong);
+}
+.image-card-frame:focus-visible { outline: 2px solid var(--pink-strong); outline-offset: -2px; }
+.image-card-caption {
+  padding: 0.6rem 0.95rem 0.8rem;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--ink-soft);
+}
+.image-lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem;
+  background: rgba(20, 10, 18, 0.75);
+  cursor: zoom-out;
+}
+.image-lightbox img {
+  max-width: min(90vw, 1024px);
+  max-height: 88vh;
+  border-radius: 14px;
+  box-shadow: var(--shadow);
+  cursor: default;
+}
+.image-lightbox-close {
+  position: fixed;
+  top: 1rem;
+  right: 1.25rem;
+  width: 2.5rem;
+  height: 2.5rem;
+  border: none;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.9);
+  color: #3a2233;
+  font-size: 1.4rem;
+  line-height: 1;
+  cursor: pointer;
+}

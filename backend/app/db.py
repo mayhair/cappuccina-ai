@@ -14,6 +14,24 @@ from pathlib import Path
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 DB_PATH = DATA_DIR / "cappuccina.db"
 
+# Generated image bytes live here as {image_id}.{ext}; the images table holds
+# the metadata. Derived from DATA_DIR at call time so tests that repoint
+# DATA_DIR get an isolated images directory too.
+def images_dir() -> Path:
+    return DATA_DIR / "images"
+
+
+# Only these MIME types are ever served; anything else is stored as .png.
+_IMAGE_EXTENSIONS = {
+    "image/png": "png",
+    "image/jpeg": "jpg",
+    "image/webp": "webp",
+}
+
+
+def image_file_path(image_id: str, mime: str) -> Path:
+    return images_dir() / f"{image_id}.{_IMAGE_EXTENSIONS.get(mime, 'png')}"
+
 _session_lock = threading.Lock()
 _conn: sqlite3.Connection | None = None
 
@@ -101,8 +119,22 @@ def _init_schema(conn: sqlite3.Connection) -> None:
             PRIMARY KEY (user_id, draft_id)
         );
 
+        CREATE TABLE IF NOT EXISTS images (
+            id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+            mime TEXT NOT NULL,
+            size_bytes INTEGER NOT NULL DEFAULT 0,
+            width INTEGER,
+            height INTEGER,
+            prompt TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL
+        );
+
         CREATE INDEX IF NOT EXISTS idx_chats_user ON chats(user_id, created_at);
         CREATE INDEX IF NOT EXISTS idx_messages_chat ON messages(chat_id, id);
+        CREATE INDEX IF NOT EXISTS idx_images_chat ON images(chat_id);
+        CREATE INDEX IF NOT EXISTS idx_images_user ON images(user_id);
         """
     )
     cols = {row["name"] for row in conn.execute("PRAGMA table_info(messages)").fetchall()}
@@ -472,11 +504,23 @@ def rename_chat(user_id: str, chat_id: str, title: str) -> bool:
 
 def delete_chat(user_id: str, chat_id: str) -> bool:
     conn = get_conn()
+    doomed = conn.execute(
+        "SELECT id, mime FROM images WHERE chat_id = :chat_id AND user_id = :user_id",
+        {"chat_id": chat_id, "user_id": user_id},
+    ).fetchall()
     cur = conn.execute(
         "DELETE FROM chats WHERE id = :id AND user_id = :user_id",
         {"id": chat_id, "user_id": user_id},
     )
     conn.commit()
+    if cur.rowcount > 0:
+        # Image rows go with the chat via ON DELETE CASCADE; the files need
+        # explicit cleanup so deleted chats leave no orphan bytes behind.
+        for row in doomed:
+            try:
+                image_file_path(row["id"], row["mime"]).unlink(missing_ok=True)
+            except OSError:
+                pass
     return cur.rowcount > 0
 
 
@@ -572,3 +616,55 @@ def set_chat_title_if_default(chat_id: str, title: str) -> None:
         {"title": title, "now": _now(), "chat_id": chat_id},
     )
     conn.commit()
+
+
+# ---------- generated images ----------
+
+def create_image(
+    user_id: str,
+    chat_id: str,
+    data: bytes,
+    mime: str = "image/png",
+    width: int | None = None,
+    height: int | None = None,
+    prompt: str = "",
+) -> dict:
+    """Persist generated image bytes and return the metadata row as a dict.
+
+    Image bytes are the server's source of truth: messages only carry a small
+    {"type": "image", "imageId": ...} part, so base64 never flows through the
+    full-history sync payloads.
+    """
+    image_id = uuid.uuid4().hex
+    images_dir().mkdir(parents=True, exist_ok=True)
+    image_file_path(image_id, mime).write_bytes(data)
+    conn = get_conn()
+    conn.execute(
+        "INSERT INTO images (id, user_id, chat_id, mime, size_bytes, width,"
+        " height, prompt, created_at)"
+        " VALUES (:id, :user_id, :chat_id, :mime, :size_bytes, :width,"
+        " :height, :prompt, :created_at)",
+        {
+            "id": image_id,
+            "user_id": user_id,
+            "chat_id": chat_id,
+            "mime": mime,
+            "size_bytes": len(data),
+            "width": width,
+            "height": height,
+            "prompt": prompt,
+            "created_at": _now(),
+        },
+    )
+    conn.commit()
+    created = get_image(user_id, image_id)
+    assert created is not None
+    return dict(created)
+
+
+def get_image(user_id: str, image_id: str) -> sqlite3.Row | None:
+    """User-scoped lookup: another user's image (or a bogus id) is a miss."""
+    return get_conn().execute(
+        "SELECT * FROM images WHERE id = :id AND user_id = :user_id",
+        {"id": image_id, "user_id": user_id},
+    ).fetchone()

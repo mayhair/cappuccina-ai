@@ -56,6 +56,72 @@ function draftFromTool(tool) {
   }
 }
 
+// A generate_image result is a machine-readable pointer at the saved picture
+// (see backend/app/main.py); the picture itself renders as an image card
+// below the message, so the thinking panel only needs a one-liner.
+function imageFromPart(part) {
+  if (part?.type !== 'image' || typeof part.imageId !== 'string' || !part.imageId) {
+    return null
+  }
+  return part
+}
+
+function imageResultSummary(tool) {
+  if (tool?.name !== 'generate_image' || typeof tool.result !== 'string') return null
+  try {
+    const data = JSON.parse(tool.result)
+    return data?.status === 'image_generated' && data.image_id
+      ? 'Picture ready — see below ✨'
+      : null
+  } catch {
+    return null
+  }
+}
+
+function ImageCard({ image }) {
+  const [open, setOpen] = useState(false)
+  const src = `/api/v1/images/${image.imageId}`
+  const alt = image.prompt ? `Picture Cappuccina drew: ${image.prompt}` : 'Picture Cappuccina drew'
+  return (
+    <figure className="image-card">
+      <button
+        type="button"
+        className="image-card-frame"
+        onClick={() => setOpen(true)}
+        aria-label="View picture full size"
+      >
+        <img
+          src={src}
+          alt={alt}
+          loading="lazy"
+          width={image.width ?? undefined}
+          height={image.height ?? undefined}
+        />
+      </button>
+      {image.prompt && <figcaption className="image-card-caption">{image.prompt}</figcaption>}
+      {open && (
+        <div
+          className="image-lightbox"
+          role="dialog"
+          aria-modal="true"
+          aria-label={alt}
+          onClick={() => setOpen(false)}
+        >
+          <img src={src} alt={alt} />
+          <button
+            type="button"
+            className="image-lightbox-close"
+            onClick={() => setOpen(false)}
+            aria-label="Close full-size picture"
+          >
+            ×
+          </button>
+        </div>
+      )}
+    </figure>
+  )
+}
+
 function DraftCard({ draft, onSent }) {
   const initial = { to: draft.to, subject: draft.subject, body: draft.body }
   const [saved, setSaved] = useState(initial) // last persisted contents
@@ -266,7 +332,7 @@ function ToolCallBlock({ tool }) {
           <div className="tool-section">
             <div className="tool-section-label">Result</div>
             <div className="tool-result">
-              <EmojiText text={tool.result ?? 'Running…'} />
+              {imageResultSummary(tool) ?? <EmojiText text={tool.result ?? 'Running…'} />}
               {tool.ok === false && ' (failed)'}
             </div>
           </div>
@@ -381,7 +447,10 @@ function RetryMessageButton({ onRetry }) {
 
 export function ChatWindow({ chat, user, isStreaming, draft, onDraft, onSend, onRetry, onDraftSent, inputRef, effort, onEffort, mode, subject, onMode }) {
   const listRef = useRef(null)
-  const scrollSig = chat.messages.map((m) => `${m.role}${m.content?.length ?? 0}`).join('|')
+  const scrollSig = chat.messages.map((m) => {
+    const images = (m.parts ?? []).filter((p) => p.type === 'image').map((p) => p.imageId).join(',')
+    return `${m.role}${m.content?.length ?? 0}${images}`
+  }).join('|')
 
   useEffect(() => {
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: 'smooth' })
@@ -411,6 +480,7 @@ export function ChatWindow({ chat, user, isStreaming, draft, onDraft, onSend, on
               ? (Array.isArray(m.parts) && m.parts.length ? m.parts : m.tools ?? [])
               : []
           const drafts = toolParts.map(draftFromTool).filter(Boolean)
+          const images = toolParts.map(imageFromPart).filter(Boolean)
           return (
             <div key={i} className={`msg-row ${m.role}${startsRun ? ' starts' : ''}`}>
               {m.role === 'assistant' ? (
@@ -441,6 +511,9 @@ export function ChatWindow({ chat, user, isStreaming, draft, onDraft, onSend, on
                   {m.content && !isActiveStream && (m.failed
                     ? <RetryMessageButton onRetry={onRetry} />
                     : <CopyMessageButton text={m.content} />)}
+                  {images.map((img) => (
+                    <ImageCard key={img.imageId} image={img} />
+                  ))}
                   {!isActiveStream && drafts.map((d, di) => (
                     <DraftCard
                       key={d.draft_id ?? di}

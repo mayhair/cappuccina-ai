@@ -9,6 +9,11 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 BRAVE_API_KEY = os.getenv("BRAVE_API_KEY", "")
 MODEL_ID = os.getenv("MODEL_ID", "gpt-5.6-luna")
 
+# Image generation (generate_image agent tool). The model must return images
+# as base64; both the returned bytes and their dimensions are persisted.
+IMAGE_MODEL_ID = os.getenv("IMAGE_MODEL_ID", "gpt-image-2.5-flare")
+IMAGE_SIZE = os.getenv("IMAGE_SIZE", "1024x1024")
+
 # ---------- Google OAuth ----------
 GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "")
 GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET", "")

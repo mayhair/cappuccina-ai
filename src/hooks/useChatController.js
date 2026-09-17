@@ -232,6 +232,18 @@ export function useChatController(enabled) {
             ),
           }))
         },
+        onImage: (image) => {
+          // A saved server-side image; only the reference travels with the
+          // history, so the next turn's full-history sync stays small.
+          const part = {
+            type: 'image',
+            imageId: image.imageId,
+            prompt: image.prompt ?? '',
+            width: image.width ?? null,
+            height: image.height ?? null,
+          }
+          patchAssistant(chatId, (m) => ({ parts: [...(m.parts ?? []), part] }))
+        },
         onTitle: (title) => applyTitle(chatId, title),
         onDone: () => {
           if (streamSeq.current === seq) setStatus('idle')

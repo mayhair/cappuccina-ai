@@ -1,3 +1,4 @@
+import base64
 import json
 
 import httpx
@@ -5,8 +6,8 @@ from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import tool
 from sympy import Eq, solve, sympify
 
-from app import gmail
-from app.config import BRAVE_API_KEY
+from app import db, gmail
+from app.config import BRAVE_API_KEY, IMAGE_MODEL_ID, IMAGE_SIZE, OPENAI_API_KEY
 from app.google_oauth import GmailNotConnected
 
 
@@ -40,11 +41,82 @@ def brave_search(query: str) -> str:
 
 
 # ---------- Gmail tools ----------
-# The authenticated user id is injected by LangGraph through RunnableConfig;
-# it never appears in the tool schema the model sees.
+# The authenticated user id (and current chat id) are injected by LangGraph
+# through RunnableConfig; they never appear in the tool schema the model sees.
 
 def _user_id(config: RunnableConfig | None) -> str:
     return ((config or {}).get("configurable", {}) or {}).get("user_id", "")
+
+
+def _chat_id(config: RunnableConfig | None) -> str:
+    return ((config or {}).get("configurable", {}) or {}).get("chat_id", "")
+
+
+# ---------- image generation ----------
+
+def _image_dimensions() -> tuple[int | None, int | None]:
+    """Requested pixel size from config (e.g. '1024x1024'), for metadata."""
+    try:
+        width, height = IMAGE_SIZE.lower().split("x", 1)
+        return int(width), int(height)
+    except (ValueError, AttributeError):
+        return None, None
+
+
+def _openai_generate_image(prompt: str) -> tuple[bytes, str]:
+    """Call the OpenAI image API. Returns (raw image bytes, mime type)."""
+    with httpx.Client(timeout=120) as client:
+        resp = client.post(
+            "https://api.openai.com/v1/images/generations",
+            headers={
+                "Authorization": f"Bearer {OPENAI_API_KEY}",
+                "Content-Type": "application/json",
+            },
+            json={"model": IMAGE_MODEL_ID, "prompt": prompt, "size": IMAGE_SIZE},
+        )
+        resp.raise_for_status()
+        data = (resp.json().get("data") or [{}])[0]
+    if data.get("b64_json"):
+        return base64.b64decode(data["b64_json"]), "image/png"
+    if data.get("url"):
+        with httpx.Client(timeout=60) as client:
+            download = client.get(data["url"])
+            download.raise_for_status()
+        mime = download.headers.get("content-type", "image/png").split(";")[0].strip()
+        return download.content, mime or "image/png"
+    raise ValueError("the image API returned neither b64_json nor url")
+
+
+@tool
+def generate_image(prompt: str, config: RunnableConfig) -> str:
+    """Draw an original picture from a text description and show it in the chat. Use this whenever the user asks you to draw, paint, sketch, or make a picture or image of something. Describe the scene vividly in `prompt`: subject, style, colors, mood. The picture is saved automatically and appears in the chat — tell the user it's ready. Never invent an image_id yourself; the returned JSON describes the saved picture."""
+    user_id = _user_id(config)
+    chat_id = _chat_id(config)
+    if not user_id or not chat_id:
+        return "Drawing isn't available right now."
+    if not OPENAI_API_KEY:
+        return "Drawing isn't set up yet."
+    try:
+        raw, mime = _openai_generate_image(prompt)
+    except (httpx.HTTPError, ValueError) as exc:
+        return f"Couldn't draw that right now ({exc})."
+    width, height = _image_dimensions()
+    try:
+        image = db.create_image(
+            user_id, chat_id, raw,
+            mime=mime, width=width, height=height, prompt=prompt,
+        )
+    except OSError as exc:
+        return f"Couldn't save the drawing ({exc})."
+    return json.dumps(
+        {
+            "status": "image_generated",
+            "image_id": image["id"],
+            "prompt": prompt,
+            "width": image["width"],
+            "height": image["height"],
+        }
+    )
 
 
 def _gmail_unavailable(config: RunnableConfig | None) -> str | None:
@@ -109,12 +181,13 @@ def draft_email(to: str, subject: str, body: str, config: RunnableConfig) -> str
     return json.dumps({"status": "draft_created", **draft})
 
 
-ALL_TOOLS = [solve_equation, brave_search, search_emails, read_email, draft_email]
+ALL_TOOLS = [solve_equation, brave_search, generate_image, search_emails, read_email, draft_email]
 
 # Human-friendly names for UI display ("Called Tool: ...").
 TOOL_DISPLAY_NAMES = {
     "solve_equation": "Calculator",
     "brave_search": "Web Search",
+    "generate_image": "Drawing",
     "search_emails": "Inbox Search",
     "read_email": "Read Email",
     "draft_email": "Compose Email",
