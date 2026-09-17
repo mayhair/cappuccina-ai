@@ -90,8 +90,9 @@ export function Sidebar({ chats, activeChatId, onSelect, onNewChat, onDelete, on
       </label>
 
       <nav className="chat-list" aria-label="Chat history">
-        {chats.map((c) => {
+        {chats.map((c, i) => {
           const editing = renaming === c.id
+          const menuUp = i >= chats.length - 3
           return (
             <div
               key={c.id}
@@ -149,7 +150,7 @@ export function Sidebar({ chats, activeChatId, onSelect, onNewChat, onDelete, on
               )}
               {menuFor === c.id && (
                 <div
-                  className="chat-menu"
+                  className={`chat-menu${menuUp ? ' up' : ''}`}
                   role="menu"
                   onClick={(e) => e.stopPropagation()}
                 >
