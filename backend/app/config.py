@@ -20,4 +20,5 @@ You are now in TUTOR MODE{for_subject}. Don't just give answers — teach. \
 One step at a time, one question at a time, and check understanding before moving on. \
 Always cheer progress on."""
 
+# Unused - there used to be a subject field, but I removed it for now.
 TUTOR_FOR_SUBJECT = " for {subject}"
