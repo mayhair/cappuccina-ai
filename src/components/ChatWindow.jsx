@@ -490,7 +490,7 @@ export function ChatWindow({ chat, user, isStreaming, draft, onDraft, onSend, on
               ) : (
                 <div className="msg-avatar user" aria-hidden="true">
                   {user?.avatarUrl ? (
-                    <img src={user.avatarUrl} alt="" />
+                    <img src={user.avatarUrl} alt="" referrerPolicy="no-referrer" />
                   ) : (
                     (user?.displayName || '?').slice(0, 1).toUpperCase()
                   )}

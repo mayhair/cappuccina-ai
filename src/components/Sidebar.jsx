@@ -217,7 +217,7 @@ export function Sidebar({ chats, activeChatId, onSelect, onNewChat, onDelete, on
       >
         <div className="user-info">
           {user.avatarUrl ? (
-            <img className="user-avatar" src={user.avatarUrl} alt="" aria-hidden="true" />
+            <img className="user-avatar" src={user.avatarUrl} alt="" aria-hidden="true" referrerPolicy="no-referrer" />
           ) : (
             <span className="user-avatar" aria-hidden="true">
               {(user.displayName || '?').slice(0, 1).toUpperCase()}
