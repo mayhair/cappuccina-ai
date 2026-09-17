@@ -188,3 +188,24 @@ export function QuoteIcon(props) {
     </svg>
   )
 }
+
+export function GoogleIcon(props) {
+  // Official Google "G" mark, fixed brand colors (not currentColor).
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" {...props}>
+      <path fill="#4285F4" d="M23.04 12.26c0-.82-.07-1.6-.21-2.36H12v4.46h6.19a5.3 5.3 0 0 1-2.3 3.48v2.9h3.72c2.18-2 3.43-4.96 3.43-8.48Z" />
+      <path fill="#34A853" d="M12 24c3.1 0 5.7-1.03 7.6-2.79l-3.72-2.89c-1.03.69-2.35 1.1-3.88 1.1-2.98 0-5.5-2.01-6.4-4.72H1.75v2.98A11.99 11.99 0 0 0 12 24Z" />
+      <path fill="#FBBC05" d="M5.6 14.7A7.2 7.2 0 0 1 5.23 12c0-.94.16-1.85.37-2.7V6.32H1.75A12 12 0 0 0 .45 12c0 1.94.46 3.77 1.3 5.4l3.85-2.7Z" />
+      <path fill="#EA4335" d="M12 4.77c1.68 0 3.2.58 4.39 1.72l3.3-3.3C17.7 1.2 15.1 0 12 0 7.5 0 3.6 2.58 1.75 6.32l3.85 2.98C6.5 6.58 9.02 4.77 12 4.77Z" />
+    </svg>
+  )
+}
+
+export function MailIcon(props) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <rect x="3" y="5" width="18" height="14" rx="2.5" />
+      <path d="m4 7 8 6 8-6" />
+    </svg>
+  )
+}

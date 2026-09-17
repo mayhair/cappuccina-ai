@@ -5,7 +5,6 @@ import { ChatWindow } from './components/ChatWindow'
 import { ThemeToggle } from './components/ThemeToggle'
 import { SparkleIcon } from './components/Icons'
 import { Sky, LandingPage } from './components/LandingPage'
-import { AuthView } from './components/AuthView'
 import { AlphaGate } from './components/AlphaGate'
 import { SettingsDialog } from './components/SettingsDialog'
 import { getMe, logout } from './api/authClient'
@@ -41,9 +40,28 @@ export default function App() {
   }
 
   const [user, setUser] = useState(null)
-  const [authPhase, setAuthPhase] = useState('checking') // checking | landing | auth
-  const [authMode, setAuthMode] = useState('signup')
+  const [authPhase, setAuthPhase] = useState('checking') // checking | landing
+  const [authError, setAuthError] = useState('')
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [gmailNotice, setGmailNotice] = useState('')
+
+  // OAuth redirects land back on "/" with a short status in the query string.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const error = params.get('auth_error')
+    const gmail = params.get('gmail')
+    if (error) setAuthError(error)
+    if (gmail === 'error' || gmail === 'connected') {
+      setGmailNotice(gmail)
+      setSettingsOpen(true)
+    }
+    if (error || gmail) {
+      params.delete('auth_error')
+      params.delete('gmail')
+      const qs = params.toString()
+      window.history.replaceState({}, '', window.location.pathname + (qs ? `?${qs}` : ''))
+    }
+  }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -60,11 +78,6 @@ export default function App() {
   }, [])
 
   const chat = useChatController(Boolean(user), user?.id)
-
-  const handleSignedIn = (me) => {
-    setUser(me)
-    setAuthPhase('chat')
-  }
 
   const handleLogout = async () => {
     await logout()
@@ -83,30 +96,8 @@ export default function App() {
     return (
       <div className="landing">
         <Sky theme={theme} />
-        {authPhase === 'auth' ? (
-          <AuthView
-            mode={authMode}
-            theme={theme}
-            onTheme={setTheme}
-            onSignedIn={handleSignedIn}
-          />
-        ) : (
-          <>
-            <LandingPage
-              theme={theme}
-              onTheme={setTheme}
-              onStart={() => {
-                setAuthMode('signup')
-                setAuthPhase('auth')
-              }}
-              onLogin={() => {
-                setAuthMode('login')
-                setAuthPhase('auth')
-              }}
-            />
-            <AlphaGate />
-          </>
-        )}
+        <LandingPage theme={theme} onTheme={setTheme} error={authError} />
+        <AlphaGate />
       </div>
     )
   }
@@ -131,6 +122,7 @@ export default function App() {
     deleteChat,
     renameChat,
     clearTypingTitle,
+    markDraftSent,
     selectChat,
   } = chat
 
@@ -158,8 +150,13 @@ export default function App() {
       <SettingsDialog
         user={user}
         open={settingsOpen}
-        onClose={() => setSettingsOpen(false)}
+        onClose={() => {
+          setSettingsOpen(false)
+          setGmailNotice('')
+        }}
         onUserUpdated={setUser}
+        gmailNotice={gmailNotice}
+        onGmailNoticeClear={() => setGmailNotice('')}
       />
 
       <main className="main">
@@ -188,6 +185,7 @@ export default function App() {
           onDraft={setDraft}
           onSend={sendMessage}
           onRetry={retryMessage}
+          onDraftSent={(draftId) => markDraftSent(activeChatId, draftId)}
           inputRef={inputRef}
           effort={effort}
           onEffort={setEffort}

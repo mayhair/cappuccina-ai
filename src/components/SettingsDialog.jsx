@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
-import { PersonIcon } from './Icons'
-import { changePassword, updateProfile } from '../api/authClient'
+import { PersonIcon, MailIcon } from './Icons'
+import { updateProfile } from '../api/authClient'
+import { connectGmailUrl, disconnectGmail, gmailStatus } from '../api/gmailClient'
 
 function ProfileForm({ user, onUpdated }) {
   const [name, setName] = useState(user.displayName)
@@ -60,103 +61,96 @@ function ProfileForm({ user, onUpdated }) {
   )
 }
 
-function PasswordForm() {
-  const [current, setCurrent] = useState('')
-  const [next, setNext] = useState('')
-  const [confirm, setConfirm] = useState('')
+function GmailForm({ user, notice, onNoticeClear, onUserUpdated }) {
+  const [status, setStatus] = useState(null)
   const [error, setError] = useState('')
-  const [saved, setSaved] = useState(false)
   const [busy, setBusy] = useState(false)
 
-  const reset = () => {
-    setCurrent('')
-    setNext('')
-    setConfirm('')
-  }
-
-  const submit = async (e) => {
-    e.preventDefault()
-    if (busy) return
-    if (next !== confirm) {
-      setError("New passwords don't match")
-      return
+  useEffect(() => {
+    let cancelled = false
+    gmailStatus()
+      .then((s) => {
+        if (!cancelled) setStatus(s)
+      })
+      .catch(() => {
+        if (!cancelled) setStatus({ connected: false })
+      })
+    return () => {
+      cancelled = true
     }
+  }, [])
+
+  const disconnect = async () => {
     setBusy(true)
     setError('')
-    setSaved(false)
     try {
-      await changePassword({ currentPassword: current, newPassword: next })
-      setSaved(true)
-      reset()
+      await disconnectGmail()
+      setStatus({ connected: false })
+      onUserUpdated({ ...user, gmailConnected: false })
+      onNoticeClear()
     } catch (err) {
-      setError(err.message || 'Something went wrong — try again')
+      setError(err.message || 'Could not disconnect — try again')
     } finally {
       setBusy(false)
     }
   }
 
+  const connected = status?.connected ?? user.gmailConnected
+
   return (
-    <form className="settings-form" onSubmit={submit}>
-      <div className="settings-row">
-        <label className="settings-label" htmlFor="settings-current">
-          Current password
-        </label>
-        <input
-          id="settings-current"
-          className="settings-input"
-          type="password"
-          value={current}
-          onChange={(e) => setCurrent(e.target.value)}
-          autoComplete="current-password"
-          required
-        />
-      </div>
-      <div className="settings-row">
-        <label className="settings-label" htmlFor="settings-new">
-          New password
-        </label>
-        <input
-          id="settings-new"
-          className="settings-input"
-          type="password"
-          value={next}
-          onChange={(e) => setNext(e.target.value)}
-          autoComplete="new-password"
-          minLength={8}
-          required
-        />
-      </div>
-      <div className="settings-row">
-        <label className="settings-label" htmlFor="settings-confirm">
-          Confirm new password
-        </label>
-        <input
-          id="settings-confirm"
-          className="settings-input"
-          type="password"
-          value={confirm}
-          onChange={(e) => setConfirm(e.target.value)}
-          autoComplete="new-password"
-          minLength={8}
-          required
-        />
-      </div>
+    <div className="settings-form">
+      <p className="settings-hint">
+        Let Cappuccina read your inbox and write email drafts. She can never send
+        email — every draft waits for you to press Send.
+      </p>
+
+      {notice === 'connected' && (
+        <p className="settings-msg ok">Gmail connected ✓</p>
+      )}
+      {notice === 'error' && (
+        <p className="settings-msg error" role="alert">
+          Connecting Gmail didn&rsquo;t finish. Please try again.
+        </p>
+      )}
       {error && (
         <p className="settings-msg error" role="alert">
           {error}
         </p>
       )}
-      {saved && !error && <p className="settings-msg ok">Password changed ✓</p>}
+
+      <p className="settings-status">
+        <MailIcon />
+        {connected ? 'Gmail is connected' : 'Gmail is not connected'}
+      </p>
+
       <div className="settings-actions">
-        <button type="submit" className="settings-save" disabled={busy}>
-          {busy ? 'Saving…' : 'Change password'}
-        </button>
+        {connected ? (
+          <button
+            type="button"
+            className="settings-save"
+            onClick={disconnect}
+            disabled={busy || status === null}
+          >
+            {busy ? 'Disconnecting…' : 'Disconnect Gmail'}
+          </button>
+        ) : (
+          <a className="settings-save" href={connectGmailUrl}>
+            Connect Gmail
+          </a>
+        )}
       </div>
-    </form>
+    </div>
   )
 }
 
-export function SettingsDialog({ user, open, onClose, onUserUpdated }) {
+export function SettingsDialog({
+  user,
+  open,
+  onClose,
+  onUserUpdated,
+  gmailNotice = '',
+  onGmailNoticeClear = () => {},
+}) {
   const [section, setSection] = useState('account')
 
   useEffect(() => {
@@ -197,17 +191,44 @@ export function SettingsDialog({ user, open, onClose, onUserUpdated }) {
             <PersonIcon />
             Account
           </button>
+          <button
+            type="button"
+            className={`settings-nav-item${section === 'connections' ? ' active' : ''}`}
+            onClick={() => setSection('connections')}
+          >
+            <MailIcon />
+            Connections
+          </button>
         </aside>
         <div className="settings-pane">
-          <h3 className="settings-heading">Account</h3>
-          <section className="settings-section">
-            <h4>Profile</h4>
-            <ProfileForm user={user} onUpdated={onUserUpdated} />
-          </section>
-          <section className="settings-section">
-            <h4>Password</h4>
-            <PasswordForm />
-          </section>
+          {section === 'account' ? (
+            <>
+              <h3 className="settings-heading">Account</h3>
+              <section className="settings-section">
+                <h4>Profile</h4>
+                <ProfileForm user={user} onUpdated={onUserUpdated} />
+              </section>
+              <section className="settings-section">
+                <h4>Sign-in</h4>
+                <p className="settings-hint">
+                  You sign in with your Google account ({user.email}).
+                </p>
+              </section>
+            </>
+          ) : (
+            <>
+              <h3 className="settings-heading">Connections</h3>
+              <section className="settings-section">
+                <h4>Gmail</h4>
+                <GmailForm
+                  user={user}
+                  notice={gmailNotice}
+                  onNoticeClear={onGmailNoticeClear}
+                  onUserUpdated={onUserUpdated}
+                />
+              </section>
+            </>
+          )}
         </div>
       </div>
     </div>

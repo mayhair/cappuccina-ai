@@ -133,6 +133,37 @@ export function useChatController(enabled) {
 
   const clearTypingTitle = useCallback(() => setTypingTitleId(null), [])
 
+  // Stamp a draft as sent in local history so re-renders (e.g. switching chats)
+  // keep showing "Sent"; the server records the same on send for reloads.
+  const markDraftSent = useCallback((chatId, draftId) => {
+    const stamp = (list) =>
+      (list ?? []).map((tool) => {
+        if (!tool || tool.name !== 'draft_email' || typeof tool.result !== 'string') {
+          return tool
+        }
+        try {
+          if (JSON.parse(tool.result)?.draft_id !== draftId) return tool
+        } catch {
+          return tool
+        }
+        return { ...tool, sent: true }
+      })
+    setChats((all) =>
+      all.map((c) =>
+        c.id !== chatId
+          ? c
+          : {
+              ...c,
+              messages: c.messages.map((m) =>
+                m.role !== 'assistant'
+                  ? m
+                  : { ...m, parts: stamp(m.parts), tools: stamp(m.tools) },
+              ),
+            },
+      ),
+    )
+  }, [])
+
   const streamReply = useCallback((chatId, history, reasoning, mode, subject) => {
     setStatus('streaming')
     const seq = ++streamSeq.current
@@ -323,6 +354,7 @@ export function useChatController(enabled) {
     deleteChat,
     renameChat,
     clearTypingTitle,
+    markDraftSent,
     selectChat: setActiveChatId,
   }
 }

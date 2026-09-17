@@ -216,9 +216,13 @@ export function Sidebar({ chats, activeChatId, onSelect, onNewChat, onDelete, on
         onMouseLeave={isTouch ? undefined : () => setAccountMenu(false)}
       >
         <div className="user-info">
-          <span className="user-avatar" aria-hidden="true">
-            {(user.displayName || '?').slice(0, 1).toUpperCase()}
-          </span>
+          {user.avatarUrl ? (
+            <img className="user-avatar" src={user.avatarUrl} alt="" aria-hidden="true" />
+          ) : (
+            <span className="user-avatar" aria-hidden="true">
+              {(user.displayName || '?').slice(0, 1).toUpperCase()}
+            </span>
+          )}
           <span className="user-details">
             <span className="user-name">
               <EmojiText text={user.displayName} />

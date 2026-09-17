@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
-import { PersonIcon, SendIcon, ChevronIcon, WrenchIcon, CopyIcon, CheckIcon, RetryIcon } from './Icons'
+import { PersonIcon, SendIcon, ChevronIcon, WrenchIcon, CopyIcon, CheckIcon, RetryIcon, MailIcon, PencilIcon } from './Icons'
 import { EffortSelector } from './EffortSelector'
 import { ModeSwitch } from './ModeSwitch'
 import { Markdown } from '../lib/markdown'
 import { EmojiText } from '../lib/emoji'
+import { sendDraft, updateDraft } from '../api/gmailClient'
 
 export function StreamingDots({ label = 'Cappuccina is typing' }) {
   return (
@@ -39,6 +40,200 @@ function formatArgs(args) {
   } catch {
     return String(args)
   }
+}
+
+// A successful draft_email tool result carries JSON the UI turns into a
+// reviewable card with an explicit Send button.
+function draftFromTool(tool) {
+  if (tool?.name !== 'draft_email' || typeof tool.result !== 'string') return null
+  try {
+    const data = JSON.parse(tool.result)
+    if (!(data?.status === 'draft_created' && data.draft_id)) return null
+    // `sent` is stamped by the server on reload and by the client after sending.
+    return { ...data, sent: tool.sent === true || data.sent === true }
+  } catch {
+    return null
+  }
+}
+
+function DraftCard({ draft, onSent }) {
+  const initial = { to: draft.to, subject: draft.subject, body: draft.body }
+  const [saved, setSaved] = useState(initial) // last persisted contents
+  const [fields, setFields] = useState(initial)
+  const [editing, setEditing] = useState(false)
+  // A previously sent draft (from a reload) starts in the sent state.
+  const [state, setState] = useState(draft.sent ? 'sent' : 'idle')
+  const [message, setMessage] = useState('')
+
+  const dirty =
+    fields.to !== saved.to ||
+    fields.subject !== saved.subject ||
+    fields.body !== saved.body
+  const canSubmit = fields.to.trim().length > 0
+
+  const startEditing = () => {
+    setEditing(true)
+    setState('idle')
+    setMessage('')
+  }
+
+  const handleError = (err) => {
+    if (err.status === 409 && /already (?:been |have been )?sent|no longer exists/i.test(err.message)) {
+      setState('sent')
+      onSent?.(draft.draft_id)
+      return
+    }
+    setState('error')
+    setMessage(err.message || 'Something went wrong — try again')
+  }
+
+  const save = async () => {
+    if (!canSubmit || !dirty) return
+    setState('saving')
+    setMessage('')
+    try {
+      await updateDraft(draft.draft_id, fields)
+      setSaved(fields)
+      setEditing(false)
+      setState('idle')
+    } catch (err) {
+      handleError(err)
+    }
+  }
+
+  const send = async () => {
+    if (!canSubmit || state === 'sending' || state === 'sent') return
+    setState('sending')
+    setMessage('')
+    try {
+      // Picking up un-saved edits here means Send always sends what's on screen.
+      if (dirty) {
+        await updateDraft(draft.draft_id, fields)
+        setSaved(fields)
+      }
+      await sendDraft(draft.draft_id)
+      setState('sent')
+      onSent?.(draft.draft_id)
+    } catch (err) {
+      handleError(err)
+    }
+  }
+
+  const cancel = () => {
+    setFields(saved)
+    setEditing(false)
+    setState('idle')
+    setMessage('')
+  }
+
+  return (
+    <div className="draft-card">
+      <div className="draft-card-head">
+        <MailIcon />
+        Email draft
+        {!editing && state !== 'sent' && (
+          <button type="button" className="draft-edit" onClick={startEditing}>
+            <PencilIcon /> Edit
+          </button>
+        )}
+      </div>
+
+      {editing ? (
+        <div className="draft-edit-form">
+          <label className="draft-edit-field">
+            <span>To</span>
+            <input
+              type="email"
+              value={fields.to}
+              onChange={(e) => setFields({ ...fields, to: e.target.value })}
+              aria-label="Recipient"
+            />
+          </label>
+          <label className="draft-edit-field">
+            <span>Subject</span>
+            <input
+              type="text"
+              value={fields.subject}
+              onChange={(e) => setFields({ ...fields, subject: e.target.value })}
+              aria-label="Subject"
+            />
+          </label>
+          <label className="draft-edit-field">
+            <span>Message</span>
+            <textarea
+              rows={6}
+              value={fields.body}
+              onChange={(e) => setFields({ ...fields, body: e.target.value })}
+              aria-label="Message body"
+            />
+          </label>
+        </div>
+      ) : (
+        <>
+          <div className="draft-fields">
+            <div><b>To</b>{fields.to}</div>
+            <div><b>Subject</b>{fields.subject}</div>
+          </div>
+          <p
+            className="draft-body"
+            role="button"
+            tabIndex={0}
+            title="Click to edit"
+            onClick={startEditing}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault()
+                startEditing()
+              }
+            }}
+          >
+            {fields.body}
+          </p>
+        </>
+      )}
+
+      {state === 'error' && (
+        <p className="draft-note error draft-error">{message}</p>
+      )}
+
+      <div className="draft-actions">
+        {state === 'sent' ? (
+          <span className="draft-note ok"><CheckIcon /> Sent</span>
+        ) : editing ? (
+          <>
+            <button
+              type="button"
+              className="draft-send"
+              onClick={save}
+              disabled={state === 'saving' || !canSubmit || !dirty}
+            >
+              {state === 'saving' ? 'Saving…' : 'Save changes'}
+            </button>
+            <button
+              type="button"
+              className="draft-secondary"
+              onClick={cancel}
+              disabled={state === 'saving'}
+            >
+              Cancel
+            </button>
+          </>
+        ) : (
+          <>
+            <button
+              type="button"
+              className="draft-send"
+              onClick={send}
+              disabled={state === 'sending' || !canSubmit}
+            >
+              {state === 'sending' ? 'Sending…' : 'Send email'}
+            </button>
+            <span className="draft-note">Click the message to edit it</span>
+          </>
+        )}
+      </div>
+    </div>
+  )
 }
 
 function ToolCallBlock({ tool }) {
@@ -83,7 +278,11 @@ function ToolCallBlock({ tool }) {
 
 function ThinkingBlock({ message, streaming }) {
   const [open, setOpen] = useState(false)
-  const parts = thinkingParts(message)
+  // Draft calls are surfaced as their own card below the message, so hide the
+  // raw tool block to avoid showing the same email twice.
+  const parts = thinkingParts(message).filter(
+    (p) => !(p.type === 'tool' && draftFromTool(p)),
+  )
   if (parts.length === 0) return null
 
   // thinkingDone/thoughtSeconds are set when the live stream finishes. After a
@@ -180,7 +379,7 @@ function RetryMessageButton({ onRetry }) {
   )
 }
 
-export function ChatWindow({ chat, isStreaming, draft, onDraft, onSend, onRetry, inputRef, effort, onEffort, mode, subject, onMode }) {
+export function ChatWindow({ chat, isStreaming, draft, onDraft, onSend, onRetry, onDraftSent, inputRef, effort, onEffort, mode, subject, onMode }) {
   const listRef = useRef(null)
   const scrollSig = chat.messages.map((m) => `${m.role}${m.content?.length ?? 0}`).join('|')
 
@@ -207,6 +406,11 @@ export function ChatWindow({ chat, isStreaming, draft, onDraft, onSend, onRetry,
           const startsRun = !prev || prev.role !== m.role
           const awaitingReply = isStreaming && i === chat.messages.length - 1 && !m.content
           const isActiveStream = isStreaming && i === chat.messages.length - 1
+          const toolParts =
+            m.role === 'assistant'
+              ? (Array.isArray(m.parts) && m.parts.length ? m.parts : m.tools ?? [])
+              : []
+          const drafts = toolParts.map(draftFromTool).filter(Boolean)
           return (
             <div key={i} className={`msg-row ${m.role}${startsRun ? ' starts' : ''}`}>
               {m.role === 'assistant' ? (
@@ -233,6 +437,13 @@ export function ChatWindow({ chat, isStreaming, draft, onDraft, onSend, onRetry,
                   {m.content && !isActiveStream && (m.failed
                     ? <RetryMessageButton onRetry={onRetry} />
                     : <CopyMessageButton text={m.content} />)}
+                  {!isActiveStream && drafts.map((d, di) => (
+                    <DraftCard
+                      key={d.draft_id ?? di}
+                      draft={d}
+                      onSent={onDraftSent}
+                    />
+                  ))}
                 </div>
               ) : (
                 <div className="bubble">

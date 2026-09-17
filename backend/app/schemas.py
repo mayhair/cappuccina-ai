@@ -40,28 +40,8 @@ class ChatResponse(BaseModel):
     tool_calls: list[ToolCall] = []
 
 
-class RegisterRequest(BaseModel):
-    email: str
-    password: str
-    display_name: str = Field(alias="displayName")
-
-    model_config = {"populate_by_name": True}
-
-
-class LoginRequest(BaseModel):
-    email: str
-    password: str
-
-
 class UpdateProfileRequest(BaseModel):
     display_name: str = Field(alias="displayName")
-
-    model_config = {"populate_by_name": True}
-
-
-class ChangePasswordRequest(BaseModel):
-    current_password: str = Field(alias="currentPassword")
-    new_password: str = Field(alias="newPassword")
 
     model_config = {"populate_by_name": True}
 
@@ -70,8 +50,21 @@ class UserResponse(BaseModel):
     id: str
     email: str
     display_name: str = Field(alias="displayName")
+    avatar_url: str | None = Field(default=None, alias="avatarUrl")
+    gmail_connected: bool = Field(default=False, alias="gmailConnected")
 
     model_config = {"populate_by_name": True}
+
+
+class GmailStatusResponse(BaseModel):
+    connected: bool
+    scopes: list[str] = []
+
+
+class UpdateDraftRequest(BaseModel):
+    to: str
+    subject: str = ""
+    body: str
 
 
 class CreateChatRequest(BaseModel):

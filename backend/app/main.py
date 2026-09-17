@@ -3,29 +3,29 @@ import time
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import RedirectResponse
 from sse_starlette.sse import EventSourceResponse
 
 from agent.graph import GRAPH
 from agent.title import generate_title
 from agent.tools import TOOL_DISPLAY_NAMES
-from app import db
+from app import db, gmail, google_oauth
 from app.auth import (
     clear_session_cookie,
     current_user,
-    hash_password,
     session_token,
     set_session_cookie,
-    verify_password,
 )
+from app.config import APP_ORIGIN, GOOGLE_GMAIL_SCOPES, GOOGLE_LOGIN_SCOPES
+from app.google_oauth import GmailNotConnected
 from app.schemas import (
-    ChangePasswordRequest,
     ChatRequest,
     ChatResponse,
     CreateChatRequest,
-    LoginRequest,
-    RegisterRequest,
+    GmailStatusResponse,
     RenameChatRequest,
     ToolCall,
+    UpdateDraftRequest,
     UpdateProfileRequest,
     UserResponse,
 )
@@ -128,6 +128,27 @@ def _final_extras(messages) -> tuple[str, list[ToolCall], list[dict]]:
     return reasoning, tool_calls, parts
 
 
+def _mark_sent_drafts(chats: list[dict], sent_ids: set[str]) -> None:
+    """Flag stored draft_email tool parts whose draft has already been sent.
+
+    Done at read time so it survives full-history syncs from the client.
+    """
+    if not sent_ids:
+        return
+    for chat in chats:
+        for message in chat.get("messages", []):
+            for key in ("parts", "tools"):
+                for tool in message.get(key) or []:
+                    if not isinstance(tool, dict) or tool.get("name") != "draft_email":
+                        continue
+                    try:
+                        data = json.loads(tool.get("result") or "")
+                    except (ValueError, TypeError):
+                        continue
+                    if isinstance(data, dict) and data.get("draft_id") in sent_ids:
+                        tool["sent"] = True
+
+
 def _state(req: ChatRequest) -> dict:
     return {
         "messages": [(m.role, m.content) for m in req.messages],
@@ -139,30 +160,67 @@ def _state(req: ChatRequest) -> dict:
 
 # ---------- auth ----------
 
-@app.post("/api/v1/auth/register")
-async def register(req: RegisterRequest, response: Response) -> UserResponse:
-    email = req.email.strip().lower()
-    if not email or "@" not in email:
-        raise HTTPException(status_code=400, detail="Enter a valid email address")
-    if len(req.password) < 8:
-        raise HTTPException(status_code=400, detail="Password must be at least 8 characters")
-    name = req.display_name.strip() or email.split("@")[0]
-    if db.get_user_by_email(email) is not None:
-        raise HTTPException(status_code=409, detail="That email already has an account — try logging in")
-    user = db.create_user(email, name, hash_password(req.password))
-    set_session_cookie(response, db.create_session(user["id"]))
-    return UserResponse(id=user["id"], email=user["email"], displayName=name)
-
-
-@app.post("/api/v1/auth/login")
-async def login(req: LoginRequest, response: Response) -> UserResponse:
-    user = db.get_user_by_email(req.email.strip().lower())
-    if user is None or not verify_password(req.password, user["password_hash"]):
-        raise HTTPException(status_code=401, detail="Email or password doesn't match")
-    set_session_cookie(response, db.create_session(user["id"]))
+def _user_response(user) -> UserResponse:
     return UserResponse(
-        id=user["id"], email=user["email"], displayName=user["display_name"]
+        id=user["id"],
+        email=user["email"],
+        displayName=user["display_name"],
+        avatarUrl=user["avatar_url"] if "avatar_url" in user.keys() else None,
+        gmailConnected=db.get_google_grant(user["id"]) is not None,
     )
+
+
+@app.get("/api/v1/auth/google/start")
+async def google_start() -> RedirectResponse:
+    """Kick off sign-in: bounce the browser to Google's consent screen."""
+    if not google_oauth.is_configured():
+        return RedirectResponse(f"{APP_ORIGIN}/?auth_error=google_not_configured")
+    state = db.create_oauth_state("login")
+    url = google_oauth.build_auth_url(
+        state, GOOGLE_LOGIN_SCOPES, google_oauth.login_redirect_uri()
+    )
+    return RedirectResponse(url)
+
+
+@app.get("/api/v1/auth/google/callback")
+async def google_callback(request: Request) -> RedirectResponse:
+    error = request.query_params.get("error")
+    if error:
+        return RedirectResponse(f"{APP_ORIGIN}/?auth_error={error}")
+    if not db.consume_oauth_state(request.query_params.get("state", ""), "login"):
+        return RedirectResponse(f"{APP_ORIGIN}/?auth_error=invalid_state")
+    code = request.query_params.get("code", "")
+    if not code:
+        return RedirectResponse(f"{APP_ORIGIN}/?auth_error=missing_code")
+
+    try:
+        tokens = google_oauth.exchange_code(code, google_oauth.login_redirect_uri())
+        info = google_oauth.fetch_userinfo(tokens.get("access_token", ""))
+    except Exception:
+        return RedirectResponse(f"{APP_ORIGIN}/?auth_error=exchange_failed")
+
+    sub = info.get("sub", "")
+    email = (info.get("email") or "").strip().lower()
+    if not sub or not email or not info.get("email_verified", False):
+        return RedirectResponse(f"{APP_ORIGIN}/?auth_error=email_unverified")
+
+    user = db.get_user_by_google_sub(sub)
+    if user is None:
+        existing = db.get_user_by_email(email)
+        if existing is not None:
+            # Legacy email/password account: link this Google identity to it.
+            db.link_google_account(existing["id"], sub, info.get("picture"))
+            user = db.get_user_by_id(existing["id"])
+        else:
+            name = (info.get("name") or email.split("@")[0]).strip() or "friend"
+            user = db.create_google_user(email, name, sub, info.get("picture"))
+
+    if user is None:
+        return RedirectResponse(f"{APP_ORIGIN}/?auth_error=account_error")
+
+    response = RedirectResponse(f"{APP_ORIGIN}/")
+    set_session_cookie(response, db.create_session(user["id"]))
+    return response
 
 
 @app.post("/api/v1/auth/logout")
@@ -174,9 +232,7 @@ async def logout(request: Request, response: Response) -> dict:
 
 @app.get("/api/v1/auth/me")
 async def me(user=Depends(current_user)) -> UserResponse:
-    return UserResponse(
-        id=user["id"], email=user["email"], displayName=user["display_name"]
-    )
+    return _user_response(user)
 
 
 @app.patch("/api/v1/auth/me")
@@ -187,28 +243,106 @@ async def update_me(
     if not name:
         raise HTTPException(status_code=400, detail="Display name can't be empty")
     db.update_user_display_name(user["id"], name)
-    return UserResponse(id=user["id"], email=user["email"], displayName=name)
+    return _user_response(db.get_user_by_id(user["id"]))
 
 
-@app.post("/api/v1/auth/change-password")
-async def change_password(
-    req: ChangePasswordRequest, user=Depends(current_user)
-) -> dict:
-    if not verify_password(req.current_password, user["password_hash"]):
-        raise HTTPException(status_code=401, detail="Current password doesn't match")
-    if len(req.new_password) < 8:
-        raise HTTPException(
-            status_code=400, detail="New password must be at least 8 characters"
-        )
-    db.update_user_password(user["id"], hash_password(req.new_password))
+# ---------- Gmail (incremental consent) ----------
+
+@app.get("/api/v1/gmail/connect")
+async def gmail_connect(user=Depends(current_user)) -> RedirectResponse:
+    if not google_oauth.is_configured():
+        return RedirectResponse(f"{APP_ORIGIN}/?gmail=error")
+    state = db.create_oauth_state("gmail", user["id"])
+    url = google_oauth.build_auth_url(
+        state,
+        GOOGLE_GMAIL_SCOPES,
+        google_oauth.gmail_redirect_uri(),
+        prompt="consent",
+        offline=True,
+    )
+    return RedirectResponse(url)
+
+
+@app.get("/api/v1/gmail/callback")
+async def gmail_callback(request: Request, user=Depends(current_user)) -> RedirectResponse:
+    if request.query_params.get("error"):
+        return RedirectResponse(f"{APP_ORIGIN}/?gmail=error")
+    state = db.consume_oauth_state(request.query_params.get("state", ""), "gmail")
+    if state is None or state["user_id"] != user["id"]:
+        return RedirectResponse(f"{APP_ORIGIN}/?gmail=error")
+    code = request.query_params.get("code", "")
+    if not code:
+        return RedirectResponse(f"{APP_ORIGIN}/?gmail=error")
+    try:
+        tokens = google_oauth.exchange_code(code, google_oauth.gmail_redirect_uri())
+        google_oauth.store_grant(user["id"], tokens)
+    except Exception:
+        return RedirectResponse(f"{APP_ORIGIN}/?gmail=error")
+    return RedirectResponse(f"{APP_ORIGIN}/?gmail=connected")
+
+
+@app.get("/api/v1/gmail/status")
+async def gmail_status(user=Depends(current_user)) -> GmailStatusResponse:
+    grant = db.get_google_grant(user["id"])
+    if grant is None:
+        return GmailStatusResponse(connected=False)
+    return GmailStatusResponse(connected=True, scopes=grant["scopes"].split())
+
+
+@app.post("/api/v1/gmail/disconnect")
+async def gmail_disconnect(user=Depends(current_user)) -> dict:
+    db.delete_google_grant(user["id"])
     return {"ok": True}
+
+
+@app.patch("/api/v1/gmail/drafts/{draft_id}")
+async def gmail_update_draft(
+    draft_id: str, req: UpdateDraftRequest, user=Depends(current_user)
+) -> dict:
+    """Let the user edit a draft (add their name, tweak wording) before sending."""
+    if not req.to.strip():
+        raise HTTPException(status_code=400, detail="Add a recipient first")
+    try:
+        updated = gmail.update_draft(
+            user["id"], draft_id, req.to.strip(), req.subject, req.body
+        )
+    except GmailNotConnected as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    except gmail.DraftGone:
+        raise HTTPException(
+            status_code=409,
+            detail="That draft no longer exists — it may already have been sent",
+        )
+    except gmail.GmailApiError as exc:
+        raise HTTPException(status_code=502, detail=f"Gmail: {exc}")
+    return {"ok": True, **updated}
+
+
+@app.post("/api/v1/gmail/drafts/{draft_id}/send")
+async def gmail_send_draft(draft_id: str, user=Depends(current_user)) -> dict:
+    """The only path that actually sends mail — driven by the user's button."""
+    try:
+        sent = gmail.send_draft(user["id"], draft_id)
+    except GmailNotConnected as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    except gmail.DraftGone:
+        raise HTTPException(
+            status_code=409,
+            detail="That draft no longer exists — it may already have been sent",
+        )
+    except gmail.GmailApiError as exc:
+        raise HTTPException(status_code=502, detail=f"Gmail: {exc}")
+    db.mark_draft_sent(user["id"], draft_id, sent.get("message_id", ""))
+    return {"ok": True, **sent}
 
 
 # ---------- chats ----------
 
 @app.get("/api/v1/chats")
 async def list_chats(user=Depends(current_user)) -> list[dict]:
-    return db.list_chats(user["id"])
+    chats = db.list_chats(user["id"])
+    _mark_sent_drafts(chats, db.get_sent_draft_ids(user["id"]))
+    return chats
 
 
 @app.post("/api/v1/chats")
@@ -279,7 +413,9 @@ def _serialize_tool_calls(tool_calls: list[ToolCall]) -> list[dict]:
 async def chat(req: ChatRequest, user=Depends(current_user)) -> ChatResponse:
     _owned_chat_or_404(user, req)
     think_start = time.monotonic()
-    result = await GRAPH.ainvoke(_state(req))
+    result = await GRAPH.ainvoke(
+        _state(req), config={"configurable": {"user_id": user["id"]}}
+    )
     thought_seconds = time.monotonic() - think_start
     messages = result["messages"]
     reasoning, tool_calls, parts = _final_extras(messages)
@@ -313,7 +449,11 @@ async def chat_stream(req: ChatRequest, user=Depends(current_user)):
         tools_by_id: dict[str, dict] = {}
         parts: list[dict] = []
         parts_by_tool_id: dict[str, dict] = {}
-        async for event in GRAPH.astream_events(_state(req), version="v2"):
+        async for event in GRAPH.astream_events(
+            _state(req),
+            config={"configurable": {"user_id": user["id"]}},
+            version="v2",
+        ):
             kind = event["event"]
             if kind == "on_chat_model_start":
                 final_text = ""

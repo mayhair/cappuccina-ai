@@ -39,7 +39,9 @@ def _init_schema(conn: sqlite3.Connection) -> None:
             id TEXT PRIMARY KEY,
             email TEXT UNIQUE NOT NULL,
             display_name TEXT NOT NULL,
-            password_hash TEXT NOT NULL,
+            password_hash TEXT,
+            google_sub TEXT,
+            avatar_url TEXT,
             created_at TEXT NOT NULL
         );
 
@@ -73,6 +75,32 @@ def _init_schema(conn: sqlite3.Connection) -> None:
             created_at TEXT NOT NULL
         );
 
+        CREATE TABLE IF NOT EXISTS google_grants (
+            user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+            scopes TEXT NOT NULL DEFAULT '',
+            access_token TEXT NOT NULL DEFAULT '',
+            refresh_token TEXT NOT NULL DEFAULT '',
+            expires_at TEXT,
+            granted_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS oauth_states (
+            token TEXT PRIMARY KEY,
+            purpose TEXT NOT NULL,
+            user_id TEXT,
+            created_at TEXT NOT NULL,
+            expires_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS sent_drafts (
+            user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            draft_id TEXT NOT NULL,
+            message_id TEXT NOT NULL DEFAULT '',
+            sent_at TEXT NOT NULL,
+            PRIMARY KEY (user_id, draft_id)
+        );
+
         CREATE INDEX IF NOT EXISTS idx_chats_user ON chats(user_id, created_at);
         CREATE INDEX IF NOT EXISTS idx_messages_chat ON messages(chat_id, id);
         """
@@ -84,7 +112,49 @@ def _init_schema(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE messages ADD COLUMN thinking_done INTEGER NOT NULL DEFAULT 0")
     if "thought_seconds" not in cols:
         conn.execute("ALTER TABLE messages ADD COLUMN thought_seconds REAL")
+    _migrate_users_for_oauth(conn)
     conn.commit()
+
+
+def _migrate_users_for_oauth(conn: sqlite3.Connection) -> None:
+    """One-time rebuild making password_hash nullable and adding OAuth columns.
+
+    SQLite cannot drop a NOT NULL constraint in place, so legacy databases get
+    the documented create-copy-drop-rename dance. Chats/sessions survive because
+    their foreign keys resolve the ``users`` name at query time.
+    """
+    info = {row["name"]: row for row in conn.execute("PRAGMA table_info(users)").fetchall()}
+    if info and info.get("password_hash") and info["password_hash"]["notnull"] == 0:
+        # Already migrated: just backfill any missing OAuth columns.
+        for name, decl in (("google_sub", "TEXT"), ("avatar_url", "TEXT")):
+            if name not in info:
+                conn.execute(f"ALTER TABLE users ADD COLUMN {name} {decl}")
+        conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_google_sub ON users(google_sub)")
+        return
+    if not info:
+        conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_google_sub ON users(google_sub)")
+        return
+
+    conn.execute("PRAGMA foreign_keys=OFF")
+    conn.executescript(
+        """
+        CREATE TABLE users_new (
+            id TEXT PRIMARY KEY,
+            email TEXT UNIQUE NOT NULL,
+            display_name TEXT NOT NULL,
+            password_hash TEXT,
+            google_sub TEXT,
+            avatar_url TEXT,
+            created_at TEXT NOT NULL
+        );
+        INSERT INTO users_new (id, email, display_name, password_hash, google_sub, avatar_url, created_at)
+            SELECT id, email, display_name, password_hash, NULL, NULL, created_at FROM users;
+        DROP TABLE users;
+        ALTER TABLE users_new RENAME TO users;
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_users_google_sub ON users(google_sub);
+        """
+    )
+    conn.execute("PRAGMA foreign_keys=ON")
 
 
 def _now() -> str:
@@ -93,22 +163,27 @@ def _now() -> str:
 
 # ---------- users ----------
 
-def create_user(email: str, display_name: str, password_hash: str) -> dict:
+def create_google_user(
+    email: str, display_name: str, google_sub: str, avatar_url: str | None = None
+) -> sqlite3.Row:
     row = {
         "id": uuid.uuid4().hex,
         "email": email,
         "display_name": display_name,
-        "password_hash": password_hash,
+        "google_sub": google_sub,
+        "avatar_url": avatar_url,
         "created_at": _now(),
     }
     conn = get_conn()
     conn.execute(
-        "INSERT INTO users (id, email, display_name, password_hash, created_at)"
-        " VALUES (:id, :email, :display_name, :password_hash, :created_at)",
+        "INSERT INTO users (id, email, display_name, google_sub, avatar_url, created_at)"
+        " VALUES (:id, :email, :display_name, :google_sub, :avatar_url, :created_at)",
         row,
     )
     conn.commit()
-    return {k: row[k] for k in ("id", "email", "display_name")}
+    created = get_user_by_id(row["id"])
+    assert created is not None
+    return created
 
 
 def get_user_by_email(email: str) -> sqlite3.Row | None:
@@ -117,10 +192,27 @@ def get_user_by_email(email: str) -> sqlite3.Row | None:
     ).fetchone()
 
 
+def get_user_by_google_sub(google_sub: str) -> sqlite3.Row | None:
+    return get_conn().execute(
+        "SELECT * FROM users WHERE google_sub = :sub", {"sub": google_sub}
+    ).fetchone()
+
+
 def get_user_by_id(user_id: str) -> sqlite3.Row | None:
     return get_conn().execute(
         "SELECT * FROM users WHERE id = :id", {"id": user_id}
     ).fetchone()
+
+
+def link_google_account(
+    user_id: str, google_sub: str, avatar_url: str | None = None
+) -> None:
+    conn = get_conn()
+    conn.execute(
+        "UPDATE users SET google_sub = :sub, avatar_url = :avatar WHERE id = :id",
+        {"sub": google_sub, "avatar": avatar_url, "id": user_id},
+    )
+    conn.commit()
 
 
 def update_user_display_name(user_id: str, display_name: str) -> None:
@@ -132,13 +224,122 @@ def update_user_display_name(user_id: str, display_name: str) -> None:
     conn.commit()
 
 
-def update_user_password(user_id: str, password_hash: str) -> None:
+# ---------- Google grants (Gmail tokens) ----------
+
+def save_google_grant(
+    user_id: str,
+    scopes: str,
+    access_token: str,
+    refresh_token: str,
+    expires_at: str | None,
+) -> None:
+    now = _now()
     conn = get_conn()
     conn.execute(
-        "UPDATE users SET password_hash = :hash WHERE id = :id",
-        {"hash": password_hash, "id": user_id},
+        """
+        INSERT INTO google_grants
+            (user_id, scopes, access_token, refresh_token, expires_at, granted_at, updated_at)
+        VALUES
+            (:user_id, :scopes, :access_token, :refresh_token, :expires_at, :now, :now)
+        ON CONFLICT(user_id) DO UPDATE SET
+            scopes = :scopes,
+            access_token = :access_token,
+            refresh_token = CASE
+                WHEN :refresh_token = '' THEN google_grants.refresh_token
+                ELSE :refresh_token
+            END,
+            expires_at = :expires_at,
+            updated_at = :now
+        """,
+        {
+            "user_id": user_id,
+            "scopes": scopes,
+            "access_token": access_token,
+            "refresh_token": refresh_token,
+            "expires_at": expires_at,
+            "now": now,
+        },
     )
     conn.commit()
+
+
+def get_google_grant(user_id: str) -> sqlite3.Row | None:
+    return get_conn().execute(
+        "SELECT * FROM google_grants WHERE user_id = :user_id", {"user_id": user_id}
+    ).fetchone()
+
+
+def delete_google_grant(user_id: str) -> None:
+    conn = get_conn()
+    conn.execute("DELETE FROM google_grants WHERE user_id = :user_id", {"user_id": user_id})
+    conn.commit()
+
+
+# ---------- sent Gmail drafts ----------
+
+def mark_draft_sent(user_id: str, draft_id: str, message_id: str = "") -> None:
+    """Record that a draft was actually sent so the UI can stop offering Send."""
+    conn = get_conn()
+    conn.execute(
+        "INSERT INTO sent_drafts (user_id, draft_id, message_id, sent_at)"
+        " VALUES (:user_id, :draft_id, :message_id, :sent_at)"
+        " ON CONFLICT(user_id, draft_id) DO UPDATE SET"
+        " message_id = :message_id, sent_at = :sent_at",
+        {
+            "user_id": user_id,
+            "draft_id": draft_id,
+            "message_id": message_id,
+            "sent_at": _now(),
+        },
+    )
+    conn.commit()
+
+
+def get_sent_draft_ids(user_id: str) -> set[str]:
+    rows = get_conn().execute(
+        "SELECT draft_id FROM sent_drafts WHERE user_id = :user_id",
+        {"user_id": user_id},
+    ).fetchall()
+    return {row["draft_id"] for row in rows}
+
+
+# ---------- OAuth state (CSRF protection) ----------
+
+def create_oauth_state(purpose: str, user_id: str | None = None) -> str:
+    token = uuid.uuid4().hex + uuid.uuid4().hex
+    conn = get_conn()
+    conn.execute("DELETE FROM oauth_states WHERE expires_at < :now", {"now": _now()})
+    conn.execute(
+        "INSERT INTO oauth_states (token, purpose, user_id, created_at, expires_at)"
+        " VALUES (:token, :purpose, :user_id, :created_at, :expires_at)",
+        {
+            "token": token,
+            "purpose": purpose,
+            "user_id": user_id,
+            "created_at": _now(),
+            "expires_at": (
+                datetime.now(timezone.utc) + timedelta(minutes=10)
+            ).isoformat(),
+        },
+    )
+    conn.commit()
+    return token
+
+
+def consume_oauth_state(token: str, purpose: str) -> sqlite3.Row | None:
+    """Fetch and delete a state token in one shot; returns None if invalid."""
+    if not token:
+        return None
+    conn = get_conn()
+    row = conn.execute(
+        "SELECT * FROM oauth_states WHERE token = :token AND purpose = :purpose",
+        {"token": token, "purpose": purpose},
+    ).fetchone()
+    conn.execute("DELETE FROM oauth_states WHERE token = :token", {"token": token})
+    conn.commit()
+    if row is None or row["expires_at"] <= _now():
+        return None
+    return row
 
 
 # ---------- sessions ----------

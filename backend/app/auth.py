@@ -1,38 +1,15 @@
-"""Session-cookie authentication helpers (see app/db.py for storage)."""
+"""Session-cookie authentication helpers (see app/db.py for storage).
 
-import hashlib
-import secrets
+Sign-in itself happens through Google OAuth (app/google_oauth.py); this module
+only mints/clears the cookie and resolves the current user from a session.
+"""
 
 from fastapi import HTTPException, Request, Response
 
 from app import db
 
 SESSION_COOKIE = "cappuccina_session"
-_PBKDF2_ITERATIONS = 200_000
 
-
-# ---------- passwords ----------
-
-def hash_password(password: str) -> str:
-    salt = secrets.token_hex(16)
-    digest = hashlib.pbkdf2_hmac(
-        "sha256", password.encode(), salt.encode(), _PBKDF2_ITERATIONS
-    ).hex()
-    return f"{salt}${digest}"
-
-
-def verify_password(password: str, stored: str) -> bool:
-    try:
-        salt, digest = stored.split("$", 1)
-    except ValueError:
-        return False
-    candidate = hashlib.pbkdf2_hmac(
-        "sha256", password.encode(), salt.encode(), _PBKDF2_ITERATIONS
-    ).hex()
-    return secrets.compare_digest(candidate, digest)
-
-
-# ---------- session cookie ----------
 
 def _cookie_params() -> dict:
     return {
