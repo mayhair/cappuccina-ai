@@ -685,10 +685,11 @@ input { caret-color: var(--pink-strong); }
   place-items: center;
   width: 36px;
   margin-top: 0.15rem;
-  background: var(--avatar-user-bg);
-  color: var(--avatar-user-ink);
+  font-family: var(--font-display);
+  font-size: 17px;
+  color: #ffffff;
+  background: linear-gradient(140deg, var(--pink-strong), var(--lilac));
 }
-.msg-avatar.user svg { width: 74%; height: 74%; }
 
 .bubble {
   width: fit-content;
