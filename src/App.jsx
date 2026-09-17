@@ -180,6 +180,7 @@ export default function App() {
 
         <ChatWindow
           chat={activeChat}
+          user={user}
           isStreaming={isStreaming}
           draft={draft}
           onDraft={setDraft}

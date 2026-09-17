@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { PersonIcon, SendIcon, ChevronIcon, WrenchIcon, CopyIcon, CheckIcon, RetryIcon, MailIcon, PencilIcon } from './Icons'
+import { SendIcon, ChevronIcon, WrenchIcon, CopyIcon, CheckIcon, RetryIcon, MailIcon, PencilIcon } from './Icons'
 import { EffortSelector } from './EffortSelector'
 import { ModeSwitch } from './ModeSwitch'
 import { Markdown } from '../lib/markdown'
@@ -379,7 +379,7 @@ function RetryMessageButton({ onRetry }) {
   )
 }
 
-export function ChatWindow({ chat, isStreaming, draft, onDraft, onSend, onRetry, onDraftSent, inputRef, effort, onEffort, mode, subject, onMode }) {
+export function ChatWindow({ chat, user, isStreaming, draft, onDraft, onSend, onRetry, onDraftSent, inputRef, effort, onEffort, mode, subject, onMode }) {
   const listRef = useRef(null)
   const scrollSig = chat.messages.map((m) => `${m.role}${m.content?.length ?? 0}`).join('|')
 
@@ -419,7 +419,11 @@ export function ChatWindow({ chat, isStreaming, draft, onDraft, onSend, onRetry,
                 </div>
               ) : (
                 <div className="msg-avatar user" aria-hidden="true">
-                  <PersonIcon />
+                  {user?.avatarUrl ? (
+                    <img src={user.avatarUrl} alt="" />
+                  ) : (
+                    (user?.displayName || '?').slice(0, 1).toUpperCase()
+                  )}
                 </div>
               )}
               {m.role === 'assistant' ? (
