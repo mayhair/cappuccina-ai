@@ -67,6 +67,7 @@ def _init_schema(conn: sqlite3.Connection) -> None:
             content TEXT NOT NULL,
             reasoning TEXT NOT NULL DEFAULT '',
             tools TEXT NOT NULL DEFAULT '[]',
+            parts TEXT NOT NULL DEFAULT '[]',
             created_at TEXT NOT NULL
         );
 
@@ -74,6 +75,9 @@ def _init_schema(conn: sqlite3.Connection) -> None:
         CREATE INDEX IF NOT EXISTS idx_messages_chat ON messages(chat_id, id);
         """
     )
+    cols = {row["name"] for row in conn.execute("PRAGMA table_info(messages)").fetchall()}
+    if "parts" not in cols:
+        conn.execute("ALTER TABLE messages ADD COLUMN parts TEXT NOT NULL DEFAULT '[]'")
     conn.commit()
 
 
@@ -223,18 +227,23 @@ def list_messages_by_chat(chat_ids: list[str]) -> dict[str, list[dict]]:
     conn = get_conn()
     placeholders = ",".join("?" for _ in chat_ids)
     rows = conn.execute(
-        f"SELECT chat_id, role, content, reasoning, tools FROM messages"
+        f"SELECT chat_id, role, content, reasoning, tools, parts FROM messages"
         f" WHERE chat_id IN ({placeholders}) ORDER BY id",
         chat_ids,
     ).fetchall()
     grouped: dict[str, list[dict]] = {cid: [] for cid in chat_ids}
     for r in rows:
+        try:
+            parts = json.loads(r["parts"]) if r["parts"] else []
+        except (ValueError, TypeError):
+            parts = []
         grouped[r["chat_id"]].append(
             {
                 "role": r["role"],
                 "content": r["content"],
                 "reasoning": r["reasoning"],
                 "tools": json.loads(r["tools"]),
+                "parts": parts,
             }
         )
     return grouped
@@ -270,8 +279,8 @@ def replace_chat_messages(chat_id: str, messages: list[dict]) -> None:
     conn = get_conn()
     conn.execute("DELETE FROM messages WHERE chat_id = :chat_id", {"chat_id": chat_id})
     conn.executemany(
-        "INSERT INTO messages (chat_id, role, content, reasoning, tools, created_at)"
-        " VALUES (:chat_id, :role, :content, :reasoning, :tools, :created_at)",
+        "INSERT INTO messages (chat_id, role, content, reasoning, tools, parts, created_at)"
+        " VALUES (:chat_id, :role, :content, :reasoning, :tools, :parts, :created_at)",
         [
             {
                 "chat_id": chat_id,
@@ -279,6 +288,7 @@ def replace_chat_messages(chat_id: str, messages: list[dict]) -> None:
                 "content": m["content"],
                 "reasoning": m.get("reasoning", ""),
                 "tools": json.dumps(m.get("tools", [])),
+                "parts": json.dumps(m.get("parts", [])),
                 "created_at": _now(),
             }
             for m in messages
@@ -311,17 +321,19 @@ def update_chat_meta(chat_id: str, mode: str | None = None,
 
 
 def append_chat_message(chat_id: str, role: str, content: str,
-                        reasoning: str = "", tools: list | None = None) -> None:
+                        reasoning: str = "", tools: list | None = None,
+                        parts: list | None = None) -> None:
     conn = get_conn()
     conn.execute(
-        "INSERT INTO messages (chat_id, role, content, reasoning, tools, created_at)"
-        " VALUES (:chat_id, :role, :content, :reasoning, :tools, :created_at)",
+        "INSERT INTO messages (chat_id, role, content, reasoning, tools, parts, created_at)"
+        " VALUES (:chat_id, :role, :content, :reasoning, :tools, :parts, :created_at)",
         {
             "chat_id": chat_id,
             "role": role,
             "content": content,
             "reasoning": reasoning,
             "tools": json.dumps(tools or []),
+            "parts": json.dumps(parts or []),
             "created_at": _now(),
         },
     )

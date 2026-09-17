@@ -4,6 +4,11 @@ from pydantic import BaseModel, Field
 class Message(BaseModel):
     role: str
     content: str
+    # Optional thinking trace sent back by the client so stored history keeps
+    # the assistant's reasoning/tools/ordered parts across turns.
+    reasoning: str = ""
+    tools: list = []
+    parts: list = []
 
 
 class ChatRequest(BaseModel):

@@ -78,20 +78,43 @@ def _tool_result_text(output) -> str:
     return str(content)
 
 
-def _final_extras(messages) -> tuple[str, list[ToolCall]]:
+def _final_extras(messages) -> tuple[str, list[ToolCall], list[dict]]:
+    """Reasoning, tool calls, and the ordered interleaving of the two."""
     reasoning = ""
     results_by_id: dict[str, str] = {}
     pending: list[tuple[str, dict, str]] = []
+    parts: list[dict] = []
+    tools_by_part_id: dict[str, dict] = {}
     for msg in messages:
         content = getattr(msg, "content", "")
-        reasoning += _reasoning_text(content)
+        step_reasoning = _reasoning_text(content)
+        if step_reasoning:
+            reasoning += step_reasoning
+            parts.append({"type": "reasoning", "text": step_reasoning})
         for call in getattr(msg, "tool_calls", None) or []:
             call_id = call.get("id") or ""
-            pending.append((call.get("name", ""), call.get("args", {}), call_id))
+            name = call.get("name", "")
+            args = call.get("args", {})
+            pending.append((name, args, call_id))
+            part = {
+                "type": "tool",
+                "id": call_id,
+                "name": name,
+                "display": TOOL_DISPLAY_NAMES.get(name, name),
+                "args": args,
+                "result": "",
+                "ok": True,
+            }
+            parts.append(part)
+            if call_id:
+                tools_by_part_id[call_id] = part
         if msg.__class__.__name__ == "ToolMessage":
             results_by_id[getattr(msg, "tool_call_id", "") or ""] = _tool_result_text(
                 getattr(msg, "content", "")
             )
+            part = tools_by_part_id.get(getattr(msg, "tool_call_id", "") or "")
+            if part is not None:
+                part["result"] = _tool_result_text(getattr(msg, "content", ""))
     tool_calls = [
         ToolCall(
             name=name,
@@ -101,7 +124,7 @@ def _final_extras(messages) -> tuple[str, list[ToolCall]]:
         )
         for name, args, call_id in pending
     ]
-    return reasoning, tool_calls
+    return reasoning, tool_calls, parts
 
 
 def _state(req: ChatRequest) -> dict:
@@ -230,8 +253,9 @@ def _sync_history(chat_id: str, req: ChatRequest) -> None:
         {
             "role": m.role,
             "content": m.content,
-            "reasoning": "",
-            "tools": [],
+            "reasoning": m.reasoning or "",
+            "tools": m.tools or [],
+            "parts": m.parts or [],
         }
         for m in req.messages
     ]
@@ -253,13 +277,14 @@ async def chat(req: ChatRequest, user=Depends(current_user)) -> ChatResponse:
     _owned_chat_or_404(user, req)
     result = await GRAPH.ainvoke(_state(req))
     messages = result["messages"]
-    reasoning, tool_calls = _final_extras(messages)
+    reasoning, tool_calls, parts = _final_extras(messages)
     db.append_chat_message(
         req.chat_id,
         role="assistant",
         content=_text(messages[-1].content),
         reasoning=reasoning,
         tools=_serialize_tool_calls(tool_calls),
+        parts=parts,
     )
     return ChatResponse(
         content=_text(messages[-1].content),
@@ -278,6 +303,8 @@ async def chat_stream(req: ChatRequest, user=Depends(current_user)):
         final_text = ""
         reasoning_text = ""
         tools_by_id: dict[str, dict] = {}
+        parts: list[dict] = []
+        parts_by_tool_id: dict[str, dict] = {}
         async for event in GRAPH.astream_events(_state(req), version="v2"):
             kind = event["event"]
             if kind == "on_chat_model_start":
@@ -292,6 +319,10 @@ async def chat_stream(req: ChatRequest, user=Depends(current_user)):
                 reasoning = _reasoning_text(content)
                 if reasoning:
                     reasoning_text += reasoning
+                    if parts and parts[-1].get("type") == "reasoning":
+                        parts[-1]["text"] += reasoning
+                    else:
+                        parts.append({"type": "reasoning", "text": reasoning})
                     yield {
                         "event": "reasoning",
                         "data": json.dumps({"content": reasoning}),
@@ -310,6 +341,17 @@ async def chat_stream(req: ChatRequest, user=Depends(current_user)):
                     "result": "",
                     "ok": True,
                 }
+                part = {
+                    "type": "tool",
+                    "id": str(call_id),
+                    "name": name,
+                    "display": TOOL_DISPLAY_NAMES.get(name, name),
+                    "args": args,
+                    "result": None,
+                    "ok": None,
+                }
+                parts.append(part)
+                parts_by_tool_id[str(call_id)] = part
                 yield {
                     "event": "tool_call",
                     "data": json.dumps(
@@ -326,6 +368,10 @@ async def chat_stream(req: ChatRequest, user=Depends(current_user)):
                 output_text = _tool_result_text(event["data"].get("output", ""))
                 if event.get("run_id", "") in tools_by_id:
                     tools_by_id[event["run_id"]]["result"] = output_text
+                tool_part = parts_by_tool_id.get(str(event.get("run_id", "")))
+                if tool_part is not None:
+                    tool_part["result"] = output_text
+                    tool_part["ok"] = True
                 yield {
                     "event": "tool_result",
                     "data": json.dumps(
@@ -342,6 +388,10 @@ async def chat_stream(req: ChatRequest, user=Depends(current_user)):
                 if event.get("run_id", "") in tools_by_id:
                     tools_by_id[event["run_id"]]["result"] = error_text
                     tools_by_id[event["run_id"]]["ok"] = False
+                tool_part = parts_by_tool_id.get(str(event.get("run_id", "")))
+                if tool_part is not None:
+                    tool_part["result"] = error_text
+                    tool_part["ok"] = False
                 yield {
                     "event": "tool_result",
                     "data": json.dumps(
@@ -366,6 +416,7 @@ async def chat_stream(req: ChatRequest, user=Depends(current_user)):
                 content=final_text,
                 reasoning=reasoning_text,
                 tools=list(tools_by_id.values()),
+                parts=[json.loads(json.dumps(p)) for p in parts],
             )
 
     return EventSourceResponse(events(), ping=15)

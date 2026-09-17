@@ -139,7 +139,7 @@ export function useChatController(enabled) {
     ;(async () => {
       patchMessages(chatId, (messages) => [
         ...messages,
-        { role: 'assistant', content: '', reasoning: '', tools: [], thinkingDone: false, thoughtSeconds: null, failed: false },
+        { role: 'assistant', content: '', reasoning: '', tools: [], parts: [], thinkingDone: false, thoughtSeconds: null, failed: false },
       ])
       const streamStart = Date.now()
       let thoughtEnd = null
@@ -162,21 +162,40 @@ export function useChatController(enabled) {
           patchAssistant(chatId, (m) => ({ content: m.content + word }))
         },
         onReasoning: (piece) => {
-          patchAssistant(chatId, (m) => ({ reasoning: (m.reasoning ?? '') + piece }))
+          patchAssistant(chatId, (m) => {
+            const parts = [...(m.parts ?? [])]
+            const last = parts[parts.length - 1]
+            if (last && last.type === 'reasoning') {
+              parts[parts.length - 1] = { ...last, text: (last.text ?? '') + piece }
+            } else {
+              parts.push({ type: 'reasoning', text: piece })
+            }
+            return { parts, reasoning: (m.reasoning ?? '') + piece }
+          })
         },
         onToolCall: (call) => {
+          const tool = {
+            type: 'tool',
+            id: call.id,
+            name: call.name,
+            display: call.display || call.name,
+            args: call.args ?? null,
+            label: call.label ?? null,
+            result: null,
+            ok: null,
+          }
           patchAssistant(chatId, (m) => ({
-            tools: [...(m.tools ?? []), {
-              id: call.id,
-              name: call.name,
-              display: call.display || call.name,
-              result: null,
-              ok: null,
-            }],
+            parts: [...(m.parts ?? []), tool],
+            tools: [...(m.tools ?? []), { ...tool }],
           }))
         },
         onToolResult: (result) => {
           patchAssistant(chatId, (m) => ({
+            parts: (m.parts ?? []).map((p) =>
+              p.type === 'tool' && p.id === result.id
+                ? { ...p, result: result.content, ok: result.ok }
+                : p,
+            ),
             tools: (m.tools ?? []).map((t) =>
               t.id === result.id ? { ...t, result: result.content, ok: result.ok } : t,
             ),

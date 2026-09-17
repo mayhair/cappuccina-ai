@@ -19,11 +19,72 @@ function formatThought(seconds) {
   return `Thought for ${shown} second${s === 1 ? '' : 's'}`
 }
 
-function ThinkingBlock({ message }) {
-  const [open, setOpen] = useState(false)
+function thinkingParts(message) {
+  // Ordered interleaving of reasoning + tool calls. Falls back to the legacy
+  // grouped shape (reasoning blob, then tools) for messages stored before parts.
+  if (Array.isArray(message.parts) && message.parts.length > 0) return message.parts
+  const out = []
   const reasoning = message.reasoning ?? ''
   const tools = message.tools ?? []
-  if (!reasoning && tools.length === 0) return null
+  if (reasoning) out.push({ type: 'reasoning', text: reasoning })
+  for (const t of tools) out.push({ type: 'tool', ...t })
+  return out
+}
+
+function formatArgs(args) {
+  if (args == null) return null
+  if (typeof args === 'string') return args
+  try {
+    return JSON.stringify(args, null, 2)
+  } catch {
+    return String(args)
+  }
+}
+
+function ToolCallBlock({ tool }) {
+  const [open, setOpen] = useState(false)
+  const running = tool.result == null
+  const argsText = formatArgs(tool.args)
+  return (
+    <div className="tool-call">
+      <button
+        type="button"
+        className="tool-call-head"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+      >
+        <WrenchIcon />
+        <span className="tool-title">
+          Called Tool: {tool.display || tool.name}
+          {running && <span className="tool-running"> · Running…</span>}
+        </span>
+        <ChevronIcon className={`chev${open ? ' open' : ''}`} />
+      </button>
+      {open && (
+        <div className="tool-body">
+          {argsText && (
+            <div className="tool-section">
+              <div className="tool-section-label">Input</div>
+              <pre className="tool-args">{argsText}</pre>
+            </div>
+          )}
+          <div className="tool-section">
+            <div className="tool-section-label">Result</div>
+            <div className="tool-result">
+              <EmojiText text={tool.result ?? 'Running…'} />
+              {tool.ok === false && ' (failed)'}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function ThinkingBlock({ message }) {
+  const [open, setOpen] = useState(false)
+  const parts = thinkingParts(message)
+  if (parts.length === 0) return null
 
   const done = message.thinkingDone && message.thoughtSeconds != null
   const label = done ? formatThought(message.thoughtSeconds) : 'Thinking...'
@@ -41,23 +102,15 @@ function ThinkingBlock({ message }) {
       </button>
       {open && (
         <div className="thinking-body">
-          {reasoning && (
-            <p className="thinking-reasoning">
-              <EmojiText text={reasoning} />
-            </p>
+          {parts.map((p, i) =>
+            p.type === 'tool' ? (
+              <ToolCallBlock key={p.id ?? `tool-${i}`} tool={p} />
+            ) : (
+              <p key={`r-${i}`} className="thinking-reasoning">
+                <EmojiText text={p.text ?? ''} />
+              </p>
+            ),
           )}
-          {tools.map((t) => (
-            <div key={t.id} className="tool-call">
-              <WrenchIcon />
-              <div className="tool-detail">
-                <div className="tool-title">Called Tool: {t.display || t.name}</div>
-                <div className="tool-result">
-                  <EmojiText text={t.result ?? 'Running…'} />
-                  {t.ok === false && ' (failed)'}
-                </div>
-              </div>
-            </div>
-          ))}
         </div>
       )}
     </div>
