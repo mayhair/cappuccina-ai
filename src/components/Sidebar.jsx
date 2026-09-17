@@ -290,14 +290,14 @@ export function Sidebar({ chats, activeChatId, onSelect, onNewChat, onDelete, on
               <img src="/plates/msg-avatar.png" alt="" />
             </div>
             <h2 id="delete-title">
-              <EmojiText text="Sip—one moment! ☕" />
+              <EmojiText text="Sip — one moment! ☕" />
             </h2>
             <p>
-              Are you <i>sure</i> you want to pour <strong>“{target.title}”</strong> down the drain? That chat will be gone <em>forever</em> — I can't get it back. <EmojiText text="💔" />
+              Are you <i>sure</i> you want to pour <strong>"{target.title}"</strong> down the drain? That chat will be gone <em>forever</em>, and I won't be able to get it back. <EmojiText text="💔" />
             </p>
             <div className="modal-actions">
               <button type="button" className="btn-keep" onClick={() => setPendingDelete(null)}>
-                Keep it, safe!
+                Nope, keep it!
               </button>
               <button
                 type="button"

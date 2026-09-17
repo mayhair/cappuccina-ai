@@ -26,9 +26,9 @@ export function LandingPage({ theme, onTheme, onStart, onLogin }) {
         </div>
 
         <div className="landing-copy">
-          <h1 className="landing-title">Hi! I&rsquo;m Ballerina Cappuccina</h1>
+          <h1 className="landing-title">Hi! I'm Ballerina Cappuccina</h1>
           <p className="landing-sub">
-            Your AI chat friend — ask me anything, or let&rsquo;s learn together
+            Your AI chat friend — ask me anything, or let's learn together
           </p>
 
           <div className="landing-actions">

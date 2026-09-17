@@ -102,7 +102,7 @@ export function EffortSelector({ effort, onChange, disabled }) {
             </div>
             <h2 id="effort-help-title">Let me think about that ☕</h2>
             <p>
-              Reasoning effort is how long I let myself think before I answer. Turn it up and I&apos;ll take my time — fewer silly mistakes, and usually a smarter, more helpful reply. Turn it down and I&apos;ll answer quickly, which is perfect for little things like &ldquo;what&apos;s 2+2?&rdquo;. For tricky questions — math, code, planning — give me a bit more effort and I&apos;ll do a much better job. The lazier the question, the lighter I can go! 💕
+              Reasoning effort is how long I let myself think before I answer. Turn it up and I'll take my time, making fewer silly mistakes and usually giving a smarter, more helpful reply. Turn it down and I'll answer quickly, which is perfect for little things like "what's 2+2?". For tricky questions, like math, code, or planning, give me a bit more effort and I'll do a much better job. The lazier the question, the lighter I can go! 💕
             </p>
             <div className="modal-actions">
               <button type="button" className="btn-gotit" onClick={() => setHelpOpen(false)}>

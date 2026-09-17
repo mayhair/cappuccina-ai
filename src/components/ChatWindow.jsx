@@ -133,11 +133,11 @@ export function ChatWindow({ chat, isStreaming, draft, onDraft, onSend, onRetry,
         {chat.messages.length === 0 && !isStreaming && (
           <div className="welcome" role="status">
             <img className="welcome-hero" src="/plates/welcome-hero.png" alt="Ballerina Cappuccina waving hello" />
-            <h1 className="welcome-title">Hi! I&apos;m Ballerina Cappuccina</h1>
+            <h1 className="welcome-title">Hi! I'm Ballerina Cappuccina</h1>
             {mode === 'tutor' ? (
-              <p className="welcome-sub">Pointe shoes on — tell me what you&apos;d like to learn</p>
+              <p className="welcome-sub">Pointe shoes on — tell me what you'd like to learn</p>
             ) : (
-              <p className="welcome-sub">Your AI chat friend — ask me anything, or let&apos;s learn together</p>
+              <p className="welcome-sub">Your AI chat friend — ask me anything, or let's learn together</p>
             )}
           </div>
         )}
