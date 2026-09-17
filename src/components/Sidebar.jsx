@@ -3,7 +3,7 @@ import { ChatIcon, TrashIcon, PlusIcon, SearchIcon, DotsIcon, PencilIcon, Logout
 import { TypewriterTitle } from './TypewriterTitle'
 import { EmojiText } from '../lib/emoji'
 
-export function Sidebar({ chats, activeChatId, onSelect, onNewChat, onDelete, onRename, query, onQuery, typingTitleId, onTitleTyped, user, onLogout }) {
+export function Sidebar({ chats, activeChatId, onSelect, onNewChat, onDelete, onRename, query, onQuery, typingTitleId, onTitleTyped, user, onLogout, onSettings }) {
   const [pendingDelete, setPendingDelete] = useState(null)
   const [menuFor, setMenuFor] = useState(null)
   const [renaming, setRenaming] = useState(null)
@@ -223,7 +223,10 @@ export function Sidebar({ chats, activeChatId, onSelect, onNewChat, onDelete, on
               type="button"
               role="menuitem"
               className="user-menu-item"
-              onClick={() => setAccountMenu(false)}
+              onClick={() => {
+                setAccountMenu(false)
+                onSettings()
+              }}
             >
               <GearIcon />
               Settings

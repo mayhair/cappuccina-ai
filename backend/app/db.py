@@ -113,6 +113,24 @@ def get_user_by_id(user_id: str) -> sqlite3.Row | None:
     ).fetchone()
 
 
+def update_user_display_name(user_id: str, display_name: str) -> None:
+    conn = get_conn()
+    conn.execute(
+        "UPDATE users SET display_name = :name WHERE id = :id",
+        {"name": display_name, "id": user_id},
+    )
+    conn.commit()
+
+
+def update_user_password(user_id: str, password_hash: str) -> None:
+    conn = get_conn()
+    conn.execute(
+        "UPDATE users SET password_hash = :hash WHERE id = :id",
+        {"hash": password_hash, "id": user_id},
+    )
+    conn.commit()
+
+
 # ---------- sessions ----------
 
 def create_session(user_id: str) -> str:

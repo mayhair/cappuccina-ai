@@ -2,9 +2,9 @@
 // Session lives in an HttpOnly cookie set by the server; every request just
 // needs credentials: 'include'.
 
-async function request(path, body) {
+async function request(path, { method = 'GET', body } = {}) {
   const res = await fetch(path, {
-    method: body ? 'POST' : 'GET',
+    method,
     headers: body ? { 'Content-Type': 'application/json' } : undefined,
     credentials: 'include',
     body: body ? JSON.stringify(body) : undefined,
@@ -28,9 +28,16 @@ async function request(path, body) {
 
 export const getMe = () => request('/api/v1/auth/me')
 export const register = ({ email, password, name }) =>
-  request('/api/v1/auth/register', { email, password, displayName: name })
+  request('/api/v1/auth/register', { body: { email, password, displayName: name } })
 export const login = ({ email, password }) =>
-  request('/api/v1/auth/login', { email, password })
+  request('/api/v1/auth/login', { body: { email, password } })
+export const updateProfile = ({ name }) =>
+  request('/api/v1/auth/me', { method: 'PATCH', body: { displayName: name } })
+export const changePassword = ({ currentPassword, newPassword }) =>
+  request('/api/v1/auth/change-password', {
+    method: 'POST',
+    body: { currentPassword, newPassword },
+  })
 
 export async function logout() {
   await fetch('/api/v1/auth/logout', {

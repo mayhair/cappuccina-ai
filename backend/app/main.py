@@ -17,6 +17,7 @@ from app.auth import (
     verify_password,
 )
 from app.schemas import (
+    ChangePasswordRequest,
     ChatRequest,
     ChatResponse,
     CreateChatRequest,
@@ -24,6 +25,7 @@ from app.schemas import (
     RegisterRequest,
     RenameChatRequest,
     ToolCall,
+    UpdateProfileRequest,
     UserResponse,
 )
 
@@ -151,6 +153,31 @@ async def me(user=Depends(current_user)) -> UserResponse:
     return UserResponse(
         id=user["id"], email=user["email"], displayName=user["display_name"]
     )
+
+
+@app.patch("/api/v1/auth/me")
+async def update_me(
+    req: UpdateProfileRequest, user=Depends(current_user)
+) -> UserResponse:
+    name = req.display_name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Display name can't be empty")
+    db.update_user_display_name(user["id"], name)
+    return UserResponse(id=user["id"], email=user["email"], displayName=name)
+
+
+@app.post("/api/v1/auth/change-password")
+async def change_password(
+    req: ChangePasswordRequest, user=Depends(current_user)
+) -> dict:
+    if not verify_password(req.current_password, user["password_hash"]):
+        raise HTTPException(status_code=401, detail="Current password doesn't match")
+    if len(req.new_password) < 8:
+        raise HTTPException(
+            status_code=400, detail="New password must be at least 8 characters"
+        )
+    db.update_user_password(user["id"], hash_password(req.new_password))
+    return {"ok": True}
 
 
 # ---------- chats ----------

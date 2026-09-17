@@ -44,6 +44,19 @@ class LoginRequest(BaseModel):
     password: str
 
 
+class UpdateProfileRequest(BaseModel):
+    display_name: str = Field(alias="displayName")
+
+    model_config = {"populate_by_name": True}
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str = Field(alias="currentPassword")
+    new_password: str = Field(alias="newPassword")
+
+    model_config = {"populate_by_name": True}
+
+
 class UserResponse(BaseModel):
     id: str
     email: str

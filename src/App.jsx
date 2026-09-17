@@ -5,6 +5,7 @@ import { ThemeToggle } from './components/ThemeToggle'
 import { SparkleIcon } from './components/Icons'
 import { Sky, LandingPage } from './components/LandingPage'
 import { AuthView } from './components/AuthView'
+import { SettingsDialog } from './components/SettingsDialog'
 import { getMe, logout } from './api/authClient'
 import { useChatController } from './hooks/useChatController'
 
@@ -23,6 +24,7 @@ export default function App() {
   const [user, setUser] = useState(null)
   const [authPhase, setAuthPhase] = useState('checking') // checking | landing | auth
   const [authMode, setAuthMode] = useState('signup')
+  const [settingsOpen, setSettingsOpen] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -127,6 +129,13 @@ export default function App() {
         onTitleTyped={clearTypingTitle}
         user={user}
         onLogout={handleLogout}
+        onSettings={() => setSettingsOpen(true)}
+      />
+      <SettingsDialog
+        user={user}
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        onUserUpdated={setUser}
       />
 
       <main className="main">
