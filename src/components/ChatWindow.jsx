@@ -491,6 +491,9 @@ export function ChatWindow({ chat, user, isStreaming, draft, onDraft, onSend, on
     if (!el) return
     el.style.height = 'auto'
     el.style.height = `${Math.min(el.scrollHeight, 200)}px`
+    const line = parseFloat(getComputedStyle(el).lineHeight) || 24
+    const multi = el.scrollHeight > line * 1.5 || el.value.includes('\n')
+    el.parentElement?.classList.toggle('expanded', multi)
   }, [draft])
 
   const handleComposerKeyDown = (e) => {

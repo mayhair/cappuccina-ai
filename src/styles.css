@@ -985,6 +985,7 @@ img.user-avatar {
   align-items: center;
   gap: 1.1rem;
 }
+.composer-row:has(.input.expanded) { align-items: flex-end; }
 .composer-meta {
   display: flex;
   justify-content: flex-end;
@@ -1029,12 +1030,15 @@ img.user-avatar {
   flex: 1;
   display: flex;
   align-items: center;
-  padding: 0.95rem 0 0.95rem 1.5rem;
+  padding: 0.95rem 1rem 0.95rem 1.5rem;
   border-radius: 999px;
   border: 1px solid var(--hairline);
   background: var(--field);
   box-shadow: var(--shadow);
+  overflow: hidden;
+  transition: border-radius 160ms ease;
 }
+.input.expanded { border-radius: 1.5rem; }
 .input textarea {
   border: none;
   outline: none;
@@ -1048,7 +1052,18 @@ img.user-avatar {
   resize: none;
   overflow-y: auto;
   max-height: 200px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar) transparent;
+  scrollbar-gutter: stable;
 }
+.input textarea::-webkit-scrollbar { width: 6px; }
+.input textarea::-webkit-scrollbar-track { background: transparent; }
+.input textarea::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: var(--scrollbar);
+}
+.input textarea::-webkit-scrollbar-button { display: none; }
+
 .input textarea::placeholder { color: var(--ink-faint); }
 .send {
   flex: none;
