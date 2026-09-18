@@ -267,16 +267,20 @@ function DraftCard({ draft, onSent }) {
           </div>
           <p
             className="draft-body"
-            role="button"
-            tabIndex={0}
-            title="Click to edit"
-            onClick={startEditing}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' || e.key === ' ') {
-                e.preventDefault()
-                startEditing()
-              }
-            }}
+            role={state === 'sent' ? undefined : 'button'}
+            tabIndex={state === 'sent' ? undefined : 0}
+            title={state === 'sent' ? undefined : 'Click to edit'}
+            onClick={state === 'sent' ? undefined : startEditing}
+            onKeyDown={
+              state === 'sent'
+                ? undefined
+                : (e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault()
+                      startEditing()
+                    }
+                  }
+            }
           >
             {fields.body}
           </p>
