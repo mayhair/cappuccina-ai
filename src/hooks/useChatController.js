@@ -35,6 +35,9 @@ export function makeChat() {
     mode: 'chat',
     subject: null,
     messages: [],
+    // A brand-new chat lives only in memory until the first message is sent,
+    // matching other AI chat apps that don't persist an empty conversation.
+    pending: true,
   }
 }
 
@@ -44,6 +47,7 @@ function normalizeChat(c) {
     mode: c.mode === 'tutor' ? 'tutor' : 'chat',
     subject: c.subject ?? null,
     tag: c.tag ?? (c.mode === 'tutor' ? 'TUTOR' : null),
+    pending: false,
   }
 }
 
@@ -73,6 +77,18 @@ export function useChatController(enabled) {
     setActiveChatId((cur) => (cur === localId ? created.id : cur))
   }, [])
 
+  // Persist a memory-only chat on first use. Returns the server id, which the
+  // caller uses for streaming; the local chat is re-keyed in place.
+  const persistChat = useCallback(
+    async (chat) => {
+      if (!chat.pending) return chat.id
+      const created = await createChatOnServer(chat.mode, chat.subject)
+      adoptServerChat(chat.id, created)
+      return created.id
+    },
+    [adoptServerChat],
+  )
+
   // Load chat history from the server (source of truth when signed in).
   useEffect(() => {
     if (!enabled) return
@@ -85,11 +101,9 @@ export function useChatController(enabled) {
           setChats(stored.map(normalizeChat))
           setActiveChatId(stored[0].id)
         } else {
-          // Fresh account: back the placeholder chat with a server-side one
-          const localId = chatsRef.current[0].id
-          const created = await createChatOnServer()
-          if (cancelled) return
-          adoptServerChat(localId, created)
+          // Fresh account: keep the empty placeholder local. It is only
+          // persisted once the user sends the first message.
+          setActiveChatId((cur) => cur ?? chatsRef.current[0]?.id ?? null)
         }
       } catch {
         // Backend unreachable — fall back to in-memory chats
@@ -99,7 +113,7 @@ export function useChatController(enabled) {
     return () => {
       cancelled = true
     }
-  }, [enabled, adoptServerChat])
+  }, [enabled])
 
   useEffect(() => {
     try {
@@ -282,18 +296,31 @@ export function useChatController(enabled) {
   const sendMessage = useCallback(() => {
     const text = draft.trim()
     if (!text || status !== 'idle') return
-    const chatId = activeChat.id
+    const chat = activeChat
     const userMessage = { role: 'user', content: text }
     const reasoning = EFFORTS.find((e) => e.label === effort)?.value ?? 'medium'
+    const history = [...chat.messages, userMessage]
 
-    patchMessages(chatId, (messages) => [...messages, userMessage])
+    patchMessages(chat.id, () => history)
     setDraft('')
-    streamReply(chatId, [...activeChat.messages, userMessage], reasoning, activeChat.mode ?? 'chat', activeChat.subject ?? null)
-  }, [draft, status, activeChat, effort, patchMessages, streamReply])
+    ;(async () => {
+      try {
+        const chatId = await persistChat(chat)
+        streamReply(chatId, history, reasoning, chat.mode ?? 'chat', chat.subject ?? null)
+      } catch {
+        patchMessages(chat.id, (messages) => [
+          ...messages,
+          { role: 'assistant', content: 'Oh no, my espresso machine hiccuped. Try again in a moment! 💕', failed: true },
+        ])
+        setStatus('idle')
+      }
+    })()
+  }, [draft, status, activeChat, effort, patchMessages, streamReply, persistChat])
 
   const retryMessage = useCallback(() => {
     if (status !== 'idle') return
-    const messages = activeChat.messages
+    const chat = activeChat
+    const messages = chat.messages
     let lastUser = -1
     for (let i = messages.length - 1; i >= 0; i--) {
       if (messages[i].role === 'user') {
@@ -302,33 +329,40 @@ export function useChatController(enabled) {
       }
     }
     if (lastUser === -1) return
-    const chatId = activeChat.id
     const history = messages.slice(0, lastUser + 1)
     const reasoning = EFFORTS.find((e) => e.label === effort)?.value ?? 'medium'
-    patchMessages(chatId, () => history)
-    streamReply(chatId, history, reasoning, activeChat.mode ?? 'chat', activeChat.subject ?? null)
-  }, [status, activeChat, effort, patchMessages, streamReply])
+    patchMessages(chat.id, () => history)
+    ;(async () => {
+      try {
+        const chatId = await persistChat(chat)
+        streamReply(chatId, history, reasoning, chat.mode ?? 'chat', chat.subject ?? null)
+      } catch {
+        patchMessages(chat.id, (msgs) => [
+          ...msgs,
+          { role: 'assistant', content: 'Oh no, my espresso machine hiccuped. Try again in a moment! 💕', failed: true },
+        ])
+        setStatus('idle')
+      }
+    })()
+  }, [status, activeChat, effort, patchMessages, streamReply, persistChat])
 
   const newChat = useCallback(() => {
     const chat = makeChat()
-    setChats((all) => [chat, ...all])
+    // Only one pristine new chat can exist; drop any other empty ones.
+    setChats((all) => [chat, ...all.filter((c) => !c.pending || c.messages.length > 0)])
     setActiveChatId(chat.id)
     setDraft('')
     setStatus('idle')
     inputRef.current?.focus()
-    createChatOnServer()
-      .then((created) => adoptServerChat(chat.id, created))
-      .catch(() => {
-        // Creation failed — chat stays local-only and will 404 on send
-      })
-  }, [adoptServerChat])
+  }, [])
 
   const deleteChat = useCallback((id) => {
     setChats((all) => {
+      const target = all.find((c) => c.id === id)
       const remaining = all.filter((c) => c.id !== id)
       if (remaining.length === 0) return all
       setActiveChatId((current) => (current === id ? remaining[0].id : current))
-      deleteChatOnServer(id).catch(() => {})
+      if (!target?.pending) deleteChatOnServer(id).catch(() => {})
       return remaining
     })
   }, [])
@@ -342,9 +376,11 @@ export function useChatController(enabled) {
   }, [])
 
   const q = query.trim().toLowerCase()
+  // Empty not-yet-persisted chats stay out of the sidebar until their first message.
+  const listed = chats.filter((c) => !c.pending || c.messages.length > 0)
   const visibleChats = q
-    ? chats.filter((c) => c.title.toLowerCase().includes(q))
-    : chats
+    ? listed.filter((c) => c.title.toLowerCase().includes(q))
+    : listed
 
   return {
     chats: visibleChats,
