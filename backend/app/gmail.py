@@ -38,7 +38,11 @@ def _headers(user_id: str) -> dict:
 
 def _request(user_id: str, method: str, path: str, **kwargs) -> dict:
     resp = httpx.request(
-        method, f"{API_ROOT}{path}", headers=_headers(user_id), timeout=TIMEOUT, **kwargs
+        method,
+        f"{API_ROOT}{path}",
+        headers=_headers(user_id),
+        timeout=TIMEOUT,
+        **kwargs,
     )
     if resp.status_code == 404:
         raise GmailApiError(404, "Not found in this Gmail account")
@@ -48,11 +52,14 @@ def _request(user_id: str, method: str, path: str, **kwargs) -> dict:
             detail = resp.json().get("error", {}).get("message", "")
         except ValueError:
             detail = resp.text[:200]
-        raise GmailApiError(resp.status_code, detail or f"Gmail error {resp.status_code}")
+        raise GmailApiError(
+            resp.status_code, detail or f"Gmail error {resp.status_code}"
+        )
     return resp.json() if resp.content else {}
 
 
 # ---------- MIME helpers ----------
+
 
 def _decode_b64url(data: str) -> str:
     if not data:
@@ -110,9 +117,10 @@ def _truncate(text: str, limit: int) -> str:
 
 # ---------- public API ----------
 
+
 def search_messages(user_id: str, query: str, max_results: int = 5) -> list[dict]:
     query = (query or "").strip() or DEFAULT_QUERY
-    count = max(1, min(int(max_results or 5), MAX_RESULTS_CAP))
+    count = max(1, min(max_results or 5, MAX_RESULTS_CAP))
     listing = _request(
         user_id,
         "GET",
