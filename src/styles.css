@@ -736,6 +736,7 @@ img.user-avatar {
   to { opacity: 1; transform: none; }
 }
 .bubble p { margin: 0; }
+.msg-row.user .bubble p { white-space: pre-wrap; }
 .bubble-waiting {
   display: inline-flex;
   align-items: center;
@@ -1034,7 +1035,7 @@ img.user-avatar {
   background: var(--field);
   box-shadow: var(--shadow);
 }
-.input input {
+.input textarea {
   border: none;
   outline: none;
   background: transparent;
@@ -1042,9 +1043,13 @@ img.user-avatar {
   font-family: var(--font-body);
   font-size: clamp(15px, 1.35vw, 21px);
   font-weight: 600;
+  line-height: 1.35;
   color: var(--ink);
+  resize: none;
+  overflow-y: auto;
+  max-height: 200px;
 }
-.input input::placeholder { color: var(--ink-faint); }
+.input textarea::placeholder { color: var(--ink-faint); }
 .send {
   flex: none;
   width: clamp(56px, 4.3vw, 88px);
@@ -1912,14 +1917,19 @@ a.settings-save { text-decoration: none; display: inline-flex; align-items: cent
 .image-lightbox-close {
   position: fixed;
   top: 1rem;
-  right: 1.25rem;
+  left: 1.25rem;
   width: 2.5rem;
   height: 2.5rem;
   border: none;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.9);
-  color: #3a2233;
+  background: linear-gradient(140deg, var(--pink-strong), var(--pink));
+  color: #ffffff;
   font-size: 1.4rem;
   line-height: 1;
   cursor: pointer;
+  box-shadow: var(--glow-pink);
+  transition: transform 140ms ease, filter 140ms ease;
 }
+.image-lightbox-close:hover { transform: scale(1.08); filter: brightness(1.05); }
+.image-lightbox-close:active { transform: scale(0.96); }
+.image-lightbox-close:focus-visible { outline: 2px solid #ffffff; outline-offset: 2px; }

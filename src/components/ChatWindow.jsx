@@ -1,10 +1,16 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { SendIcon, ChevronIcon, WrenchIcon, CopyIcon, CheckIcon, RetryIcon, MailIcon, PencilIcon } from './Icons'
 import { EffortSelector } from './EffortSelector'
 import { ModeSwitch } from './ModeSwitch'
 import { Markdown } from '../lib/markdown'
 import { EmojiText } from '../lib/emoji'
 import { sendDraft, updateDraft } from '../api/gmailClient'
+
+const isTouchKeyboard = () =>
+  typeof window !== 'undefined' &&
+  typeof window.matchMedia === 'function' &&
+  window.matchMedia('(hover: none) and (pointer: coarse)').matches
 
 export function StreamingDots({ label = 'Cappuccina is typing' }) {
   return (
@@ -82,6 +88,21 @@ function ImageCard({ image }) {
   const [open, setOpen] = useState(false)
   const src = `/api/v1/images/${image.imageId}`
   const alt = image.prompt ? `Picture Cappuccina drew: ${image.prompt}` : 'Picture Cappuccina drew'
+
+  useEffect(() => {
+    if (!open) return
+    const onKey = (e) => {
+      if (e.key === 'Escape') setOpen(false)
+    }
+    window.addEventListener('keydown', onKey)
+    const prevOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => {
+      window.removeEventListener('keydown', onKey)
+      document.body.style.overflow = prevOverflow
+    }
+  }, [open])
+
   return (
     <figure className="image-card">
       <button
@@ -99,25 +120,29 @@ function ImageCard({ image }) {
         />
       </button>
       {image.prompt && <figcaption className="image-card-caption">{image.prompt}</figcaption>}
-      {open && (
-        <div
-          className="image-lightbox"
-          role="dialog"
-          aria-modal="true"
-          aria-label={alt}
-          onClick={() => setOpen(false)}
-        >
-          <img src={src} alt={alt} />
-          <button
-            type="button"
-            className="image-lightbox-close"
-            onClick={() => setOpen(false)}
-            aria-label="Close full-size picture"
+      {open &&
+        createPortal(
+          <div
+            className="image-lightbox"
+            role="dialog"
+            aria-modal="true"
+            aria-label={alt}
+            onClick={(e) => {
+              if (e.target === e.currentTarget) setOpen(false)
+            }}
           >
-            ×
-          </button>
-        </div>
-      )}
+            <img src={src} alt={alt} onClick={(e) => e.stopPropagation()} />
+            <button
+              type="button"
+              className="image-lightbox-close"
+              onClick={() => setOpen(false)}
+              aria-label="Close full-size picture"
+            >
+              ×
+            </button>
+          </div>,
+          document.body,
+        )}
     </figure>
   )
 }
@@ -447,6 +472,11 @@ function RetryMessageButton({ onRetry }) {
 
 export function ChatWindow({ chat, user, isStreaming, draft, onDraft, onSend, onRetry, onDraftSent, inputRef, effort, onEffort, mode, subject, onMode }) {
   const listRef = useRef(null)
+  const composerRef = useRef(null)
+  const setComposer = useCallback((el) => {
+    composerRef.current = el
+    if (inputRef) inputRef.current = el
+  }, [inputRef])
   const scrollSig = chat.messages.map((m) => {
     const images = (m.parts ?? []).filter((p) => p.type === 'image').map((p) => p.imageId).join(',')
     return `${m.role}${m.content?.length ?? 0}${images}`
@@ -455,6 +485,23 @@ export function ChatWindow({ chat, user, isStreaming, draft, onDraft, onSend, on
   useEffect(() => {
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: 'smooth' })
   }, [isStreaming, scrollSig])
+
+  useEffect(() => {
+    const el = composerRef.current
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = `${Math.min(el.scrollHeight, 200)}px`
+  }, [draft])
+
+  const handleComposerKeyDown = (e) => {
+    if (e.key !== 'Enter') return
+    // Let IME candidate selection finish before acting on Enter.
+    if (e.nativeEvent?.isComposing || e.keyCode === 229) return
+    // Shift+Enter and touch keyboards insert a line break instead of sending.
+    if (e.shiftKey || isTouchKeyboard()) return
+    e.preventDefault()
+    if (draft.trim() && !isStreaming) onSend()
+  }
 
   return (
     <>
@@ -543,13 +590,14 @@ export function ChatWindow({ chat, user, isStreaming, draft, onDraft, onSend, on
       >
         <div className="composer-row">
           <div className="input">
-            <input
-              type="text"
+            <textarea
+              rows={1}
               placeholder={mode === 'tutor' ? 'What shall we learn today?' : 'Ask me anything...'}
               aria-label="Message Cappuccina"
               value={draft}
               onChange={(e) => onDraft(e.target.value)}
-              ref={inputRef}
+              onKeyDown={handleComposerKeyDown}
+              ref={setComposer}
             />
           </div>
           <button className="send" type="submit" aria-label="Send message" disabled={!draft.trim() || isStreaming}>
