@@ -257,6 +257,21 @@ input { caret-color: var(--pink-strong); }
   font-weight: 600;
 }
 .search input::placeholder { color: var(--ink-faint); font-weight: 600; }
+.search input::-webkit-search-cancel-button { -webkit-appearance: none; appearance: none; }
+.search-clear {
+  flex: none;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--ink);
+  opacity: 0.55;
+  cursor: pointer;
+  transition: opacity 140ms ease;
+}
+.search-clear:hover { opacity: 1; }
+.search-clear svg { width: 0.85em; height: 0.85em; opacity: 1; }
 
 .chat-list {
   display: flex;

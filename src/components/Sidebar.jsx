@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { ChatIcon, TrashIcon, PlusIcon, SearchIcon, DotsIcon, PencilIcon, LogoutIcon, GearIcon } from './Icons'
+import { ChatIcon, TrashIcon, PlusIcon, SearchIcon, CloseIcon, DotsIcon, PencilIcon, LogoutIcon, GearIcon } from './Icons'
 import { TypewriterTitle } from './TypewriterTitle'
 import { EmojiText } from '../lib/emoji'
 
@@ -115,6 +115,19 @@ export function Sidebar({ chats, activeChatId, onSelect, onNewChat, onDelete, on
           onChange={(e) => onQuery(e.target.value)}
           aria-label="Search chats"
         />
+        {query && (
+          <button
+            type="button"
+            className="search-clear"
+            aria-label="Clear search"
+            onClick={() => {
+              onQuery('')
+              searchInputRef.current?.focus()
+            }}
+          >
+            <CloseIcon />
+          </button>
+        )}
       </label>
 
       <nav className="chat-list" aria-label="Chat history" ref={listRef}>
