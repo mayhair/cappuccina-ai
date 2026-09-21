@@ -51,7 +51,7 @@ Chat:
 - `app/gmail.py` — Gmail REST client (search/read/draft/send) over httpx
 - `app/db.py` — SQLite (users, sessions, chats, messages, google_grants, oauth_states)
 - `agent/graph.py` — LangGraph: `call_model -> (tool?) -> tools -> call_model ... -> END`
-- `agent/tools.py` — `solve_equation`, `web_search`, `search_emails`, `read_email`, `draft_email`
+- `agent/tools.py` — `solve_equation`, `web_search`, `read_webpage`, `search_emails`, `read_email`, `draft_email`
 - `agent/model.py` — model factory (OpenRouter, `MODEL_ID` env, `glm-5.3-flash` default)
 
 The authenticated user id reaches Gmail tools through LangGraph's

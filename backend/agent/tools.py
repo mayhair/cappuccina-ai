@@ -39,6 +39,41 @@ def web_search(query: str) -> str:
     )
 
 
+@tool
+def read_webpage(url: str, objective: str = "") -> str:
+    """Read a specific web page. Use when you need more detail than web_search's excerpts, or when the user shares a URL. Pass `objective` to get only the parts of the page relevant to what you're looking for; without it you get the whole page as markdown."""
+    client = Parallel(api_key=PARALLEL_API_KEY)
+    try:
+        if objective:
+            response = client.extract(
+                urls=[url],
+                objective=objective,
+                advanced_settings={"excerpt_settings": {"max_chars_per_result": 3000}},
+            )
+        else:
+            response = client.extract(
+                urls=[url],
+                advanced_settings={"full_content": {"max_chars_per_result": 10000}},
+            )
+    except Exception as exc:
+        return f"Couldn't read that page ({exc})."
+    if response.errors:
+        return f"Couldn't read that page ({response.errors[0].error_type})."
+    results = response.results or []
+    if not results:
+        return "No readable content found at that URL."
+    r = results[0]
+    header = f"{r.title}: {r.url}" if r.title else r.url
+    if r.publish_date:
+        header += f" (published {r.publish_date})"
+    body = "\n\n".join(r.excerpts or []) if objective else (r.full_content or "")
+    if not body:
+        return f"{header}\n\nNo readable content found."
+    if not objective and len(body) >= 10000:
+        body += "\n\n[Truncated — pass an `objective` to fetch only the relevant excerpts.]"
+    return f"{header}\n\n{body}"
+
+
 # ---------- Gmail tools ----------
 # The authenticated user id (and current chat id) are injected by LangGraph
 # through RunnableConfig; they never appear in the tool schema the model sees.
@@ -180,12 +215,13 @@ def draft_email(to: str, subject: str, body: str, config: RunnableConfig) -> str
     return json.dumps({"status": "draft_created", **draft})
 
 
-ALL_TOOLS = [solve_equation, web_search, generate_image, search_emails, read_email, draft_email]
+ALL_TOOLS = [solve_equation, web_search, read_webpage, generate_image, search_emails, read_email, draft_email]
 
 # Human-friendly names for UI display ("Called Tool: ...").
 TOOL_DISPLAY_NAMES = {
     "solve_equation": "Calculator",
     "web_search": "Web Search",
+    "read_webpage": "Read Webpage",
     "generate_image": "Drawing",
     "search_emails": "Inbox Search",
     "read_email": "Read Email",
