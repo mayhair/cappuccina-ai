@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { SendIcon, ChevronIcon, WrenchIcon, CopyIcon, CheckIcon, RetryIcon, MailIcon, PencilIcon, PaperclipIcon, FileIcon } from './Icons'
+import { SendIcon, ChevronIcon, WrenchIcon, CopyIcon, CheckIcon, RetryIcon, MailIcon, PencilIcon, PaperclipIcon, FileIcon, CalendarIcon } from './Icons'
 import { EffortSelector } from './EffortSelector'
 import { ModeSwitch } from './ModeSwitch'
 import { Markdown } from '../lib/markdown'
 import { EmojiText } from '../lib/emoji'
 import { sendDraft, updateDraft } from '../api/gmailClient'
+import { deleteEvent } from '../api/calendarClient'
 
 const isTouchKeyboard = () =>
   typeof window !== 'undefined' &&
@@ -119,6 +120,24 @@ function draftFromTool(tool) {
     if (!(data?.status === 'draft_created' && data.draft_id)) return null
     // `sent` is stamped by the server on reload and by the client after sending.
     return { ...data, sent: tool.sent === true || data.sent === true }
+  } catch {
+    return null
+  }
+}
+
+// A successful propose_event_deletion tool result carries JSON the UI turns
+// into a card with an explicit Delete button. The assistant never deletes on
+// its own — this button is the only way an event is removed.
+function deleteFromTool(tool) {
+  if (tool?.name !== 'propose_event_deletion' || typeof tool.result !== 'string') {
+    return null
+  }
+  try {
+    const data = JSON.parse(tool.result)
+    if (!(data?.status === 'delete_proposed' && data.event_id)) return null
+    // `deleted` is stamped by the server on reload and by the client after
+    // confirming.
+    return { ...data, deleted: tool.deleted === true || data.deleted === true }
   } catch {
     return null
   }
@@ -463,6 +482,75 @@ function DraftCard({ draft, onSent }) {
   )
 }
 
+function EventDeleteCard({ proposal, onDeleted }) {
+  // A previously confirmed deletion (from a reload) starts in the done state.
+  const [state, setState] = useState(proposal.deleted ? 'deleted' : 'idle')
+  const [message, setMessage] = useState('')
+
+  const handleError = (err) => {
+    if (
+      err.status === 409 &&
+      /already gone|no longer exists|deleted/i.test(err.message)
+    ) {
+      setState('deleted')
+      onDeleted?.(proposal.event_id)
+      return
+    }
+    setState('error')
+    setMessage(err.message || 'Something went wrong — try again')
+  }
+
+  const remove = async () => {
+    if (state === 'deleting' || state === 'deleted') return
+    setState('deleting')
+    setMessage('')
+    try {
+      await deleteEvent(proposal.event_id)
+      setState('deleted')
+      onDeleted?.(proposal.event_id)
+    } catch (err) {
+      handleError(err)
+    }
+  }
+
+  return (
+    <div className="draft-card">
+      <div className="draft-card-head">
+        <CalendarIcon />
+        Delete this event?
+      </div>
+
+      <div className="draft-fields">
+        <div><b>Event</b>{proposal.title}</div>
+        <div><b>When</b>{proposal.when}</div>
+        {proposal.location && <div><b>Where</b>{proposal.location}</div>}
+      </div>
+
+      {state === 'error' && (
+        <p className="draft-note error draft-error">{message}</p>
+      )}
+
+      <div className="draft-actions">
+        {state === 'deleted' ? (
+          <span className="draft-note ok"><CheckIcon /> Deleted</span>
+        ) : (
+          <>
+            <button
+              type="button"
+              className="draft-send danger"
+              onClick={remove}
+              disabled={state === 'deleting'}
+            >
+              {state === 'deleting' ? 'Deleting…' : 'Delete event'}
+            </button>
+            <span className="draft-note">Cappuccina won&rsquo;t delete it without you</span>
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
 function ToolCallBlock({ tool }) {
   const [open, setOpen] = useState(false)
   const running = tool.result == null
@@ -517,10 +605,10 @@ function ToolCallBlock({ tool }) {
 
 function ThinkingBlock({ parts: segmentParts, streaming, fallbackSeconds = null }) {
   const [open, setOpen] = useState(false)
-  // Draft calls are surfaced as their own card below the message, so hide the
-  // raw tool block to avoid showing the same email twice.
+  // Draft and deletion calls are surfaced as their own cards below the
+  // message, so hide the raw tool blocks to avoid showing them twice.
   const parts = segmentParts.filter(
-    (p) => !(p.type === 'tool' && draftFromTool(p)),
+    (p) => !(p.type === 'tool' && (draftFromTool(p) || deleteFromTool(p))),
   )
   if (parts.length === 0) return null
 
@@ -621,7 +709,7 @@ function RetryMessageButton({ onRetry }) {
   )
 }
 
-export function ChatWindow({ chat, user, isStreaming, draft, onDraft, onSend, onRetry, onDraftSent, inputRef, effort, onEffort, mode, subject, onMode, attachments = [], uploading = false, attachError = '', onAttach, onRemoveAttachment }) {
+export function ChatWindow({ chat, user, isStreaming, draft, onDraft, onSend, onRetry, onDraftSent, onEventDeleted, inputRef, effort, onEffort, mode, subject, onMode, attachments = [], uploading = false, attachError = '', onAttach, onRemoveAttachment }) {
   const listRef = useRef(null)
   const composerRef = useRef(null)
   const fileRef = useRef(null)
@@ -750,6 +838,7 @@ export function ChatWindow({ chat, user, isStreaming, draft, onDraft, onSend, on
               ? (Array.isArray(m.parts) && m.parts.length ? m.parts : m.tools ?? [])
               : []
           const drafts = toolParts.map(draftFromTool).filter(Boolean)
+          const proposals = toolParts.map(deleteFromTool).filter(Boolean)
           const images = toolParts.map(imageFromPart).filter(Boolean)
           const userAttachments =
             m.role === 'user'
@@ -807,6 +896,13 @@ export function ChatWindow({ chat, user, isStreaming, draft, onDraft, onSend, on
                       key={d.draft_id ?? di}
                       draft={d}
                       onSent={onDraftSent}
+                    />
+                  ))}
+                  {!isActiveStream && proposals.map((p, pi) => (
+                    <EventDeleteCard
+                      key={p.event_id ?? pi}
+                      proposal={p}
+                      onDeleted={onEventDeleted}
                     />
                   ))}
                 </div>

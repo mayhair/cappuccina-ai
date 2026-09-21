@@ -34,6 +34,15 @@ Gmail (incremental consent; tokens encrypted at rest):
 - `PATCH /api/v1/gmail/drafts/{draft_id}` — user edits a draft before sending
 - `POST /api/v1/gmail/drafts/{draft_id}/send` — the only path that actually sends mail
 
+Google Calendar (incremental consent; per-service grant):
+
+- `GET /api/v1/calendar/connect` / `GET /api/v1/calendar/callback` — 302 flow for `calendar.events`
+- `GET /api/v1/calendar/status`, `POST /api/v1/calendar/disconnect`
+- `POST /api/v1/calendar/events/{event_id}/delete` — the only path that deletes an event
+
+Each connected Google service has its own grant row, so Gmail and Calendar can
+be connected and disconnected independently.
+
 Chat:
 
 - `POST /api/v1/chat` — JSON `{chatId, messages, reasoning, mode, subject}` -> `{role, content, reasoning, tool_calls}`
@@ -49,12 +58,13 @@ Chat:
 - `app/auth.py` — session cookie + `current_user`
 - `app/google_oauth.py` — OAuth code flow, token encryption, refresh
 - `app/gmail.py` — Gmail REST client (search/read/draft/send) over httpx
+- `app/calendar.py` — Calendar REST client (list/read/create/update/delete) over httpx
 - `app/db.py` — SQLite (users, sessions, chats, messages, google_grants, oauth_states)
 - `agent/graph.py` — LangGraph: `call_model -> (tool?) -> tools -> call_model ... -> END`
-- `agent/tools.py` — `solve_equation`, `web_search`, `read_webpage`, `search_emails`, `read_email`, `draft_email`
+- `agent/tools.py` — `solve_equation`, `web_search`, `read_webpage`, `search_emails`, `read_email`, `draft_email`, `list_events`, `read_event`, `create_event`, `update_event`, `propose_event_deletion`
 - `agent/model.py` — model factory (OpenRouter, `MODEL_ID` env, `glm-5.3-flash` default)
 
-The authenticated user id reaches Gmail tools through LangGraph's
+The authenticated user id reaches the Google tools through LangGraph's
 `config={"configurable": {"user_id": ...}}`; tools declare a `RunnableConfig`
 parameter that is injected and hidden from the model's schema.
 

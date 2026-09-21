@@ -1,5 +1,7 @@
 import base64
 import json
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 import httpx
 from langchain_core.runnables import RunnableConfig
@@ -7,9 +9,9 @@ from langchain_core.tools import tool
 from parallel import Parallel
 from sympy import Eq, solve, sympify
 
-from app import db, gmail
+from app import calendar, db, gmail
 from app.config import IMAGE_MODEL_ID, IMAGE_SIZE, OPENAI_API_KEY, PARALLEL_API_KEY
-from app.google_oauth import GmailNotConnected
+from app.google_oauth import ServiceNotConnected
 
 
 # ponytail: sympify is eval-adjacent; output is text-only so risk is low. Add a symbols whitelist if tool input ever becomes structured/persistent.
@@ -202,7 +204,7 @@ def search_emails(query: str, config: RunnableConfig, max_results: int = 5) -> s
         return missing
     try:
         results = gmail.search_messages(_user_id(config), query, max_results)
-    except GmailNotConnected:
+    except ServiceNotConnected:
         return "Gmail isn't connected yet. Ask the user to connect it in Settings, then try again."
     except gmail.GmailApiError as exc:
         return f"Couldn't search the inbox ({exc})."
@@ -225,7 +227,7 @@ def read_email(message_id: str, config: RunnableConfig) -> str:
         return missing
     try:
         message = gmail.get_message(_user_id(config), message_id)
-    except GmailNotConnected:
+    except ServiceNotConnected:
         return "Gmail isn't connected yet. Ask the user to connect it in Settings, then try again."
     except gmail.GmailApiError as exc:
         return f"Couldn't read that email ({exc})."
@@ -243,7 +245,7 @@ def draft_email(to: str, subject: str, body: str, config: RunnableConfig) -> str
         return missing
     try:
         draft = gmail.create_draft(_user_id(config), to, subject, body)
-    except GmailNotConnected:
+    except ServiceNotConnected:
         return "Gmail isn't connected yet. Ask the user to connect it in Settings, then try again."
     except gmail.GmailApiError as exc:
         return f"Couldn't create the draft ({exc})."
@@ -251,6 +253,163 @@ def draft_email(to: str, subject: str, body: str, config: RunnableConfig) -> str
 
 
 ALL_TOOLS = [solve_equation, web_search, read_webpage, generate_image, read_attachment, search_emails, read_email, draft_email]
+
+
+# ---------- Calendar tools ----------
+
+CALENDAR_NOT_CONNECTED = (
+    "Google Calendar isn't connected yet. Ask the user to connect it in "
+    "Settings, then try again."
+)
+
+
+def _calendar_unavailable(config: RunnableConfig | None) -> str | None:
+    if not _user_id(config):
+        return "Google Calendar isn't available right now."
+    return None
+
+
+def _calendar_today(tz: str) -> str:
+    try:
+        zone = ZoneInfo(tz)
+    except Exception:
+        zone = ZoneInfo("UTC")
+    return datetime.now(zone).strftime("%A %d %B %Y")
+
+
+def _format_event_line(event: dict) -> str:
+    line = f"[{event['id']}] {event['title']} — {event['when']}"
+    if event.get("location"):
+        line += f" (at {event['location']})"
+    if event.get("recurring"):
+        line += " (repeating)"
+    return line
+
+
+@tool
+def list_events(config: RunnableConfig, start: str = "", end: str = "", query: str = "", max_results: int = 10) -> str:
+    """Look at the user's Google Calendar. Returns the events in a date range, each with an id you can pass to read_event, update_event or propose_event_deletion. With no arguments it lists the next 7 days. Use this whenever the user asks what's on their calendar, what they have coming up, or whether they're free. Dates use the user's own calendar timezone, which is stated in the result."""
+    missing = _calendar_unavailable(config)
+    if missing:
+        return missing
+    try:
+        days = calendar.list_events(
+            _user_id(config), start, end, query, max_results
+        )
+    except ServiceNotConnected:
+        return CALENDAR_NOT_CONNECTED
+    except ValueError as exc:
+        return f"I couldn't understand that date ({exc})."
+    except calendar.CalendarApiError as exc:
+        return f"Couldn't read the calendar ({exc})."
+    header = (
+        f"Today is {_calendar_today(days['timezone'])} in the user's calendar "
+        f"timezone ({days['timezone']}). Showing {days['start']} → {days['end']}."
+    )
+    if not days["events"]:
+        return f"{header}\n\nNo events in that range."
+    return header + "\n" + "\n".join(_format_event_line(e) for e in days["events"])
+
+
+@tool
+def read_event(event_id: str, config: RunnableConfig) -> str:
+    """Read one calendar event in full by its id (the bracketed id from list_events). Gives the title, time, location and any notes. Use this before changing an event so you know what it currently says."""
+    missing = _calendar_unavailable(config)
+    if missing:
+        return missing
+    try:
+        event = calendar.get_event(_user_id(config), event_id)
+    except ServiceNotConnected:
+        return CALENDAR_NOT_CONNECTED
+    except calendar.CalendarApiError as exc:
+        return f"Couldn't read that event ({exc})."
+    parts = [
+        f"{event['title']} — {event['when']}",
+    ]
+    if event.get("location"):
+        parts.append(f"Where: {event['location']}")
+    if event.get("recurring"):
+        parts.append("This is part of a repeating series.")
+    if event.get("description"):
+        parts.append(f"Notes: {event['description']}")
+    return "\n".join(parts)
+
+
+@tool
+def create_event(title: str, start: str, config: RunnableConfig, end: str = "", description: str = "", location: str = "") -> str:
+    """Add a new event to the user's Google Calendar. `start` and `end` are either 'YYYY-MM-DDTHH:MM' for a timed event or 'YYYY-MM-DD' for an all-day event; leave `end` out to default to one hour later (or one day for all-day). Tell the user what you added. Never add guests or invite other people."""
+    missing = _calendar_unavailable(config)
+    if missing:
+        return missing
+    try:
+        event = calendar.create_event(
+            _user_id(config),
+            title=title,
+            start=start,
+            end=end,
+            description=description,
+            location=location,
+        )
+    except ServiceNotConnected:
+        return CALENDAR_NOT_CONNECTED
+    except ValueError as exc:
+        return f"I couldn't set that time ({exc})."
+    except calendar.CalendarApiError as exc:
+        return f"Couldn't add that event ({exc})."
+    return json.dumps({"status": "event_created", **event})
+
+
+@tool
+def update_event(event_id: str, config: RunnableConfig, title: str = "", start: str = "", end: str = "", description: str = "", location: str = "") -> str:
+    """Change an existing calendar event. Only pass the fields that need changing — everything else stays as it was. Read the event first so you can tell the user exactly what changed. Same date formats as create_event."""
+    missing = _calendar_unavailable(config)
+    if missing:
+        return missing
+    try:
+        event = calendar.update_event(
+            _user_id(config),
+            event_id,
+            title=title,
+            start=start,
+            end=end,
+            description=description,
+            location=location,
+        )
+    except ServiceNotConnected:
+        return CALENDAR_NOT_CONNECTED
+    except calendar.EventGone:
+        return "That event no longer exists — it may already have been deleted."
+    except ValueError as exc:
+        return f"I couldn't make that change ({exc})."
+    except calendar.CalendarApiError as exc:
+        return f"Couldn't change that event ({exc})."
+    return json.dumps({"status": "event_updated", **event})
+
+
+@tool
+def propose_event_deletion(event_id: str, config: RunnableConfig) -> str:
+    """Ask the user to confirm deleting one calendar event. This NEVER deletes anything by itself: it shows the user a card and they press Delete themselves. Use this whenever the user asks to cancel, remove or delete an event. Tell the user you've prepared the deletion for them to confirm."""
+    missing = _calendar_unavailable(config)
+    if missing:
+        return missing
+    try:
+        event = calendar.get_event(_user_id(config), event_id)
+    except ServiceNotConnected:
+        return CALENDAR_NOT_CONNECTED
+    except calendar.CalendarApiError as exc:
+        return f"Couldn't find that event ({exc})."
+    return json.dumps(
+        {
+            "status": "delete_proposed",
+            "event_id": event["id"],
+            "title": event["title"],
+            "when": event["when"],
+            "location": event["location"],
+        }
+    )
+
+
+ALL_TOOLS = [solve_equation, web_search, read_webpage, generate_image, read_attachment, search_emails, read_email, draft_email, list_events, read_event, create_event, update_event, propose_event_deletion]
 
 # Human-friendly names for UI display ("Called Tool: ...").
 TOOL_DISPLAY_NAMES = {
@@ -262,4 +421,9 @@ TOOL_DISPLAY_NAMES = {
     "search_emails": "Inbox Search",
     "read_email": "Read Email",
     "draft_email": "Compose Email",
+    "list_events": "Calendar Search",
+    "read_event": "Read Event",
+    "create_event": "New Event",
+    "update_event": "Edit Event",
+    "propose_event_deletion": "Delete Event",
 }

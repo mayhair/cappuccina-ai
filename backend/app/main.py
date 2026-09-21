@@ -12,16 +12,22 @@ from sse_starlette.sse import EventSourceResponse
 from agent.graph import GRAPH
 from agent.title import generate_title
 from agent.tools import TOOL_DISPLAY_NAMES
-from app import db, documents, gmail, google_oauth
+from app import calendar, db, documents, gmail, google_oauth
 from app.auth import (
     clear_session_cookie,
     current_user,
     session_token,
     set_session_cookie,
 )
-from app.config import APP_ORIGIN, GOOGLE_GMAIL_SCOPES, GOOGLE_LOGIN_SCOPES
-from app.google_oauth import GmailNotConnected
+from app.config import (
+    APP_ORIGIN,
+    GOOGLE_CALENDAR_SCOPES,
+    GOOGLE_GMAIL_SCOPES,
+    GOOGLE_LOGIN_SCOPES,
+)
+from app.google_oauth import ServiceNotConnected
 from app.schemas import (
+    CalendarStatusResponse,
     ChatRequest,
     ChatResponse,
     CreateChatRequest,
@@ -203,6 +209,30 @@ def _mark_sent_drafts(chats: list[dict], sent_ids: set[str]) -> None:
                         tool["sent"] = True
 
 
+def _mark_deleted_events(chats: list[dict], deleted_ids: set[str]) -> None:
+    """Flag stored propose_event_deletion tool parts whose event is gone.
+
+    Done at read time so it survives full-history syncs from the client.
+    """
+    if not deleted_ids:
+        return
+    for chat in chats:
+        for message in chat.get("messages", []):
+            for key in ("parts", "tools"):
+                for tool in message.get(key) or []:
+                    if (
+                        not isinstance(tool, dict)
+                        or tool.get("name") != "propose_event_deletion"
+                    ):
+                        continue
+                    try:
+                        data = json.loads(tool.get("result") or "")
+                    except (ValueError, TypeError):
+                        continue
+                    if isinstance(data, dict) and data.get("event_id") in deleted_ids:
+                        tool["deleted"] = True
+
+
 def _attachment_blocks(parts, user_id: str) -> list[dict]:
     """LLM content blocks for a user turn's attachment parts.
 
@@ -279,7 +309,8 @@ def _user_response(user) -> UserResponse:
         email=user["email"],
         displayName=user["display_name"],
         avatarUrl=user["avatar_url"] if "avatar_url" in user.keys() else None,
-        gmailConnected=db.get_google_grant(user["id"]) is not None,
+        gmailConnected=db.get_google_grant(user["id"], "gmail") is not None,
+        calendarConnected=db.get_google_grant(user["id"], "calendar") is not None,
     )
 
 
@@ -388,7 +419,7 @@ async def gmail_callback(request: Request, user=Depends(current_user)) -> Redire
         return RedirectResponse(f"{APP_ORIGIN}/?gmail=error")
     try:
         tokens = google_oauth.exchange_code(code, google_oauth.gmail_redirect_uri())
-        google_oauth.store_grant(user["id"], tokens)
+        google_oauth.store_grant(user["id"], "gmail", tokens)
     except Exception:
         return RedirectResponse(f"{APP_ORIGIN}/?gmail=error")
     return RedirectResponse(f"{APP_ORIGIN}/?gmail=connected")
@@ -396,7 +427,7 @@ async def gmail_callback(request: Request, user=Depends(current_user)) -> Redire
 
 @app.get("/api/v1/gmail/status")
 async def gmail_status(user=Depends(current_user)) -> GmailStatusResponse:
-    grant = db.get_google_grant(user["id"])
+    grant = db.get_google_grant(user["id"], "gmail")
     if grant is None:
         return GmailStatusResponse(connected=False)
     return GmailStatusResponse(connected=True, scopes=grant["scopes"].split())
@@ -404,7 +435,7 @@ async def gmail_status(user=Depends(current_user)) -> GmailStatusResponse:
 
 @app.post("/api/v1/gmail/disconnect")
 async def gmail_disconnect(user=Depends(current_user)) -> dict:
-    db.delete_google_grant(user["id"])
+    db.delete_google_grant(user["id"], "gmail")
     return {"ok": True}
 
 
@@ -419,7 +450,7 @@ async def gmail_update_draft(
         updated = gmail.update_draft(
             user["id"], draft_id, req.to.strip(), req.subject, req.body
         )
-    except GmailNotConnected as exc:
+    except ServiceNotConnected as exc:
         raise HTTPException(status_code=409, detail=str(exc))
     except gmail.DraftGone:
         raise HTTPException(
@@ -436,7 +467,7 @@ async def gmail_send_draft(draft_id: str, user=Depends(current_user)) -> dict:
     """The only path that actually sends mail — driven by the user's button."""
     try:
         sent = gmail.send_draft(user["id"], draft_id)
-    except GmailNotConnected as exc:
+    except ServiceNotConnected as exc:
         raise HTTPException(status_code=409, detail=str(exc))
     except gmail.DraftGone:
         raise HTTPException(
@@ -449,12 +480,86 @@ async def gmail_send_draft(draft_id: str, user=Depends(current_user)) -> dict:
     return {"ok": True, **sent}
 
 
+# ---------- Calendar (incremental consent) ----------
+
+@app.get("/api/v1/calendar/connect")
+async def calendar_connect(user=Depends(current_user)) -> RedirectResponse:
+    if not google_oauth.is_configured():
+        return RedirectResponse(f"{APP_ORIGIN}/?calendar=error")
+    state = db.create_oauth_state("calendar", user["id"])
+    url = google_oauth.build_auth_url(
+        state,
+        GOOGLE_CALENDAR_SCOPES,
+        google_oauth.calendar_redirect_uri(),
+        prompt="consent",
+        offline=True,
+    )
+    return RedirectResponse(url)
+
+
+@app.get("/api/v1/calendar/callback")
+async def calendar_callback(
+    request: Request, user=Depends(current_user)
+) -> RedirectResponse:
+    if request.query_params.get("error"):
+        return RedirectResponse(f"{APP_ORIGIN}/?calendar=error")
+    state = db.consume_oauth_state(request.query_params.get("state", ""), "calendar")
+    if state is None or state["user_id"] != user["id"]:
+        return RedirectResponse(f"{APP_ORIGIN}/?calendar=error")
+    code = request.query_params.get("code", "")
+    if not code:
+        return RedirectResponse(f"{APP_ORIGIN}/?calendar=error")
+    try:
+        tokens = google_oauth.exchange_code(code, google_oauth.calendar_redirect_uri())
+        google_oauth.store_grant(user["id"], "calendar", tokens)
+    except Exception:
+        return RedirectResponse(f"{APP_ORIGIN}/?calendar=error")
+    return RedirectResponse(f"{APP_ORIGIN}/?calendar=connected")
+
+
+@app.get("/api/v1/calendar/status")
+async def calendar_status(user=Depends(current_user)) -> CalendarStatusResponse:
+    grant = db.get_google_grant(user["id"], "calendar")
+    if grant is None:
+        return CalendarStatusResponse(connected=False)
+    return CalendarStatusResponse(connected=True, scopes=grant["scopes"].split())
+
+
+@app.post("/api/v1/calendar/disconnect")
+async def calendar_disconnect(user=Depends(current_user)) -> dict:
+    db.delete_google_grant(user["id"], "calendar")
+    return {"ok": True}
+
+
+@app.post("/api/v1/calendar/events/{event_id}/delete")
+async def calendar_delete_event(event_id: str, user=Depends(current_user)) -> dict:
+    """The only path that deletes an event — driven by the user's button.
+
+    The assistant proposes the deletion in chat; nothing is removed until the
+    user confirms here.
+    """
+    try:
+        calendar.delete_event(user["id"], event_id)
+    except ServiceNotConnected as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    except calendar.EventGone:
+        raise HTTPException(
+            status_code=409,
+            detail="That event is already gone — it may have been deleted already",
+        )
+    except calendar.CalendarApiError as exc:
+        raise HTTPException(status_code=502, detail=f"Calendar: {exc}")
+    db.mark_event_deleted(user["id"], event_id)
+    return {"ok": True, "event_id": event_id}
+
+
 # ---------- chats ----------
 
 @app.get("/api/v1/chats")
 async def list_chats(user=Depends(current_user)) -> list[dict]:
     chats = db.list_chats(user["id"])
     _mark_sent_drafts(chats, db.get_sent_draft_ids(user["id"]))
+    _mark_deleted_events(chats, db.get_deleted_event_ids(user["id"]))
     return chats
 
 

@@ -1,7 +1,12 @@
 import { useEffect, useState } from 'react'
-import { PersonIcon, MailIcon } from './Icons'
+import { PersonIcon, MailIcon, CalendarIcon } from './Icons'
 import { updateProfile } from '../api/authClient'
 import { connectGmailUrl, disconnectGmail, gmailStatus } from '../api/gmailClient'
+import {
+  connectCalendarUrl,
+  calendarStatus,
+  disconnectCalendar,
+} from '../api/calendarClient'
 
 function ProfileForm({ user, onUpdated }) {
   const [name, setName] = useState(user.displayName)
@@ -61,14 +66,26 @@ function ProfileForm({ user, onUpdated }) {
   )
 }
 
-function GmailForm({ user, notice, onNoticeClear, onUserUpdated }) {
+function ConnectionForm({
+  icon: Icon,
+  serviceName,
+  description,
+  connectUrl,
+  loadStatus,
+  disconnect,
+  connectedKey,
+  user,
+  notice,
+  onNoticeClear,
+  onUserUpdated,
+}) {
   const [status, setStatus] = useState(null)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
 
   useEffect(() => {
     let cancelled = false
-    gmailStatus()
+    loadStatus()
       .then((s) => {
         if (!cancelled) setStatus(s)
       })
@@ -78,15 +95,15 @@ function GmailForm({ user, notice, onNoticeClear, onUserUpdated }) {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [loadStatus])
 
-  const disconnect = async () => {
+  const handleDisconnect = async () => {
     setBusy(true)
     setError('')
     try {
-      await disconnectGmail()
+      await disconnect()
       setStatus({ connected: false })
-      onUserUpdated({ ...user, gmailConnected: false })
+      onUserUpdated({ ...user, [connectedKey]: false })
       onNoticeClear()
     } catch (err) {
       setError(err.message || 'Could not disconnect — try again')
@@ -95,21 +112,18 @@ function GmailForm({ user, notice, onNoticeClear, onUserUpdated }) {
     }
   }
 
-  const connected = status?.connected ?? user.gmailConnected
+  const connected = status?.connected ?? user[connectedKey]
 
   return (
     <div className="settings-form">
-      <p className="settings-hint">
-        Let Cappuccina read your inbox and write email drafts. She can never send
-        email — every draft waits for you to press Send.
-      </p>
+      <p className="settings-hint">{description}</p>
 
       {notice === 'connected' && (
-        <p className="settings-msg ok">Gmail connected ✓</p>
+        <p className="settings-msg ok">{serviceName} connected ✓</p>
       )}
       {notice === 'error' && (
         <p className="settings-msg error" role="alert">
-          Connecting Gmail didn&rsquo;t finish. Please try again.
+          Connecting {serviceName} didn&rsquo;t finish. Please try again.
         </p>
       )}
       {error && (
@@ -119,8 +133,10 @@ function GmailForm({ user, notice, onNoticeClear, onUserUpdated }) {
       )}
 
       <p className="settings-status">
-        <MailIcon />
-        {connected ? 'Gmail is connected' : 'Gmail is not connected'}
+        <Icon />
+        {connected
+          ? `${serviceName} is connected`
+          : `${serviceName} is not connected`}
       </p>
 
       <div className="settings-actions">
@@ -128,18 +144,54 @@ function GmailForm({ user, notice, onNoticeClear, onUserUpdated }) {
           <button
             type="button"
             className="settings-save"
-            onClick={disconnect}
+            onClick={handleDisconnect}
             disabled={busy || status === null}
           >
-            {busy ? 'Disconnecting…' : 'Disconnect Gmail'}
+            {busy ? 'Disconnecting…' : `Disconnect ${serviceName}`}
           </button>
         ) : (
-          <a className="settings-save" href={connectGmailUrl}>
-            Connect Gmail
+          <a className="settings-save" href={connectUrl}>
+            Connect {serviceName}
           </a>
         )}
       </div>
     </div>
+  )
+}
+
+function GmailForm({ user, notice, onNoticeClear, onUserUpdated }) {
+  return (
+    <ConnectionForm
+      icon={MailIcon}
+      serviceName="Gmail"
+      description="Let Cappuccina read your inbox and write email drafts. She can never send email — every draft waits for you to press Send."
+      connectUrl={connectGmailUrl}
+      loadStatus={gmailStatus}
+      disconnect={disconnectGmail}
+      connectedKey="gmailConnected"
+      user={user}
+      notice={notice}
+      onNoticeClear={onNoticeClear}
+      onUserUpdated={onUserUpdated}
+    />
+  )
+}
+
+function CalendarForm({ user, notice, onNoticeClear, onUserUpdated }) {
+  return (
+    <ConnectionForm
+      icon={CalendarIcon}
+      serviceName="Google Calendar"
+      description="Let Cappuccina see your schedule and add or edit events for you. She can never delete an event on her own — she asks you to confirm first."
+      connectUrl={connectCalendarUrl}
+      loadStatus={calendarStatus}
+      disconnect={disconnectCalendar}
+      connectedKey="calendarConnected"
+      user={user}
+      notice={notice}
+      onNoticeClear={onNoticeClear}
+      onUserUpdated={onUserUpdated}
+    />
   )
 }
 
@@ -150,6 +202,8 @@ export function SettingsDialog({
   onUserUpdated,
   gmailNotice = '',
   onGmailNoticeClear = () => {},
+  calendarNotice = '',
+  onCalendarNoticeClear = () => {},
 }) {
   const [section, setSection] = useState('account')
 
@@ -224,6 +278,15 @@ export function SettingsDialog({
                   user={user}
                   notice={gmailNotice}
                   onNoticeClear={onGmailNoticeClear}
+                  onUserUpdated={onUserUpdated}
+                />
+              </section>
+              <section className="settings-section">
+                <h4>Google Calendar</h4>
+                <CalendarForm
+                  user={user}
+                  notice={calendarNotice}
+                  onNoticeClear={onCalendarNoticeClear}
                   onUserUpdated={onUserUpdated}
                 />
               </section>

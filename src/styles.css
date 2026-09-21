@@ -2040,6 +2040,7 @@ a.settings-save { text-decoration: none; display: inline-flex; align-items: cent
 }
 .draft-send:hover { filter: brightness(1.08); }
 .draft-send:disabled { opacity: 0.5; cursor: default; filter: none; }
+.draft-send.danger { background: var(--danger); }
 .draft-note { font-size: 13px; font-weight: 600; color: var(--ink-soft); }
 .draft-note.ok { color: #2e9e63; }
 .draft-note.error { color: var(--danger); }

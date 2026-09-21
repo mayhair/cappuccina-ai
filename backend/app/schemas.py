@@ -52,11 +52,17 @@ class UserResponse(BaseModel):
     display_name: str = Field(alias="displayName")
     avatar_url: str | None = Field(default=None, alias="avatarUrl")
     gmail_connected: bool = Field(default=False, alias="gmailConnected")
+    calendar_connected: bool = Field(default=False, alias="calendarConnected")
 
     model_config = {"populate_by_name": True}
 
 
 class GmailStatusResponse(BaseModel):
+    connected: bool
+    scopes: list[str] = []
+
+
+class CalendarStatusResponse(BaseModel):
     connected: bool
     scopes: list[str] = []
 

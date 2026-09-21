@@ -44,20 +44,27 @@ export default function App() {
   const [authError, setAuthError] = useState('')
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [gmailNotice, setGmailNotice] = useState('')
+  const [calendarNotice, setCalendarNotice] = useState('')
 
   // OAuth redirects land back on "/" with a short status in the query string.
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
     const error = params.get('auth_error')
     const gmail = params.get('gmail')
+    const calendar = params.get('calendar')
     if (error) setAuthError(error)
     if (gmail === 'error' || gmail === 'connected') {
       setGmailNotice(gmail)
       setSettingsOpen(true)
     }
-    if (error || gmail) {
+    if (calendar === 'error' || calendar === 'connected') {
+      setCalendarNotice(calendar)
+      setSettingsOpen(true)
+    }
+    if (error || gmail || calendar) {
       params.delete('auth_error')
       params.delete('gmail')
+      params.delete('calendar')
       const qs = params.toString()
       window.history.replaceState({}, '', window.location.pathname + (qs ? `?${qs}` : ''))
     }
@@ -123,6 +130,7 @@ export default function App() {
     renameChat,
     clearTypingTitle,
     markDraftSent,
+    markEventDeleted,
     selectChat,
     attachments,
     uploading,
@@ -158,10 +166,13 @@ export default function App() {
         onClose={() => {
           setSettingsOpen(false)
           setGmailNotice('')
+          setCalendarNotice('')
         }}
         onUserUpdated={setUser}
         gmailNotice={gmailNotice}
         onGmailNoticeClear={() => setGmailNotice('')}
+        calendarNotice={calendarNotice}
+        onCalendarNoticeClear={() => setCalendarNotice('')}
       />
 
       <main className="main">
@@ -192,6 +203,7 @@ export default function App() {
           onSend={sendMessage}
           onRetry={retryMessage}
           onDraftSent={(draftId) => markDraftSent(activeChatId, draftId)}
+          onEventDeleted={(eventId) => markEventDeleted(activeChatId, eventId)}
           inputRef={inputRef}
           effort={effort}
           onEffort={setEffort}

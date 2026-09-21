@@ -231,6 +231,42 @@ export function useChatController(enabled) {
     )
   }, [])
 
+  // Stamp a proposed calendar deletion as done in local history so re-renders
+  // (e.g. switching chats) keep showing "Deleted"; the server records the same
+  // on confirm for reloads.
+  const markEventDeleted = useCallback((chatId, eventId) => {
+    const stamp = (list) =>
+      (list ?? []).map((tool) => {
+        if (
+          !tool ||
+          tool.name !== 'propose_event_deletion' ||
+          typeof tool.result !== 'string'
+        ) {
+          return tool
+        }
+        try {
+          if (JSON.parse(tool.result)?.event_id !== eventId) return tool
+        } catch {
+          return tool
+        }
+        return { ...tool, deleted: true }
+      })
+    setChats((all) =>
+      all.map((c) =>
+        c.id !== chatId
+          ? c
+          : {
+              ...c,
+              messages: c.messages.map((m) =>
+                m.role !== 'assistant'
+                  ? m
+                  : { ...m, parts: stamp(m.parts), tools: stamp(m.tools) },
+              ),
+            },
+      ),
+    )
+  }, [])
+
   const streamReply = useCallback((chatId, history, reasoning, mode, subject) => {
     setStatus('streaming')
     const seq = ++streamSeq.current
@@ -512,6 +548,7 @@ export function useChatController(enabled) {
     renameChat,
     clearTypingTitle,
     markDraftSent,
+    markEventDeleted,
     selectChat,
     attachments,
     uploading,

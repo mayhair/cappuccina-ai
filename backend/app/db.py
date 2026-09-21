@@ -106,13 +106,15 @@ def _init_schema(conn: sqlite3.Connection) -> None:
         );
 
         CREATE TABLE IF NOT EXISTS google_grants (
-            user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+            user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            service TEXT NOT NULL,
             scopes TEXT NOT NULL DEFAULT '',
             access_token TEXT NOT NULL DEFAULT '',
             refresh_token TEXT NOT NULL DEFAULT '',
             expires_at TEXT,
             granted_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (user_id, service)
         );
 
         CREATE TABLE IF NOT EXISTS oauth_states (
@@ -129,6 +131,13 @@ def _init_schema(conn: sqlite3.Connection) -> None:
             message_id TEXT NOT NULL DEFAULT '',
             sent_at TEXT NOT NULL,
             PRIMARY KEY (user_id, draft_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS deleted_events (
+            user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            event_id TEXT NOT NULL,
+            deleted_at TEXT NOT NULL,
+            PRIMARY KEY (user_id, event_id)
         );
 
         CREATE TABLE IF NOT EXISTS images (
@@ -172,6 +181,7 @@ def _init_schema(conn: sqlite3.Connection) -> None:
     if "thought_seconds" not in cols:
         conn.execute("ALTER TABLE messages ADD COLUMN thought_seconds REAL")
     _migrate_users_for_oauth(conn)
+    _migrate_grants_for_services(conn)
     conn.commit()
 
 
@@ -211,6 +221,43 @@ def _migrate_users_for_oauth(conn: sqlite3.Connection) -> None:
         DROP TABLE users;
         ALTER TABLE users_new RENAME TO users;
         CREATE UNIQUE INDEX IF NOT EXISTS idx_users_google_sub ON users(google_sub);
+        """
+    )
+    conn.execute("PRAGMA foreign_keys=ON")
+
+
+def _migrate_grants_for_services(conn: sqlite3.Connection) -> None:
+    """One-time rebuild letting a user hold one grant per Google service.
+
+    Older databases stored a single grant row keyed by user_id (Gmail only).
+    SQLite cannot change a primary key in place, so this runs the same
+    create-copy-drop-rename dance as the users migration. Existing rows become
+    service='gmail'.
+    """
+    info = {row["name"]: row for row in conn.execute("PRAGMA table_info(google_grants)").fetchall()}
+    if not info or "service" in info:
+        return
+
+    conn.execute("PRAGMA foreign_keys=OFF")
+    conn.executescript(
+        """
+        CREATE TABLE google_grants_new (
+            user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            service TEXT NOT NULL,
+            scopes TEXT NOT NULL DEFAULT '',
+            access_token TEXT NOT NULL DEFAULT '',
+            refresh_token TEXT NOT NULL DEFAULT '',
+            expires_at TEXT,
+            granted_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (user_id, service)
+        );
+        INSERT INTO google_grants_new
+            (user_id, service, scopes, access_token, refresh_token, expires_at, granted_at, updated_at)
+            SELECT user_id, 'gmail', scopes, access_token, refresh_token, expires_at, granted_at, updated_at
+            FROM google_grants;
+        DROP TABLE google_grants;
+        ALTER TABLE google_grants_new RENAME TO google_grants;
         """
     )
     conn.execute("PRAGMA foreign_keys=ON")
@@ -283,10 +330,11 @@ def update_user_display_name(user_id: str, display_name: str) -> None:
     conn.commit()
 
 
-# ---------- Google grants (Gmail tokens) ----------
+# ---------- Google grants (per-service OAuth tokens) ----------
 
 def save_google_grant(
     user_id: str,
+    service: str,
     scopes: str,
     access_token: str,
     refresh_token: str,
@@ -297,10 +345,10 @@ def save_google_grant(
     conn.execute(
         """
         INSERT INTO google_grants
-            (user_id, scopes, access_token, refresh_token, expires_at, granted_at, updated_at)
+            (user_id, service, scopes, access_token, refresh_token, expires_at, granted_at, updated_at)
         VALUES
-            (:user_id, :scopes, :access_token, :refresh_token, :expires_at, :now, :now)
-        ON CONFLICT(user_id) DO UPDATE SET
+            (:user_id, :service, :scopes, :access_token, :refresh_token, :expires_at, :now, :now)
+        ON CONFLICT(user_id, service) DO UPDATE SET
             scopes = :scopes,
             access_token = :access_token,
             refresh_token = CASE
@@ -312,6 +360,7 @@ def save_google_grant(
         """,
         {
             "user_id": user_id,
+            "service": service,
             "scopes": scopes,
             "access_token": access_token,
             "refresh_token": refresh_token,
@@ -322,15 +371,19 @@ def save_google_grant(
     conn.commit()
 
 
-def get_google_grant(user_id: str) -> sqlite3.Row | None:
+def get_google_grant(user_id: str, service: str) -> sqlite3.Row | None:
     return get_conn().execute(
-        "SELECT * FROM google_grants WHERE user_id = :user_id", {"user_id": user_id}
+        "SELECT * FROM google_grants WHERE user_id = :user_id AND service = :service",
+        {"user_id": user_id, "service": service},
     ).fetchone()
 
 
-def delete_google_grant(user_id: str) -> None:
+def delete_google_grant(user_id: str, service: str) -> None:
     conn = get_conn()
-    conn.execute("DELETE FROM google_grants WHERE user_id = :user_id", {"user_id": user_id})
+    conn.execute(
+        "DELETE FROM google_grants WHERE user_id = :user_id AND service = :service",
+        {"user_id": user_id, "service": service},
+    )
     conn.commit()
 
 
@@ -360,6 +413,29 @@ def get_sent_draft_ids(user_id: str) -> set[str]:
         {"user_id": user_id},
     ).fetchall()
     return {row["draft_id"] for row in rows}
+
+
+# ---------- user-confirmed calendar deletions ----------
+
+def mark_event_deleted(user_id: str, event_id: str) -> None:
+    """Record that a proposed deletion was confirmed, so the card stays done
+    after a reload (mirrors sent_drafts for email)."""
+    conn = get_conn()
+    conn.execute(
+        "INSERT INTO deleted_events (user_id, event_id, deleted_at)"
+        " VALUES (:user_id, :event_id, :deleted_at)"
+        " ON CONFLICT(user_id, event_id) DO UPDATE SET deleted_at = :deleted_at",
+        {"user_id": user_id, "event_id": event_id, "deleted_at": _now()},
+    )
+    conn.commit()
+
+
+def get_deleted_event_ids(user_id: str) -> set[str]:
+    rows = get_conn().execute(
+        "SELECT event_id FROM deleted_events WHERE user_id = :user_id",
+        {"user_id": user_id},
+    ).fetchall()
+    return {row["event_id"] for row in rows}
 
 
 # ---------- OAuth state (CSRF protection) ----------

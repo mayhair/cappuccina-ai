@@ -212,6 +212,7 @@ def _user_with_grant(refresh: str) -> str:
     uid = db.create_google_user("u1@example.com", "U1", "sub-u1")["id"]
     db.save_google_grant(
         uid,
+        "gmail",
         scopes="scope",
         access_token=google_oauth.encrypt_token("old-at"),
         refresh_token=google_oauth.encrypt_token(refresh),
@@ -230,10 +231,10 @@ def test_access_token_refreshes_when_expired(isolated_db, monkeypatch):
         return {"access_token": "new-at", "expires_in": 3600}
 
     monkeypatch.setattr(google_oauth, "_post_token", fake_post)
-    assert google_oauth.get_access_token(uid) == "new-at"
+    assert google_oauth.get_access_token(uid, "gmail") == "new-at"
     assert calls["grant_type"] == "refresh_token"
     assert calls["refresh_token"] == "refresh-rt"
-    grant = db.get_google_grant(uid)
+    grant = db.get_google_grant(uid, "gmail")
     assert grant is not None
     assert google_oauth.decrypt_token(grant["access_token"]) == "new-at"
     assert google_oauth.decrypt_token(grant["refresh_token"]) == "refresh-rt"
@@ -248,11 +249,11 @@ def test_refresh_failure_drops_grant(isolated_db, monkeypatch):
 
     monkeypatch.setattr(google_oauth, "_post_token", fail)
     try:
-        google_oauth.get_access_token(uid)
-        assert False, "expected GmailNotConnected"
-    except google_oauth.GmailNotConnected:
+        google_oauth.get_access_token(uid, "gmail")
+        assert False, "expected ServiceNotConnected"
+    except google_oauth.ServiceNotConnected:
         pass
-    assert db.get_google_grant(uid) is None
+    assert db.get_google_grant(uid, "gmail") is None
 
 
 def test_tools_report_missing_connection(isolated_db):

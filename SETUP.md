@@ -98,20 +98,22 @@ Sign-in is Google-only, and the same OAuth client is used for the optional
 Gmail connection. In [Google Cloud Console](https://console.cloud.google.com/):
 
 1. **Create a project** (e.g. "Cappuccina").
-2. **Enable the Gmail API**: *APIs & Services → Library → Gmail API → Enable*.
+2. **Enable the Gmail and Google Calendar APIs**: *APIs & Services → Library*,
+   then enable **Gmail API** and **Google Calendar API**.
 3. **Configure the consent screen**: *APIs & Services → OAuth consent screen*.
    - User type: **External**, then fill in app name and support email.
    - Scopes: add `.../auth/gmail.readonly`, `.../auth/gmail.compose`,
-     `.../auth/gmail.send`.
+     `.../auth/gmail.send`, and `.../auth/calendar.events`.
    - **Test users**: add every Google account that will try the app. While the
      app is in *Testing*, only these accounts can sign in.
 4. **Create credentials**: *APIs & Services → Credentials → Create
    credentials → OAuth client ID → Web application*. Under **Authorized
-   redirect URIs** add both (must match `APP_ORIGIN` exactly):
+   redirect URIs** add all three (must match `APP_ORIGIN` exactly):
 
    ```
    http://localhost:5173/api/v1/auth/google/callback
    http://localhost:5173/api/v1/gmail/callback
+   http://localhost:5173/api/v1/calendar/callback
    ```
 
 5. Copy the **client ID** and **client secret** into `backend/.env` as
@@ -123,13 +125,16 @@ Gmail connection. In [Google Cloud Console](https://console.cloud.google.com/):
 
 Notes:
 
-- The Gmail scopes are **restricted scopes**. While the app stays in *Testing*
-  mode this is fine for a handful of accounts (up to 100 test users), but
-  Google also expires refresh tokens after 7 days in Testing — users reconnect
-  Gmail in **Settings → Connections** when that happens. Serving the public
-  needs OAuth verification plus a CASA security assessment.
+- The Gmail scopes are **restricted scopes**; `calendar.events` is a
+  **sensitive scope**. While the app stays in *Testing* mode this is fine for a
+  handful of accounts (up to 100 test users), but Google also expires refresh
+  tokens after 7 days in Testing — users reconnect in **Settings →
+  Connections** when that happens. Serving the public needs OAuth verification
+  (and, for Gmail, a CASA security assessment).
 - The app never sends email on its own. Gmail tools only search/read and save
   **drafts**; the user presses Send in the chat.
+- The app never deletes a calendar event on its own either. It adds and edits
+  events directly, but deletions are shown as a card the user confirms.
 
 ## 5. Frontend setup
 

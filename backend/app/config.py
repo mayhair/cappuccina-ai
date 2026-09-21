@@ -34,6 +34,11 @@ GOOGLE_GMAIL_SCOPES = [
     "https://www.googleapis.com/auth/gmail.compose",
     "https://www.googleapis.com/auth/gmail.send",
 ]
+# Read + write events on the user's calendars. We only ever touch the primary
+# calendar, so this single scope is enough (no calendar.readonly needed).
+GOOGLE_CALENDAR_SCOPES = [
+    "https://www.googleapis.com/auth/calendar.events",
+]
 
 REASONING_LEVELS = {"low", "high", "max"}
 

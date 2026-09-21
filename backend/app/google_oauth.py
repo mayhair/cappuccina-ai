@@ -1,12 +1,15 @@
 """Google OAuth 2.0 (authorization code flow) and token storage helpers.
 
-Two flows use this module:
+Three flows use this module:
 
-* Sign-in  — openid/email/profile scopes, handled by /api/v1/auth/google/*.
-* Gmail    — incremental consent for the Gmail scopes, /api/v1/gmail/*.
+* Sign-in   — openid/email/profile scopes, handled by /api/v1/auth/google/*.
+* Gmail     — incremental consent for the Gmail scopes, /api/v1/gmail/*.
+* Calendar  — incremental consent for the Calendar scope, /api/v1/calendar/*.
 
-Access and refresh tokens are encrypted at rest with a Fernet key derived from
-TOKEN_ENC_KEY (any string; ``openssl rand -hex 32`` works).
+Each connected service gets its own encrypted grant row (user_id, service), so
+services can be connected and disconnected independently. Access and refresh
+tokens are encrypted at rest with a Fernet key derived from TOKEN_ENC_KEY (any
+string; ``openssl rand -hex 32`` works).
 """
 
 import base64
@@ -39,8 +42,8 @@ class GoogleNotConfigured(RuntimeError):
     """GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET are missing."""
 
 
-class GmailNotConnected(RuntimeError):
-    """The user has no usable Google grant (never granted, or revoked)."""
+class ServiceNotConnected(RuntimeError):
+    """The user has no usable Google grant for that service (never granted, or revoked)."""
 
 
 class GoogleOAuthError(RuntimeError):
@@ -57,6 +60,10 @@ def login_redirect_uri() -> str:
 
 def gmail_redirect_uri() -> str:
     return f"{APP_ORIGIN}/api/v1/gmail/callback"
+
+
+def calendar_redirect_uri() -> str:
+    return f"{APP_ORIGIN}/api/v1/calendar/callback"
 
 
 # ---------- token encryption ----------
@@ -160,10 +167,11 @@ def _expiry_from(payload: dict) -> str | None:
     ).isoformat()
 
 
-def store_grant(user_id: str, payload: dict) -> None:
+def store_grant(user_id: str, service: str, payload: dict) -> None:
     scopes = payload.get("scope", "")
     db.save_google_grant(
         user_id,
+        service,
         scopes=scopes,
         access_token=encrypt_token(payload.get("access_token", "")),
         refresh_token=encrypt_token(payload.get("refresh_token", "")),
@@ -171,14 +179,15 @@ def store_grant(user_id: str, payload: dict) -> None:
     )
 
 
-def get_access_token(user_id: str) -> str:
-    """Return a currently-valid access token, refreshing if needed.
+def get_access_token(user_id: str, service: str) -> str:
+    """Return a currently-valid access token for one service, refreshing if needed.
 
-    Raises GmailNotConnected when the user has no grant or consent was revoked.
+    Raises ServiceNotConnected when the user has no grant for that service or
+    consent was revoked.
     """
-    grant = db.get_google_grant(user_id)
+    grant = db.get_google_grant(user_id, service)
     if grant is None:
-        raise GmailNotConnected("Gmail is not connected")
+        raise ServiceNotConnected(f"{service} is not connected")
 
     expires_at = grant["expires_at"]
     if expires_at and datetime.fromisoformat(expires_at) - _EXPIRY_SKEW > datetime.now(
@@ -188,8 +197,8 @@ def get_access_token(user_id: str) -> str:
 
     refresh_token = decrypt_token(grant["refresh_token"])
     if not refresh_token:
-        db.delete_google_grant(user_id)
-        raise GmailNotConnected("Gmail needs to be reconnected")
+        db.delete_google_grant(user_id, service)
+        raise ServiceNotConnected(f"{service} needs to be reconnected")
 
     try:
         payload = _post_token(
@@ -197,12 +206,15 @@ def get_access_token(user_id: str) -> str:
         )
     except GoogleOAuthError:
         # invalid_grant / expired consent: drop the grant so the UI re-prompts.
-        db.delete_google_grant(user_id)
-        raise GmailNotConnected("Gmail access expired — reconnect in Settings") from None
+        db.delete_google_grant(user_id, service)
+        raise ServiceNotConnected(
+            f"{service} access expired — reconnect in Settings"
+        ) from None
 
     # Refresh responses omit refresh_token; save_google_grant keeps the old one.
     db.save_google_grant(
         user_id,
+        service,
         scopes=grant["scopes"],
         access_token=encrypt_token(payload.get("access_token", "")),
         refresh_token="",

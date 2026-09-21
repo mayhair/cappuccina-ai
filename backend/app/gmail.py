@@ -33,7 +33,7 @@ class DraftGone(RuntimeError):
 
 
 def _headers(user_id: str) -> dict:
-    return {"Authorization": f"Bearer {get_access_token(user_id)}"}
+    return {"Authorization": f"Bearer {get_access_token(user_id, 'gmail')}"}
 
 
 def _request(user_id: str, method: str, path: str, **kwargs) -> dict:
