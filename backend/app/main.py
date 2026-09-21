@@ -51,7 +51,11 @@ def _text(content) -> str:
 
 
 def _reasoning_text(content) -> str:
-    """Human-readable reasoning summary from Responses API content blocks."""
+    """Reasoning trace from Responses-API-style content blocks.
+
+    OpenRouter (Chat Completions) reports reasoning separately, on the
+    message's `additional_kwargs`, so plain string content is never reasoning.
+    """
     if isinstance(content, str):
         return ""
     parts = []
@@ -61,6 +65,15 @@ def _reasoning_text(content) -> str:
                 if isinstance(summary, dict) and summary.get("text"):
                     parts.append(summary["text"])
     return "".join(parts)
+
+
+def _message_reasoning(msg, content) -> str:
+    """Reasoning for one model message: OpenRouter's field first, then content."""
+    kwargs = getattr(msg, "additional_kwargs", None) or {}
+    reasoning = kwargs.get("reasoning") or kwargs.get("reasoning_content")
+    if isinstance(reasoning, str) and reasoning:
+        return reasoning
+    return _reasoning_text(content)
 
 
 def _tool_label(name: str, args: dict) -> str:
@@ -118,10 +131,17 @@ def _final_extras(messages) -> tuple[str, list[ToolCall], list[dict]]:
     tools_by_part_id: dict[str, dict] = {}
     for msg in messages:
         content = getattr(msg, "content", "")
-        step_reasoning = _reasoning_text(content)
+        step_reasoning = _message_reasoning(msg, content)
         if step_reasoning:
             reasoning += step_reasoning
             parts.append({"type": "reasoning", "text": step_reasoning})
+        # Text the model emitted on this turn. Kept as its own part so the
+        # UI can interleave it between thinking blocks and tool calls. Tool
+        # results are not model text, so they never become text parts.
+        if msg.__class__.__name__ != "ToolMessage":
+            step_text = _text(content)
+            if step_text:
+                parts.append({"type": "text", "text": step_text})
         for call in getattr(msg, "tool_calls", None) or []:
             call_id = call.get("id") or ""
             name = call.get("name", "")
@@ -500,6 +520,32 @@ async def chat_stream(req: ChatRequest, user=Depends(current_user)):
         tools_by_id: dict[str, dict] = {}
         parts: list[dict] = []
         parts_by_tool_id: dict[str, dict] = {}
+        # Per-thinking-block timing: a "block" is a run of consecutive
+        # reasoning/tool parts. It opens when the first of the run arrives and
+        # closes when text follows (or the stream ends), at which point every
+        # part in the run is stamped with that run's duration. This keeps the
+        # counter running while the model reasons after a tool call instead of
+        # stopping at the first bit of text.
+        block_start: float | None = None
+        block_first_index: int | None = None
+
+        def close_block() -> None:
+            nonlocal block_start, block_first_index
+            if block_start is None or block_first_index is None:
+                return
+            seconds = round(time.monotonic() - block_start, 1)
+            for part in parts[block_first_index:]:
+                if part.get("type") in ("reasoning", "tool"):
+                    part["seconds"] = seconds
+            block_start = None
+            block_first_index = None
+
+        def open_block() -> None:
+            nonlocal block_start, block_first_index
+            if block_start is None:
+                block_start = time.monotonic()
+                block_first_index = len(parts)
+
         async for event in GRAPH.astream_events(
             _state(req),
             config=_graph_config(user, req),
@@ -514,10 +560,19 @@ async def chat_stream(req: ChatRequest, user=Depends(current_user)):
                 text = _text(content)
                 if text:
                     final_text += text
+                    # Text ends the current thinking block: stamp its duration.
+                    close_block()
+                    # A text part is appended (or extended) so the stored parts
+                    # preserve the model's text/reasoning/tool interleaving.
+                    if parts and parts[-1].get("type") == "text":
+                        parts[-1]["text"] += text
+                    else:
+                        parts.append({"type": "text", "text": text})
                     yield {"event": "token", "data": json.dumps({"content": text})}
-                reasoning = _reasoning_text(content)
+                reasoning = _message_reasoning(chunk, content)
                 if reasoning:
                     reasoning_text += reasoning
+                    open_block()
                     if parts and parts[-1].get("type") == "reasoning":
                         parts[-1]["text"] += reasoning
                     else:
@@ -532,6 +587,7 @@ async def chat_stream(req: ChatRequest, user=Depends(current_user)):
                 if not isinstance(args, dict):
                     args = {"input": args}
                 name = event.get("name", "")
+                open_block()
                 tools_by_id[call_id] = {
                     "id": call_id,
                     "name": name,
@@ -609,6 +665,7 @@ async def chat_stream(req: ChatRequest, user=Depends(current_user)):
                     ),
                 }
         yield {"event": "done", "data": "{}"}
+        close_block()
         if req.generate_title and req.messages:
             title = await generate_title(req.messages[0].content, final_text)
             if title:

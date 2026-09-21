@@ -134,8 +134,9 @@ def test_final_extras_appends_image_part():
         AIMessage(content="Here you go!"),
     ]
     reasoning, tool_calls, parts = main._final_extras(messages)
-    assert [p["type"] for p in parts] == ["tool", "image"]
+    assert [p["type"] for p in parts] == ["tool", "image", "text"]
     assert parts[1]["imageId"] == "img-9"
+    assert parts[2]["text"] == "Here you go!"
     assert tool_calls[0].result == marker
 
 
@@ -307,3 +308,77 @@ def test_nonstream_chat_persists_image_part(signed_in, monkeypatch):
     stored = signed_in.get("/api/v1/chats").json()
     parts = stored[0]["messages"][-1]["parts"]
     assert [p for p in parts if p.get("type") == "image"][0]["imageId"] == image["id"]
+
+
+def test_stream_stamps_each_thinking_block(signed_in, monkeypatch):
+    """A thinking block keeps counting through tools and later reasoning.
+
+    Each run of reasoning/tool parts is one block; the run is stamped with its
+    duration when text follows (or the stream ends), so a block that spans a
+    tool call reports one running total rather than stopping at the tool.
+    """
+    import app.main as main
+    from types import SimpleNamespace
+
+    chat = signed_in.post("/api/v1/chats", json={"mode": "chat"}).json()
+
+    def reasoning(text):
+        msg = SimpleNamespace(content="", additional_kwargs={"reasoning": text})
+        return {
+            "event": "on_chat_model_stream",
+            "data": {"chunk": msg},
+        }
+
+    class FakeGraph:
+        async def astream_events(self, state, config=None, version=None):
+            yield {"event": "on_chat_model_start", "data": {}}
+            yield reasoning("Think first. ")
+            yield {
+                "event": "on_tool_start",
+                "run_id": "r1",
+                "name": "web_search",
+                "data": {"input": {"query": "london"}},
+            }
+            yield {
+                "event": "on_tool_end",
+                "run_id": "r1",
+                "name": "web_search",
+                "data": {"output": "rain"},
+            }
+            yield reasoning("Think again. ")
+            yield {
+                "event": "on_chat_model_stream",
+                "data": {"chunk": SimpleNamespace(content="Let me check.")},
+            }
+            yield reasoning("Final thought. ")
+            yield {
+                "event": "on_chat_model_stream",
+                "data": {"chunk": SimpleNamespace(content="Done.")},
+            }
+
+    monkeypatch.setattr(main, "GRAPH", FakeGraph())
+    res = signed_in.post(
+        "/api/v1/chat/stream",
+        json={
+            "chatId": chat["id"],
+            "messages": [{"role": "user", "content": "hi"}],
+            "generateTitle": False,
+        },
+    )
+    assert res.status_code == 200
+
+    parts = signed_in.get("/api/v1/chats").json()[0]["messages"][-1]["parts"]
+    kinds = [p["type"] for p in parts]
+    assert kinds == ["reasoning", "tool", "reasoning", "text", "reasoning", "text"]
+
+    # First block (reasoning + tool + reasoning) shares one duration.
+    first = parts[0]["seconds"]
+    assert isinstance(first, float)
+    assert parts[1]["seconds"] == first
+    assert parts[2]["seconds"] == first
+    assert first >= 0
+    # Text never carries a duration.
+    assert "seconds" not in parts[3]
+    # Second block gets its own duration.
+    assert isinstance(parts[4]["seconds"], float)
+    assert "seconds" not in parts[5]

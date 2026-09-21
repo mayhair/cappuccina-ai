@@ -32,7 +32,7 @@ def _clean(raw: str) -> str:
 
 async def generate_title(user_message: str, assistant_reply: str) -> str:
     try:
-        model = make_model(reasoning="none")
+        model = make_model(reasoning="")
         result = await model.ainvoke(
             [
                 SystemMessage(TITLE_SYSTEM_PROMPT),

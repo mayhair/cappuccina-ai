@@ -18,7 +18,7 @@ class Message(BaseModel):
 class ChatRequest(BaseModel):
     chat_id: str = Field(alias="chatId")
     messages: list[Message]
-    reasoning: str = "medium"
+    reasoning: str = "high"
     mode: str = "chat"
     subject: str | None = None
     generate_title: bool = Field(default=False, alias="generateTitle")

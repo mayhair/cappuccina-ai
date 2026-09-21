@@ -27,8 +27,9 @@ function formatThought(seconds) {
 }
 
 function thinkingParts(message) {
-  // Ordered interleaving of reasoning + tool calls. Falls back to the legacy
-  // grouped shape (reasoning blob, then tools) for messages stored before parts.
+  // Ordered interleaving of reasoning + tool calls + text. Falls back to the
+  // legacy grouped shape (reasoning blob, then tools) for messages stored
+  // before parts existed.
   if (Array.isArray(message.parts) && message.parts.length > 0) return message.parts
   const out = []
   const reasoning = message.reasoning ?? ''
@@ -36,6 +37,38 @@ function thinkingParts(message) {
   if (reasoning) out.push({ type: 'reasoning', text: reasoning })
   for (const t of tools) out.push({ type: 'tool', ...t })
   return out
+}
+
+// A model may interleave text with thinking ("Let me search for that" then
+// more reasoning then the answer). Group consecutive non-text parts into a
+// thinking segment and emit each text part as its own segment, so the UI can
+// render a new thinking block immediately after a chat message.
+function messageSegments(message) {
+  const raw = thinkingParts(message)
+  const hasTextPart = raw.some((p) => p.type === 'text')
+  const parts = hasTextPart
+    ? raw
+    : message.content
+      ? [...raw, { type: 'text', text: message.content }]
+      : raw
+  const segments = []
+  let thinking = []
+  const flushThinking = () => {
+    if (thinking.length) {
+      segments.push({ type: 'thinking', parts: thinking })
+      thinking = []
+    }
+  }
+  for (const part of parts) {
+    if (part.type === 'text') {
+      flushThinking()
+      segments.push({ type: 'text', text: part.text ?? '' })
+    } else {
+      thinking.push(part)
+    }
+  }
+  flushThinking()
+  return segments
 }
 
 function formatArgs(args) {
@@ -371,24 +404,24 @@ function ToolCallBlock({ tool }) {
   )
 }
 
-function ThinkingBlock({ message, streaming }) {
+function ThinkingBlock({ parts: segmentParts, streaming }) {
   const [open, setOpen] = useState(false)
   // Draft calls are surfaced as their own card below the message, so hide the
   // raw tool block to avoid showing the same email twice.
-  const parts = thinkingParts(message).filter(
+  const parts = segmentParts.filter(
     (p) => !(p.type === 'tool' && draftFromTool(p)),
   )
   if (parts.length === 0) return null
 
-  // thinkingDone/thoughtSeconds are set when the live stream finishes. After a
-  // reload the stream is over by definition, so anything not actively
-  // streaming counts as done (rows stored before durations were persisted
-  // simply show "Thought" without a duration).
-  const done = message.thinkingDone || !streaming
+  // Each thinking block carries its own duration (stamped on its parts when
+  // the block closes — see backend/app/main.py). A block with no stamp yet is
+  // still being thought through, so it reads "Thinking...".
+  const stamped = parts.find((p) => p.seconds != null)
+  const done = stamped != null || !streaming
   const label = !done
     ? 'Thinking...'
-    : message.thoughtSeconds != null
-      ? formatThought(message.thoughtSeconds)
+    : stamped
+      ? formatThought(stamped.seconds)
       : 'Thought'
 
   return (
@@ -552,16 +585,24 @@ export function ChatWindow({ chat, user, isStreaming, draft, onDraft, onSend, on
               )}
               {m.role === 'assistant' ? (
                 <div className="assistant-col">
-                  <ThinkingBlock message={m} streaming={isActiveStream} />
-                  <div className={`bubble${awaitingReply ? ' bubble-waiting' : ''}`}>
-                    {m.content ? (
-                      <Markdown text={m.content} />
-                    ) : awaitingReply ? (
-                      <StreamingDots />
+                  {messageSegments(m).map((seg, si) =>
+                    seg.type === 'thinking' ? (
+                      <ThinkingBlock
+                        key={`think-${si}`}
+                        parts={seg.parts}
+                        streaming={isActiveStream}
+                      />
                     ) : (
-                      <p>…</p>
-                    )}
-                  </div>
+                      <div key={`text-${si}`} className="bubble">
+                        <Markdown text={seg.text} />
+                      </div>
+                    ),
+                  )}
+                  {awaitingReply && messageSegments(m).length === 0 && (
+                    <div className="bubble bubble-waiting">
+                      <StreamingDots />
+                    </div>
+                  )}
                   {m.content && !isActiveStream && (m.failed
                     ? <RetryMessageButton onRetry={onRetry} />
                     : <CopyMessageButton text={m.content} />)}

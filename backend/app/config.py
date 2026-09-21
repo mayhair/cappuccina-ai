@@ -6,8 +6,10 @@ from dotenv import load_dotenv
 load_dotenv()
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
+OPENROUTER_BASE_URL = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
+MODEL_ID = os.getenv("MODEL_ID", "z-ai/glm-5.3-flash")
 PARALLEL_API_KEY = os.getenv("PARALLEL_API_KEY", "")
-MODEL_ID = os.getenv("MODEL_ID", "gpt-5.6-luna")
 
 # Image generation (generate_image agent tool). The model must return images
 # as base64; both the returned bytes and their dimensions are persisted.
@@ -31,7 +33,7 @@ GOOGLE_GMAIL_SCOPES = [
     "https://www.googleapis.com/auth/gmail.send",
 ]
 
-REASONING_LEVELS = {"none", "low", "medium", "high", "xhigh", "max"}
+REASONING_LEVELS = {"low", "high", "max"}
 
 # The current date formatted like e.g. "15 September 2026"
 now_utc = datetime.now(timezone.utc)

@@ -19,8 +19,8 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--url", default="http://localhost:8000")
 parser.add_argument(
     "--reasoning",
-    default="medium",
-    choices=["none", "low", "medium", "high", "xhigh", "max"],
+    default="high",
+    choices=["low", "high", "max"],
 )
 parser.add_argument("--mode", default="chat", choices=["chat", "tutor"])
 parser.add_argument("--subject", default=None)

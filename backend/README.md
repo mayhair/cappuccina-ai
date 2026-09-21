@@ -8,7 +8,7 @@ FastAPI + LangGraph chatbot backend.
 cd backend
 python -m venv .venv
 .\.venv\Scripts\pip install -r requirements.txt
-Copy-Item .env.example .env   # fill in OPENAI_API_KEY and PARALLEL_API_KEY
+Copy-Item .env.example .env   # fill in OPENROUTER_API_KEY, OPENAI_API_KEY and PARALLEL_API_KEY
 ```
 
 ## Run
@@ -39,7 +39,7 @@ Chat:
 - `POST /api/v1/chat` — JSON `{chatId, messages, reasoning, mode, subject}` -> `{role, content, reasoning, tool_calls}`
 - `POST /api/v1/chat/stream` — same body, SSE stream (`start`/`token`/`reasoning`/`tool_call`/`tool_result`/`done` events)
 
-`reasoning`: `low|medium|high`. `mode`: `chat|tutor` (tutor takes `subject`).
+`reasoning`: `low|high|max`. `mode`: `chat|tutor` (tutor takes `subject`).
 
 ## Structure
 
@@ -52,7 +52,7 @@ Chat:
 - `app/db.py` — SQLite (users, sessions, chats, messages, google_grants, oauth_states)
 - `agent/graph.py` — LangGraph: `call_model -> (tool?) -> tools -> call_model ... -> END`
 - `agent/tools.py` — `solve_equation`, `web_search`, `search_emails`, `read_email`, `draft_email`
-- `agent/model.py` — model factory (`MODEL_ID` env, `-luna` default)
+- `agent/model.py` — model factory (OpenRouter, `MODEL_ID` env, `glm-5.3-flash` default)
 
 The authenticated user id reaches Gmail tools through LangGraph's
 `config={"configurable": {"user_id": ...}}`; tools declare a `RunnableConfig`

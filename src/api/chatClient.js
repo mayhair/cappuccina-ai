@@ -10,7 +10,7 @@ function buildRequest({ chatId, messages, reasoning, mode, subject, generateTitl
   return {
     chatId,
     messages,
-    reasoning: reasoning ?? 'medium',
+    reasoning: reasoning ?? 'high',
     mode: mode ?? 'chat',
     subject: subject ?? null,
     generateTitle: generateTitle ?? false,

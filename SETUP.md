@@ -19,7 +19,8 @@ only talks to the frontend port. Chat history lives in SQLite at
 - **Python 3.11+** (the backend uses `X | Y` type syntax)
 - **Node.js 20 LTS or newer** (Vite 5 requirement) + npm
 - A terminal: **PowerShell 5.1+** on Windows, any POSIX shell on macOS/Linux
-- API keys: an **OpenAI API key** (required), a **Parallel Search API key**
+- API keys: an **OpenRouter API key** (required, chat model), an **OpenAI API
+  key** (required, image generation), a **Parallel Search API key**
   (required for the web-search tool; chat still works without it), and a
   **Google OAuth client** (required to sign in — see §4)
 
@@ -80,9 +81,10 @@ nano .env
 
 | Variable               | Required   | Notes                                                        |
 |------------------------|------------|--------------------------------------------------------------|
-| `OPENAI_API_KEY`       | Yes        | Chat + reasoning summaries                                   |
+| `OPENROUTER_API_KEY`   | Yes        | Chat model + reasoning (via OpenRouter)                      |
+| `OPENAI_API_KEY`       | For images | Image generation tool; chat works without it                 |
 | `PARALLEL_API_KEY`     | For search | Web-search tool; chat works without it                       |
-| `MODEL_ID`             | No         | Defaults to `gpt-5.6-luna`                                   |
+| `MODEL_ID`             | No         | Defaults to `z-ai/glm-5.3-flash` (OpenRouter)                |
 | `GOOGLE_CLIENT_ID`     | Yes        | Google OAuth web client (see §4)                             |
 | `GOOGLE_CLIENT_SECRET` | Yes        | Google OAuth web client (see §4)                             |
 | `TOKEN_ENC_KEY`        | Yes        | Encrypts Gmail tokens at rest; `openssl rand -hex 32`        |
@@ -274,7 +276,7 @@ Same URL: **http://localhost:5173**. Drop `--reload` for a calmer backend log.
 | Gmail connect instantly errors | Consent-screen scopes missing, or `TOKEN_ENC_KEY` empty |
 | Gmail disconnects every ~7 days | Testing-mode refresh tokens expire weekly — reconnect in Settings (see §4) |
 | Search tool fails, chat is fine | Missing/invalid `PARALLEL_API_KEY` in `backend/.env` |
-| Model errors on startup | Missing `OPENAI_API_KEY`, or `MODEL_ID` your key can't access |
+| Model errors on startup | Missing `OPENROUTER_API_KEY`, or `MODEL_ID` your key can't access |
 | Thinking blocks always say "Thinking..." | Stale DB from before durations were stored — fixed going forward; old rows show "Thought" |
 | Weird local state | Delete `backend/data/cappuccina.db` to reset all chats (fresh `CREATE TABLE`s + migrations re-run on next start) |
 | `pip install` fails on Windows | Use a matching Python 3.11+ from python.org; avoid the Store shim (`py -m pip install -r requirements.txt`) |

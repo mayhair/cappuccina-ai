@@ -11,10 +11,9 @@ const EFFORT_KEY = 'cappuccina-effort'
 const DEFAULT_TITLE = 'New chat'
 
 export const EFFORTS = [
-  { label: 'Light', value: 'low' },
-  { label: 'Medium', value: 'medium' },
+  { label: 'Low', value: 'low' },
   { label: 'High', value: 'high' },
-  { label: 'Extra High', value: 'xhigh' },
+  { label: 'Max', value: 'max' },
 ]
 
 function loadEffort() {
@@ -24,7 +23,7 @@ function loadEffort() {
   } catch {
     // storage unavailable
   }
-  return 'Medium'
+  return 'High'
 }
 
 export function makeChat() {
@@ -186,14 +185,27 @@ export function useChatController(enabled) {
         ...messages,
         { role: 'assistant', content: '', reasoning: '', tools: [], parts: [], thinkingDone: false, thoughtSeconds: null, failed: false },
       ])
-      const streamStart = Date.now()
-      let thoughtEnd = null
-      const finishThinking = () => {
-        if (thoughtEnd !== null) return
-        thoughtEnd = Date.now()
-        const seconds = (thoughtEnd - streamStart) / 1000
-        patchAssistant(chatId, () => ({ thinkingDone: true, thoughtSeconds: seconds }))
+      // Per-thinking-block timing, mirroring the backend: a run of consecutive
+      // reasoning/tool parts is one block; it is stamped with its duration
+      // when text follows or the stream ends.
+      let blockStart = null
+      const openBlock = () => {
+        if (blockStart === null) blockStart = Date.now()
       }
+      // Ends the current thinking block and returns its duration in seconds,
+      // or null when no block was open (so nothing needs stamping).
+      const closeBlock = () => {
+        if (blockStart === null) return null
+        const seconds = (Date.now() - blockStart) / 1000
+        blockStart = null
+        return seconds
+      }
+      const stampParts = (parts, seconds) =>
+        seconds == null
+          ? parts
+          : parts.map((p) =>
+              p.type === 'text' || p.seconds != null ? p : { ...p, seconds },
+            )
       await sendStreaming({
         chatId,
         messages: history,
@@ -203,10 +215,22 @@ export function useChatController(enabled) {
         generateTitle: history.length === 1,
       }, {
         onToken: (word) => {
-          finishThinking()
-          patchAssistant(chatId, (m) => ({ content: m.content + word }))
+          const seconds = closeBlock()
+          patchAssistant(chatId, (m) => {
+            const parts = [...(m.parts ?? [])]
+            const last = parts[parts.length - 1]
+            // Text becomes a part so it can sit between thinking blocks:
+            // the model may say "Let me check..." then think again.
+            if (last && last.type === 'text') {
+              parts[parts.length - 1] = { ...last, text: (last.text ?? '') + word }
+            } else {
+              parts.push({ type: 'text', text: word })
+            }
+            return { parts: stampParts(parts, seconds), content: m.content + word }
+          })
         },
         onReasoning: (piece) => {
+          openBlock()
           patchAssistant(chatId, (m) => {
             const parts = [...(m.parts ?? [])]
             const last = parts[parts.length - 1]
@@ -219,6 +243,7 @@ export function useChatController(enabled) {
           })
         },
         onToolCall: (call) => {
+          openBlock()
           const tool = {
             type: 'tool',
             id: call.id,
@@ -263,7 +288,13 @@ export function useChatController(enabled) {
           if (streamSeq.current === seq) setStatus('idle')
         },
       })
-      finishThinking()
+      // Stamp the final thinking block (the stream ended while still thinking).
+      const trailingSeconds = closeBlock()
+      if (trailingSeconds != null) {
+        patchAssistant(chatId, (m) => ({
+          parts: stampParts([...(m.parts ?? [])], trailingSeconds),
+        }))
+      }
     })().catch((err) => {
       console.error('chat error', err)
       patchMessages(chatId, (messages) =>
@@ -298,7 +329,7 @@ export function useChatController(enabled) {
     if (!text || status !== 'idle') return
     const chat = activeChat
     const userMessage = { role: 'user', content: text }
-    const reasoning = EFFORTS.find((e) => e.label === effort)?.value ?? 'medium'
+    const reasoning = EFFORTS.find((e) => e.label === effort)?.value ?? 'high'
     const history = [...chat.messages, userMessage]
 
     patchMessages(chat.id, () => history)
@@ -330,7 +361,7 @@ export function useChatController(enabled) {
     }
     if (lastUser === -1) return
     const history = messages.slice(0, lastUser + 1)
-    const reasoning = EFFORTS.find((e) => e.label === effort)?.value ?? 'medium'
+    const reasoning = EFFORTS.find((e) => e.label === effort)?.value ?? 'high'
     patchMessages(chat.id, () => history)
     ;(async () => {
       try {
