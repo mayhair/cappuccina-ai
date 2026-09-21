@@ -3,7 +3,7 @@ import { EmojiText } from '../lib/emoji'
 
 const CHAR_MS = 40
 
-export function TypewriterTitle({ text, onDone }) {
+export function TypewriterTitle({ text, onDone, className = 'chat-title typewriter' }) {
   const [count, setCount] = useState(0)
   const done = useRef(onDone)
   done.current = onDone
@@ -28,7 +28,7 @@ export function TypewriterTitle({ text, onDone }) {
   }, [text])
 
   return (
-    <span className="chat-title typewriter" aria-label={text}>
+    <span className={className} aria-label={text}>
       <span aria-hidden="true">
         <EmojiText text={text.slice(0, count)} />
       </span>

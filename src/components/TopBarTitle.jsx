@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { TypewriterTitle } from './TypewriterTitle'
 
-export function TopBarTitle({ title, onRename }) {
+export function TopBarTitle({ title, typing, onTyped, onRename }) {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(title)
   const inputRef = useRef(null)
@@ -72,7 +73,11 @@ export function TopBarTitle({ title, onRename }) {
 
   return (
     <button type="button" className="chat-title-btn" onClick={start}>
-      {title}
+      {typing ? (
+        <TypewriterTitle text={title} onDone={onTyped} className="typewriter" />
+      ) : (
+        title
+      )}
     </button>
   )
 }

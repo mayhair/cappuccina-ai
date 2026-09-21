@@ -187,6 +187,8 @@ export default function App() {
             />
             <TopBarTitle
               title={activeChat.pending ? '' : activeChat.title}
+              typing={activeChat.id === typingTitleId}
+              onTyped={clearTypingTitle}
               onRename={(title) => renameChat(activeChat.id, title)}
             />
           </div>
