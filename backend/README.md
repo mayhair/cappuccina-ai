@@ -8,7 +8,7 @@ FastAPI + LangGraph chatbot backend.
 cd backend
 python -m venv .venv
 .\.venv\Scripts\pip install -r requirements.txt
-Copy-Item .env.example .env   # fill in OPENAI_API_KEY and BRAVE_API_KEY
+Copy-Item .env.example .env   # fill in OPENAI_API_KEY and PARALLEL_API_KEY
 ```
 
 ## Run
@@ -51,7 +51,7 @@ Chat:
 - `app/gmail.py` — Gmail REST client (search/read/draft/send) over httpx
 - `app/db.py` — SQLite (users, sessions, chats, messages, google_grants, oauth_states)
 - `agent/graph.py` — LangGraph: `call_model -> (tool?) -> tools -> call_model ... -> END`
-- `agent/tools.py` — `solve_equation`, `brave_search`, `search_emails`, `read_email`, `draft_email`
+- `agent/tools.py` — `solve_equation`, `web_search`, `search_emails`, `read_email`, `draft_email`
 - `agent/model.py` — model factory (`MODEL_ID` env, `-luna` default)
 
 The authenticated user id reaches Gmail tools through LangGraph's

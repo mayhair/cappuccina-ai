@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
-BRAVE_API_KEY = os.getenv("BRAVE_API_KEY", "")
+PARALLEL_API_KEY = os.getenv("PARALLEL_API_KEY", "")
 MODEL_ID = os.getenv("MODEL_ID", "gpt-5.6-luna")
 
 # Image generation (generate_image agent tool). The model must return images

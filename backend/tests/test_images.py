@@ -95,7 +95,7 @@ def test_image_part_from_result():
         "height": 1024,
     }
     # Other tools, failures and garbage never produce image parts.
-    assert main._image_part_from_result("brave_search", marker) is None
+    assert main._image_part_from_result("web_search", marker) is None
     assert main._image_part_from_result("generate_image", "nope") is None
     assert main._image_part_from_result("generate_image", "") is None
     assert (

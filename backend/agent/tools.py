@@ -4,10 +4,11 @@ import json
 import httpx
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import tool
+from parallel import Parallel
 from sympy import Eq, solve, sympify
 
 from app import db, gmail
-from app.config import BRAVE_API_KEY, IMAGE_MODEL_ID, IMAGE_SIZE, OPENAI_API_KEY
+from app.config import IMAGE_MODEL_ID, IMAGE_SIZE, OPENAI_API_KEY, PARALLEL_API_KEY
 from app.google_oauth import GmailNotConnected
 
 
@@ -23,20 +24,18 @@ def solve_equation(expression: str) -> str:
 
 
 @tool
-def brave_search(query: str) -> str:
-    """Search the web via Brave Search API. Use for current events, facts you don't know, or anything requiring up-to-date info."""
-    with httpx.Client(timeout=10) as client:
-        resp = client.get(
-            "https://api.search.brave.com/res/v1/web/search",
-            params={"q": query, "count": 3},
-            headers={"X-Subscription-Token": BRAVE_API_KEY, "Accept": "application/json"},
-        )
-        resp.raise_for_status()
-    results = resp.json().get("web", {}).get("results", [])
+def web_search(query: str) -> str:
+    """Search the web via the Parallel Search API. Use for current events, facts you don't know, or anything requiring up-to-date info."""
+    client = Parallel(api_key=PARALLEL_API_KEY)
+    try:
+        response = client.search(search_queries=[query], mode="fast")
+    except Exception as exc:
+        return f"Couldn't search the web ({exc})."
+    results = response.results or []
     if not results:
         return "No results found."
     return "\n\n".join(
-        f"{r['title']}: {r.get('description', '')} ({r['url']})" for r in results
+        f"{r.title}: {' '.join(r.excerpts or [])[:500]} ({r.url})" for r in results
     )
 
 
@@ -181,12 +180,12 @@ def draft_email(to: str, subject: str, body: str, config: RunnableConfig) -> str
     return json.dumps({"status": "draft_created", **draft})
 
 
-ALL_TOOLS = [solve_equation, brave_search, generate_image, search_emails, read_email, draft_email]
+ALL_TOOLS = [solve_equation, web_search, generate_image, search_emails, read_email, draft_email]
 
 # Human-friendly names for UI display ("Called Tool: ...").
 TOOL_DISPLAY_NAMES = {
     "solve_equation": "Calculator",
-    "brave_search": "Web Search",
+    "web_search": "Web Search",
     "generate_image": "Drawing",
     "search_emails": "Inbox Search",
     "read_email": "Read Email",

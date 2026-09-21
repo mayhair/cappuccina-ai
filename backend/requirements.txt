@@ -8,4 +8,5 @@ sympy>=1.13.3
 sse-starlette>=2.1
 pydantic>=2.10
 python-dotenv>=1.0
+parallel-web>=0.1
 cryptography>=43
