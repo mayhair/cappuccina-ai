@@ -225,6 +225,32 @@ input { caret-color: var(--pink-strong); }
   transform: translate(-50%, 0);
 }
 
+/* Same look as .has-tip, but floated via a portal so scroll containers that
+   clip (like .chat-list) can't cut it off. Positioned in JS. */
+.tip-bubble {
+  position: fixed;
+  z-index: 200;
+  padding: 0.4rem 0.65rem;
+  border-radius: 9px;
+  border: 1px solid var(--tooltip-border);
+  background: var(--tooltip-bg);
+  color: var(--tooltip-ink);
+  box-shadow: var(--tooltip-shadow);
+  font-family: var(--font-body);
+  font-size: 12.5px;
+  font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 90ms ease;
+}
+.tip-bubble.in { opacity: 1; }
+
+@media (prefers-reduced-motion: reduce) {
+  .tip-bubble { transition: none; }
+}
+
 .new-chat-btn {
   display: flex;
   align-items: center;
@@ -329,6 +355,9 @@ input { caret-color: var(--pink-strong); }
 .chat-list-item.active { background: var(--pink-soak); color: var(--ink); }
 .chat-list-item > svg { width: 1.15em; height: 1.15em; flex: none; opacity: 0.7; }
 .chat-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 0.9em;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

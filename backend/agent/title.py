@@ -6,8 +6,9 @@ from agent.model import make_model
 
 TITLE_SYSTEM_PROMPT = (
     "You title chats. Given the first user message and the assistant's first reply, "
-    "output a title of at most 6 words. Plain text only - no quotes, no trailing "
-    "periods or commas; a trailing ? or ! is fine. Same language as the user."
+    "output a short title of at most 4 words. Aim for 2-4 words. Plain text only - "
+    "no quotes, no trailing periods or commas; a trailing ? or ! is fine. Same "
+    "language as the user."
 )
 
 MAX_WORDS = 8

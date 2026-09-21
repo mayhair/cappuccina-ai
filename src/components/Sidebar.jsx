@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { ChatIcon, TrashIcon, PlusIcon, SearchIcon, CloseIcon, DotsIcon, PencilIcon, LogoutIcon, GearIcon } from './Icons'
 import { TypewriterTitle } from './TypewriterTitle'
+import { ChatTitle } from './ChatTitle'
 import { EmojiText } from '../lib/emoji'
 
 export function Sidebar({ chats, activeChatId, onSelect, onNewChat, onDelete, onRename, query, onQuery, searchInputRef, collapsed, typingTitleId, onTitleTyped, user, onLogout, onSettings }) {
@@ -166,9 +167,7 @@ export function Sidebar({ chats, activeChatId, onSelect, onNewChat, onDelete, on
               ) : c.id === typingTitleId ? (
                 <TypewriterTitle text={c.title} onDone={onTitleTyped} />
               ) : (
-                <span className="chat-title">
-                  <EmojiText text={c.title} />
-                </span>
+                <ChatTitle text={c.title} />
               )}
               {c.tag && (
                 <span className={`tag${c.tag === 'TUTOR' ? ' tutor' : ''}`}>{c.tag}</span>
