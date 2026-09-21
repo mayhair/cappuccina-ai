@@ -1281,7 +1281,7 @@ img.user-avatar {
 .effort-pill:hover { color: var(--ink-soft); }
 .effort-pill:disabled { opacity: 0.6; cursor: default; }
 .effort-pill .chev { width: 0.95em; height: 0.95em; transition: transform 150ms ease; }
-.effort-pill .chev.open { transform: rotate(90deg); }
+.effort-pill .chev.open { transform: rotate(-90deg); }
 .effort-veil {
   position: fixed;
   inset: 0;
