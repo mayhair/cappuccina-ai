@@ -42,7 +42,7 @@ await page.waitForFunction(() =>
 console.log("tutor welcome copy: shown");
 
 // main input placeholder cues the subject
-const placeholder = await page.getAttribute('input[aria-label="Message Cappuccina"]', "placeholder");
+const placeholder = await page.getAttribute('textarea[aria-label="Message Cappuccina"]', "placeholder");
 console.log("tutor placeholder:", placeholder === "What shall we learn today?");
 
 // TUTOR badge appears in the sidebar chat list
@@ -50,7 +50,7 @@ const badge = page.locator(".chat-list-item.active .tag.tutor");
 console.log("TUTOR badge visible:", (await badge.count()) === 1, await badge.textContent());
 
 // send a message; the subject is typed in the main box but not parsed out — null subject
-await page.fill('input[aria-label="Message Cappuccina"]', "help me with fractions");
+await page.fill('textarea[aria-label="Message Cappuccina"]', "help me with fractions");
 await page.keyboard.press("Enter");
 await page.waitForFunction(
   () => [...document.querySelectorAll(".bubble")].some((b) => b.textContent.includes("4x")),

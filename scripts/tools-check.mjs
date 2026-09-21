@@ -44,7 +44,7 @@ await page.route("**/api/v1/chat/stream", async (route) => {
 });
 
 await page.goto("http://localhost:4173/", { waitUntil: "networkidle" });
-await page.fill('input[aria-label="Message Cappuccina"]', "weather in both Londons");
+await page.fill('textarea[aria-label="Message Cappuccina"]', "weather in both Londons");
 await page.keyboard.press("Enter");
 
 // wait for the thinking header, then expand it

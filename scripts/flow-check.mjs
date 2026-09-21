@@ -10,7 +10,7 @@ await page.goto("http://localhost:4173/", { waitUntil: "networkidle" });
 
 // count bubbles, send a message
 const before = await page.locator(".bubble").count();
-await page.fill('input[aria-label="Message Cappuccina"]', "I have a math test tomorrow");
+await page.fill('textarea[aria-label="Message Cappuccina"]', "I have a math test tomorrow");
 await page.keyboard.press("Enter");
 
 // assistant placeholder (animated dots) should show while the reply streams

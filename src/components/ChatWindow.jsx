@@ -81,6 +81,35 @@ function formatArgs(args) {
   }
 }
 
+// Colours a pretty-printed JSON blob by splitting it into React element spans
+// (never innerHTML) so untrusted model output stays injection-safe. Anything
+// that is not a quoted string, number, or boolean/null literal is left as
+// plain text, so non-JSON args still render legibly.
+const JSON_TOKEN =
+  /("(?:\\.|[^"\\])*"\s*:)|("(?:\\.|[^"\\])*")|(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)|(true|false|null)/g
+
+function highlightJson(text) {
+  const out = []
+  let last = 0
+  let n = 0
+  for (const m of text.matchAll(JSON_TOKEN)) {
+    if (m.index > last) out.push(text.slice(last, m.index))
+    const cls =
+      m[1] !== undefined ? 'json-key'
+        : m[2] !== undefined ? 'json-string'
+          : m[3] !== undefined ? 'json-number'
+            : 'json-literal'
+    out.push(
+      <span key={`j-${n++}`} className={cls}>
+        {m[0]}
+      </span>,
+    )
+    last = m.index + m[0].length
+  }
+  if (last < text.length) out.push(text.slice(last))
+  return out
+}
+
 // A successful draft_email tool result carries JSON the UI turns into a
 // reviewable card with an explicit Send button.
 function draftFromTool(tool) {
@@ -437,6 +466,7 @@ function DraftCard({ draft, onSent }) {
 function ToolCallBlock({ tool }) {
   const [open, setOpen] = useState(false)
   const running = tool.result == null
+  const failed = tool.ok === false
   const argsText = formatArgs(tool.args)
   return (
     <div className="tool-call">
@@ -446,11 +476,23 @@ function ToolCallBlock({ tool }) {
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
       >
-        <WrenchIcon />
-        <span className="tool-title">
-          Called Tool: {tool.display || tool.name}
-          {running && <span className="tool-running"> · Running…</span>}
+        <span className="tool-badge" aria-hidden="true">
+          <WrenchIcon />
         </span>
+        <span className="tool-title">{tool.display || tool.name}</span>
+        {running ? (
+          <span className="tool-status running">
+            <StreamingDots label={`${tool.display || tool.name} is running`} />
+            Running
+          </span>
+        ) : failed ? (
+          <span className="tool-status failed">Failed</span>
+        ) : (
+          <span className="tool-status done">
+            <CheckIcon />
+            Done
+          </span>
+        )}
         <ChevronIcon className={`chev${open ? ' open' : ''}`} />
       </button>
       {open && (
@@ -458,14 +500,13 @@ function ToolCallBlock({ tool }) {
           {argsText && (
             <div className="tool-section">
               <div className="tool-section-label">Input</div>
-              <pre className="tool-args">{argsText}</pre>
+              <pre className="tool-args">{highlightJson(argsText)}</pre>
             </div>
           )}
           <div className="tool-section">
             <div className="tool-section-label">Result</div>
             <div className="tool-result">
               {imageResultSummary(tool) ?? <EmojiText text={tool.result ?? 'Running…'} />}
-              {tool.ok === false && ' (failed)'}
             </div>
           </div>
         </div>
@@ -474,7 +515,7 @@ function ToolCallBlock({ tool }) {
   )
 }
 
-function ThinkingBlock({ parts: segmentParts, streaming }) {
+function ThinkingBlock({ parts: segmentParts, streaming, fallbackSeconds = null }) {
   const [open, setOpen] = useState(false)
   // Draft calls are surfaced as their own card below the message, so hide the
   // raw tool block to avoid showing the same email twice.
@@ -484,14 +525,17 @@ function ThinkingBlock({ parts: segmentParts, streaming }) {
   if (parts.length === 0) return null
 
   // Each thinking block carries its own duration (stamped on its parts when
-  // the block closes — see backend/app/main.py). A block with no stamp yet is
-  // still being thought through, so it reads "Thinking...".
+  // the block closes — see backend/app/main.py). Messages stored before
+  // per-part timing, and replies from the non-streaming endpoint, only carry a
+  // message-level duration, so fall back to it when no part is stamped. A
+  // block with neither while still streaming is still being thought through.
   const stamped = parts.find((p) => p.seconds != null)
-  const done = stamped != null || !streaming
+  const seconds = stamped?.seconds ?? fallbackSeconds
+  const done = seconds != null || !streaming
   const label = !done
     ? 'Thinking...'
-    : stamped
-      ? formatThought(stamped.seconds)
+    : seconds != null
+      ? formatThought(seconds)
       : 'Thought'
 
   return (
@@ -711,6 +755,11 @@ export function ChatWindow({ chat, user, isStreaming, draft, onDraft, onSend, on
             m.role === 'user'
               ? (m.parts ?? []).map(attachmentFromPart).filter(Boolean)
               : []
+          const segments = m.role === 'assistant' ? messageSegments(m) : []
+          // A message-level duration is only unambiguous when the whole reply
+          // is a single thinking block; with several blocks each carries its
+          // own stamp, so don't smear the total across all of them.
+          const thinkingCount = segments.filter((s) => s.type === 'thinking').length
           return (
             <div key={i} className={`msg-row ${m.role}${startsRun ? ' starts' : ''}`}>
               {m.role === 'assistant' ? (
@@ -728,12 +777,13 @@ export function ChatWindow({ chat, user, isStreaming, draft, onDraft, onSend, on
               )}
               {m.role === 'assistant' ? (
                 <div className="assistant-col">
-                  {messageSegments(m).map((seg, si) =>
+                  {segments.map((seg, si) =>
                     seg.type === 'thinking' ? (
                       <ThinkingBlock
                         key={`think-${si}`}
                         parts={seg.parts}
                         streaming={isActiveStream}
+                        fallbackSeconds={thinkingCount === 1 ? m.thoughtSeconds : null}
                       />
                     ) : (
                       <div key={`text-${si}`} className="bubble">
@@ -741,7 +791,7 @@ export function ChatWindow({ chat, user, isStreaming, draft, onDraft, onSend, on
                       </div>
                     ),
                   )}
-                  {awaitingReply && messageSegments(m).length === 0 && (
+                  {awaitingReply && segments.length === 0 && (
                     <div className="bubble bubble-waiting">
                       <StreamingDots />
                     </div>

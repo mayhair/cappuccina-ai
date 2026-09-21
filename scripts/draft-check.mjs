@@ -84,7 +84,7 @@ await page.route("**/api/v1/gmail/drafts/draft-check/send", async (route) => {
 });
 
 await page.goto("http://localhost:4173/", { waitUntil: "networkidle" });
-await page.fill('input[aria-label="Message Cappuccina"]', "email my teacher for an extension");
+await page.fill('textarea[aria-label="Message Cappuccina"]', "email my teacher for an extension");
 await page.keyboard.press("Enter");
 
 await page.waitForSelector(".draft-card", { timeout: 5000 });
