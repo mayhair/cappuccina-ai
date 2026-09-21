@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Sidebar } from './components/Sidebar'
 import { SidebarControls } from './components/SidebarControls'
+import { TopBarTitle } from './components/TopBarTitle'
 import { ChatWindow } from './components/ChatWindow'
 import { ThemeToggle } from './components/ThemeToggle'
 import { SparkleIcon } from './components/Icons'
@@ -183,6 +184,10 @@ export default function App() {
               onToggle={toggleSidebar}
               onSearch={openSidebarAndSearch}
               onNewChat={newChat}
+            />
+            <TopBarTitle
+              title={activeChat.pending ? '' : activeChat.title}
+              onRename={(title) => renameChat(activeChat.id, title)}
             />
           </div>
           <div className="top-bar-right">
