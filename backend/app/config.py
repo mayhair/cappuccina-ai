@@ -9,6 +9,8 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
 OPENROUTER_BASE_URL = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
 MODEL_ID = os.getenv("MODEL_ID", "z-ai/glm-5.3-flash")
+# Optional smaller/cheaper model for chat titles; falls back to MODEL_ID.
+TITLE_MODEL_ID = os.getenv("TITLE_MODEL_ID", "")
 PARALLEL_API_KEY = os.getenv("PARALLEL_API_KEY", "")
 
 # Image generation (generate_image agent tool). The model must return images

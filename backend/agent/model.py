@@ -1,6 +1,12 @@
 from langchain_openai import ChatOpenAI
 
-from app.config import MODEL_ID, OPENROUTER_API_KEY, OPENROUTER_BASE_URL, REASONING_LEVELS
+from app.config import (
+    MODEL_ID,
+    OPENROUTER_API_KEY,
+    OPENROUTER_BASE_URL,
+    REASONING_LEVELS,
+    TITLE_MODEL_ID,
+)
 
 DEFAULT_REASONING = "high"
 
@@ -54,18 +60,19 @@ class OpenRouterChatModel(ChatOpenAI):
         return generation_chunk
 
 
-def make_model(reasoning: str = DEFAULT_REASONING, tools=None):
-    # `reasoning=""` opts out of reasoning entirely (used for utility calls
-    # like chat titles, where thinking only wastes tokens). GLM rejects
-    # effort="none", so omit the field rather than sending it.
-    if reasoning and reasoning not in REASONING_LEVELS:
+def make_model(reasoning: str = DEFAULT_REASONING, tools=None, model_id: str = ""):
+    # `reasoning=""` omits the reasoning field entirely. "none" explicitly
+    # asks for zero thinking; models that don't support that effort level
+    # (e.g. GLM) reject the request, so callers wanting cheap reasoning fall
+    # back to "low" (see agent/title.py).
+    if reasoning != "none" and reasoning and reasoning not in REASONING_LEVELS:
         reasoning = DEFAULT_REASONING
     # The model runs on OpenRouter, which speaks the OpenAI Chat Completions
     # API (not the Responses API). Reasoning is requested through OpenRouter's
     # unified `reasoning` field, passed verbatim via extra_body so the OpenAI
     # SDK doesn't have to know about it.
     model = OpenRouterChatModel(
-        model=MODEL_ID,
+        model=model_id or MODEL_ID,
         api_key=OPENROUTER_API_KEY,
         base_url=OPENROUTER_BASE_URL,
         extra_body={"reasoning": {"effort": reasoning}} if reasoning else {},

@@ -1,5 +1,7 @@
 from langchain_core.messages import HumanMessage, SystemMessage
 
+from app.config import TITLE_MODEL_ID
+
 from agent.model import make_model
 
 TITLE_SYSTEM_PROMPT = (
@@ -30,17 +32,31 @@ def _clean(raw: str) -> str:
     return title.strip()
 
 
+# Try zero reasoning first; models that don't support effort="none" (e.g.
+# GLM) reject the request, so retry with "low". Once a rejection is seen we
+# skip "none" for the rest of the process's lifetime.
+_REASONING_ATTEMPTS = ("none", "low")
+_none_rejected = False
+
+
+def _reasoning_attempts():
+    return ("low",) if _none_rejected else _REASONING_ATTEMPTS
+
+
 async def generate_title(user_message: str, assistant_reply: str) -> str:
-    try:
-        model = make_model(reasoning="")
-        result = await model.ainvoke(
-            [
-                SystemMessage(TITLE_SYSTEM_PROMPT),
-                HumanMessage(
-                    f"User: {user_message}\nAssistant: {assistant_reply[:500]}\nTitle:"
-                ),
-            ]
-        )
-        return _clean(_content_text(getattr(result, "content", "")))
-    except Exception:
-        return ""
+    global _none_rejected
+    messages = [
+        SystemMessage(TITLE_SYSTEM_PROMPT),
+        HumanMessage(
+            f"User: {user_message}\nAssistant: {assistant_reply[:500]}\nTitle:"
+        ),
+    ]
+    for reasoning in _reasoning_attempts():
+        try:
+            model = make_model(reasoning=reasoning, model_id=TITLE_MODEL_ID)
+            result = await model.ainvoke(messages)
+            return _clean(_content_text(getattr(result, "content", "")))
+        except Exception:
+            if reasoning == "none":
+                _none_rejected = True
+    return ""
