@@ -153,6 +153,41 @@ def generate_image(prompt: str, config: RunnableConfig) -> str:
     )
 
 
+# ---------- attachments (user uploads) ----------
+
+# How much document text one read_attachment call returns; longer files are
+# paged through with the `offset` argument.
+ATTACHMENT_CHUNK = 20_000
+
+
+@tool
+def read_attachment(attachment_id: str, config: RunnableConfig, offset: int = 0) -> str:
+    """Read the text of a file the user attached to this chat. Use the id shown in the message (for example, call this with the id from 'Attached file "report.pdf" (id=...)'). Long files come back in chunks: if the result says more remains, call again with offset set to where the previous read stopped."""
+    user_id = _user_id(config)
+    if not user_id:
+        return "That file isn't available right now."
+    row = db.get_attachment(user_id, attachment_id)
+    if row is None:
+        return "I couldn't find that attachment."
+    if row["kind"] != "document":
+        return f"{row['filename']} is an image — you can see it directly."
+    text = row["text"] or ""
+    if not text:
+        return f"{row['filename']} has no readable text."
+    total = len(text)
+    start = max(0, offset)
+    if start >= total:
+        return f"You've reached the end of {row['filename']} ({total} characters total)."
+    end = min(total, start + ATTACHMENT_CHUNK)
+    header = f"{row['filename']} ({total} characters, showing {start}-{end}):\n\n"
+    footer = (
+        f"\n\n[More remains — call read_attachment again with offset={end}.]"
+        if end < total
+        else ""
+    )
+    return header + text[start:end] + footer
+
+
 def _gmail_unavailable(config: RunnableConfig | None) -> str | None:
     if not _user_id(config):
         return "Gmail isn't available right now."
@@ -215,7 +250,7 @@ def draft_email(to: str, subject: str, body: str, config: RunnableConfig) -> str
     return json.dumps({"status": "draft_created", **draft})
 
 
-ALL_TOOLS = [solve_equation, web_search, read_webpage, generate_image, search_emails, read_email, draft_email]
+ALL_TOOLS = [solve_equation, web_search, read_webpage, generate_image, read_attachment, search_emails, read_email, draft_email]
 
 # Human-friendly names for UI display ("Called Tool: ...").
 TOOL_DISPLAY_NAMES = {
@@ -223,6 +258,7 @@ TOOL_DISPLAY_NAMES = {
     "web_search": "Web Search",
     "read_webpage": "Read Webpage",
     "generate_image": "Drawing",
+    "read_attachment": "Read File",
     "search_emails": "Inbox Search",
     "read_email": "Read Email",
     "draft_email": "Compose Email",

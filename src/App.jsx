@@ -124,6 +124,11 @@ export default function App() {
     clearTypingTitle,
     markDraftSent,
     selectChat,
+    attachments,
+    uploading,
+    attachError,
+    addAttachments,
+    removeAttachment,
   } = chat
 
   return (
@@ -193,6 +198,11 @@ export default function App() {
           mode={activeChat.mode ?? 'chat'}
           subject={activeChat.subject}
           onMode={(mode, subject) => setMode(activeChatId, mode, subject)}
+          attachments={attachments}
+          uploading={uploading}
+          attachError={attachError}
+          onAttach={addAttachments}
+          onRemoveAttachment={removeAttachment}
         />
       </main>
     </div>

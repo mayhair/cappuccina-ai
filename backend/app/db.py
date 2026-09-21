@@ -32,6 +32,18 @@ _IMAGE_EXTENSIONS = {
 def image_file_path(image_id: str, mime: str) -> Path:
     return images_dir() / f"{image_id}.{_IMAGE_EXTENSIONS.get(mime, 'png')}"
 
+
+# Uploaded attachments (user files) live here as {attachment_id}.{ext}. The
+# original filename is kept in the attachments table for display only — it is
+# never used to build a path, so it can't escape this directory.
+def attachments_dir() -> Path:
+    return DATA_DIR / "attachments"
+
+
+def attachment_file_path(attachment_id: str, filename: str) -> Path:
+    return attachments_dir() / f"{attachment_id}{Path(filename or '').suffix.lower()}"
+
+
 _session_lock = threading.Lock()
 _conn: sqlite3.Connection | None = None
 
@@ -131,10 +143,25 @@ def _init_schema(conn: sqlite3.Connection) -> None:
             created_at TEXT NOT NULL
         );
 
+        CREATE TABLE IF NOT EXISTS attachments (
+            id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+            filename TEXT NOT NULL,
+            mime TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            size_bytes INTEGER NOT NULL DEFAULT 0,
+            text TEXT NOT NULL DEFAULT '',
+            char_count INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL
+        );
+
         CREATE INDEX IF NOT EXISTS idx_chats_user ON chats(user_id, created_at);
         CREATE INDEX IF NOT EXISTS idx_messages_chat ON messages(chat_id, id);
         CREATE INDEX IF NOT EXISTS idx_images_chat ON images(chat_id);
         CREATE INDEX IF NOT EXISTS idx_images_user ON images(user_id);
+        CREATE INDEX IF NOT EXISTS idx_attachments_chat ON attachments(chat_id);
+        CREATE INDEX IF NOT EXISTS idx_attachments_user ON attachments(user_id);
         """
     )
     cols = {row["name"] for row in conn.execute("PRAGMA table_info(messages)").fetchall()}
@@ -508,17 +535,27 @@ def delete_chat(user_id: str, chat_id: str) -> bool:
         "SELECT id, mime FROM images WHERE chat_id = :chat_id AND user_id = :user_id",
         {"chat_id": chat_id, "user_id": user_id},
     ).fetchall()
+    doomed_attachments = conn.execute(
+        "SELECT id, filename FROM attachments"
+        " WHERE chat_id = :chat_id AND user_id = :user_id",
+        {"chat_id": chat_id, "user_id": user_id},
+    ).fetchall()
     cur = conn.execute(
         "DELETE FROM chats WHERE id = :id AND user_id = :user_id",
         {"id": chat_id, "user_id": user_id},
     )
     conn.commit()
     if cur.rowcount > 0:
-        # Image rows go with the chat via ON DELETE CASCADE; the files need
-        # explicit cleanup so deleted chats leave no orphan bytes behind.
+        # Image/attachment rows go with the chat via ON DELETE CASCADE; the
+        # files need explicit cleanup so deleted chats leave no orphan bytes.
         for row in doomed:
             try:
                 image_file_path(row["id"], row["mime"]).unlink(missing_ok=True)
+            except OSError:
+                pass
+        for row in doomed_attachments:
+            try:
+                attachment_file_path(row["id"], row["filename"]).unlink(missing_ok=True)
             except OSError:
                 pass
     return cur.rowcount > 0
@@ -668,3 +705,73 @@ def get_image(user_id: str, image_id: str) -> sqlite3.Row | None:
         "SELECT * FROM images WHERE id = :id AND user_id = :user_id",
         {"id": image_id, "user_id": user_id},
     ).fetchone()
+
+
+# ---------- attachments (user uploads) ----------
+
+def create_attachment(
+    user_id: str,
+    chat_id: str,
+    filename: str,
+    data: bytes,
+    kind: str,
+    mime: str,
+    text: str = "",
+) -> dict:
+    """Persist an uploaded file and return its metadata row as a dict.
+
+    Image bytes and document text are the server's source of truth: messages
+    only carry a small {"type": "attachment", "attachmentId": ...} part, so
+    neither bytes nor extracted text flow through full-history sync payloads.
+    """
+    attachment_id = uuid.uuid4().hex
+    attachments_dir().mkdir(parents=True, exist_ok=True)
+    attachment_file_path(attachment_id, filename).write_bytes(data)
+    conn = get_conn()
+    conn.execute(
+        "INSERT INTO attachments (id, user_id, chat_id, filename, mime, kind,"
+        " size_bytes, text, char_count, created_at)"
+        " VALUES (:id, :user_id, :chat_id, :filename, :mime, :kind,"
+        " :size_bytes, :text, :char_count, :created_at)",
+        {
+            "id": attachment_id,
+            "user_id": user_id,
+            "chat_id": chat_id,
+            "filename": filename,
+            "mime": mime,
+            "kind": kind,
+            "size_bytes": len(data),
+            "text": text,
+            "char_count": len(text),
+            "created_at": _now(),
+        },
+    )
+    conn.commit()
+    created = get_attachment(user_id, attachment_id)
+    assert created is not None
+    return dict(created)
+
+
+def get_attachment(user_id: str, attachment_id: str) -> sqlite3.Row | None:
+    """User-scoped lookup: another user's file (or a bogus id) is a miss."""
+    return get_conn().execute(
+        "SELECT * FROM attachments WHERE id = :id AND user_id = :user_id",
+        {"id": attachment_id, "user_id": user_id},
+    ).fetchone()
+
+
+def delete_attachment(user_id: str, attachment_id: str) -> bool:
+    conn = get_conn()
+    row = get_attachment(user_id, attachment_id)
+    if row is None:
+        return False
+    conn.execute(
+        "DELETE FROM attachments WHERE id = :id AND user_id = :user_id",
+        {"id": attachment_id, "user_id": user_id},
+    )
+    conn.commit()
+    try:
+        attachment_file_path(row["id"], row["filename"]).unlink(missing_ok=True)
+    except OSError:
+        pass
+    return True

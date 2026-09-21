@@ -108,3 +108,32 @@ export const renameChatOnServer = (chatId, title) =>
 
 export const deleteChatOnServer = (chatId) =>
   jsonFetch(`/api/v1/chats/${chatId}`, { method: 'DELETE' })
+
+// ---------- attachments (user uploads) ----------
+
+export async function uploadAttachment(chatId, file) {
+  const form = new FormData()
+  form.append('chatId', chatId)
+  form.append('file', file)
+  const res = await fetch('/api/v1/attachments', {
+    method: 'POST',
+    credentials: 'include',
+    body: form,
+  })
+  if (!res.ok) {
+    let detail = `Upload failed (${res.status})`
+    try {
+      const body = await res.json()
+      if (body?.detail) detail = body.detail
+    } catch {
+      // non-JSON error body
+    }
+    const err = new Error(detail)
+    err.status = res.status
+    throw err
+  }
+  return res.json()
+}
+
+export const deleteAttachment = (attachmentId) =>
+  jsonFetch(`/api/v1/attachments/${attachmentId}`, { method: 'DELETE' })

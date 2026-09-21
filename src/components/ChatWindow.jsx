@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { SendIcon, ChevronIcon, WrenchIcon, CopyIcon, CheckIcon, RetryIcon, MailIcon, PencilIcon } from './Icons'
+import { SendIcon, ChevronIcon, WrenchIcon, CopyIcon, CheckIcon, RetryIcon, MailIcon, PencilIcon, PaperclipIcon, FileIcon } from './Icons'
 import { EffortSelector } from './EffortSelector'
 import { ModeSwitch } from './ModeSwitch'
 import { Markdown } from '../lib/markdown'
@@ -115,6 +115,76 @@ function imageResultSummary(tool) {
   } catch {
     return null
   }
+}
+
+// Accepted by the picker; the server rejects anything else with a clear error.
+const ATTACH_ACCEPT = [
+  'image/png', 'image/jpeg', 'image/webp',
+  '.pdf', '.docx', '.pptx', '.xlsx',
+  '.txt', '.md', '.markdown', '.csv', '.tsv', '.json', '.log', '.rst',
+  '.py', '.js', '.jsx', '.ts', '.tsx', '.html', '.htm', '.css', '.xml',
+  '.yaml', '.yml', '.ini', '.cfg', '.toml', '.sql', '.sh', '.java', '.c',
+  '.h', '.cpp', '.go', '.rs', '.rb', '.php', '.tex',
+].join(',')
+
+function formatSize(bytes) {
+  if (!bytes) return ''
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
+// An attachment part references a server-stored file by id (see
+// backend/app/main.py); the bytes/text never travel with the message.
+function attachmentFromPart(part) {
+  if (part?.type !== 'attachment' || !part.attachmentId) return null
+  return {
+    id: part.attachmentId,
+    kind: part.kind,
+    name: part.name || 'file',
+    mime: part.mime || '',
+    size: part.size ?? 0,
+  }
+}
+
+function AttachmentPreview({ attachment }) {
+  const href = `/api/v1/attachments/${attachment.id}`
+  if (attachment.kind === 'image') {
+    return (
+      <a className="msg-attachment image" href={href} target="_blank" rel="noreferrer">
+        <img src={href} alt={attachment.name} loading="lazy" />
+      </a>
+    )
+  }
+  return (
+    <a className="msg-attachment file" href={href} target="_blank" rel="noreferrer">
+      <FileIcon />
+      <span className="msg-attachment-name">{attachment.name}</span>
+      {attachment.size ? <span className="msg-attachment-size">{formatSize(attachment.size)}</span> : null}
+    </a>
+  )
+}
+
+function AttachmentChip({ attachment, onRemove }) {
+  const href = `/api/v1/attachments/${attachment.id}`
+  return (
+    <div className={`attach-chip${attachment.kind === 'image' ? ' image' : ''}`}>
+      {attachment.kind === 'image' ? (
+        <img src={href} alt="" />
+      ) : (
+        <FileIcon />
+      )}
+      <span className="attach-chip-name" title={attachment.name}>{attachment.name}</span>
+      <button
+        type="button"
+        className="attach-chip-remove"
+        onClick={() => onRemove(attachment.id)}
+        aria-label={`Remove ${attachment.name}`}
+      >
+        ×
+      </button>
+    </div>
+  )
 }
 
 function ImageCard({ image }) {
@@ -507,13 +577,82 @@ function RetryMessageButton({ onRetry }) {
   )
 }
 
-export function ChatWindow({ chat, user, isStreaming, draft, onDraft, onSend, onRetry, onDraftSent, inputRef, effort, onEffort, mode, subject, onMode }) {
+export function ChatWindow({ chat, user, isStreaming, draft, onDraft, onSend, onRetry, onDraftSent, inputRef, effort, onEffort, mode, subject, onMode, attachments = [], uploading = false, attachError = '', onAttach, onRemoveAttachment }) {
   const listRef = useRef(null)
   const composerRef = useRef(null)
+  const fileRef = useRef(null)
   const setComposer = useCallback((el) => {
     composerRef.current = el
     if (inputRef) inputRef.current = el
   }, [inputRef])
+
+  const handleFiles = (e) => {
+    const files = e.target.files
+    if (files?.length) onAttach?.(files)
+    e.target.value = ''
+  }
+
+  const canAttach = !isStreaming && !uploading
+
+  // Window-level drag & drop. dragenter/dragleave fire for every child element
+  // crossed, so a depth counter keeps the overlay visible until we really leave.
+  const dragDepth = useRef(0)
+  const [dragActive, setDragActive] = useState(false)
+
+  useEffect(() => {
+    const hasFiles = (e) => Array.from(e.dataTransfer?.types || []).includes('Files')
+    const onDragEnter = (e) => {
+      if (!hasFiles(e)) return
+      e.preventDefault()
+      if (!canAttach) return
+      dragDepth.current += 1
+      setDragActive(true)
+    }
+    const onDragOver = (e) => {
+      // Always prevent default for files, or the browser would open the file
+      // instead of letting us handle the drop.
+      if (!hasFiles(e)) return
+      e.preventDefault()
+      e.dataTransfer.dropEffect = canAttach ? 'copy' : 'none'
+    }
+    const onDragLeave = () => {
+      dragDepth.current = Math.max(0, dragDepth.current - 1)
+      if (dragDepth.current === 0) setDragActive(false)
+    }
+    const onDrop = (e) => {
+      if (!hasFiles(e)) return
+      e.preventDefault()
+      dragDepth.current = 0
+      setDragActive(false)
+      if (!canAttach) return
+      const files = e.dataTransfer?.files
+      if (files?.length) onAttach?.(files)
+    }
+    window.addEventListener('dragenter', onDragEnter)
+    window.addEventListener('dragover', onDragOver)
+    window.addEventListener('dragleave', onDragLeave)
+    window.addEventListener('drop', onDrop)
+    return () => {
+      window.removeEventListener('dragenter', onDragEnter)
+      window.removeEventListener('dragover', onDragOver)
+      window.removeEventListener('dragleave', onDragLeave)
+      window.removeEventListener('drop', onDrop)
+    }
+  }, [canAttach, onAttach])
+
+  // Paste files from the clipboard (e.g. a copied screenshot). Text pastes fall
+  // through to the browser so the composer behaves normally.
+  useEffect(() => {
+    const onPaste = (e) => {
+      const files = e.clipboardData?.files
+      if (!files?.length || !canAttach) return
+      e.preventDefault()
+      onAttach?.(files)
+    }
+    window.addEventListener('paste', onPaste)
+    return () => window.removeEventListener('paste', onPaste)
+  }, [canAttach, onAttach])
+
   const scrollSig = chat.messages.map((m) => {
     const images = (m.parts ?? []).filter((p) => p.type === 'image').map((p) => p.imageId).join(',')
     return `${m.role}${m.content?.length ?? 0}${images}`
@@ -540,7 +679,7 @@ export function ChatWindow({ chat, user, isStreaming, draft, onDraft, onSend, on
     // Shift+Enter and touch keyboards insert a line break instead of sending.
     if (e.shiftKey || isTouchKeyboard()) return
     e.preventDefault()
-    if (draft.trim() && !isStreaming) onSend()
+    if ((draft.trim() || attachments.length > 0) && !isStreaming && !uploading) onSend()
   }
 
   return (
@@ -568,6 +707,10 @@ export function ChatWindow({ chat, user, isStreaming, draft, onDraft, onSend, on
               : []
           const drafts = toolParts.map(draftFromTool).filter(Boolean)
           const images = toolParts.map(imageFromPart).filter(Boolean)
+          const userAttachments =
+            m.role === 'user'
+              ? (m.parts ?? []).map(attachmentFromPart).filter(Boolean)
+              : []
           return (
             <div key={i} className={`msg-row ${m.role}${startsRun ? ' starts' : ''}`}>
               {m.role === 'assistant' ? (
@@ -619,9 +762,18 @@ export function ChatWindow({ chat, user, isStreaming, draft, onDraft, onSend, on
                 </div>
               ) : (
                 <div className="bubble">
-                  <p>
-                    <EmojiText text={m.content || '…'} />
-                  </p>
+                  {userAttachments.length > 0 && (
+                    <div className="msg-attachments">
+                      {userAttachments.map((a, ai) => (
+                        <AttachmentPreview key={a.id ?? ai} attachment={a} />
+                      ))}
+                    </div>
+                  )}
+                  {(m.content || userAttachments.length === 0) && (
+                    <p>
+                      <EmojiText text={m.content || '…'} />
+                    </p>
+                  )}
                 </div>
               )}
             </div>
@@ -636,6 +788,15 @@ export function ChatWindow({ chat, user, isStreaming, draft, onDraft, onSend, on
           onSend()
         }}
       >
+        {(attachments.length > 0 || uploading) && (
+          <div className="attach-tray">
+            {attachments.map((a) => (
+              <AttachmentChip key={a.id} attachment={a} onRemove={onRemoveAttachment} />
+            ))}
+            {uploading && <span className="attach-uploading">Uploading…</span>}
+          </div>
+        )}
+        {attachError && <p className="attach-error" role="alert">{attachError}</p>}
         <div className="composer-row">
           <div className="input">
             <textarea
@@ -648,7 +809,31 @@ export function ChatWindow({ chat, user, isStreaming, draft, onDraft, onSend, on
               ref={setComposer}
             />
           </div>
-          <button className="send" type="submit" aria-label="Send message" disabled={!draft.trim() || isStreaming}>
+          <input
+            ref={fileRef}
+            type="file"
+            className="attach-input"
+            multiple
+            accept={ATTACH_ACCEPT}
+            onChange={handleFiles}
+            tabIndex={-1}
+          />
+          <button
+            type="button"
+            className="attach has-tip tip-up"
+            data-tip="Attach files..."
+            aria-label="Attach files..."
+            onClick={() => fileRef.current?.click()}
+            disabled={isStreaming || uploading}
+          >
+            <PaperclipIcon />
+          </button>
+          <button
+            className="send"
+            type="submit"
+            aria-label="Send message"
+            disabled={(!draft.trim() && attachments.length === 0) || isStreaming || uploading}
+          >
             <SendIcon />
           </button>
         </div>
@@ -657,6 +842,15 @@ export function ChatWindow({ chat, user, isStreaming, draft, onDraft, onSend, on
           <EffortSelector effort={effort} onChange={onEffort} disabled={isStreaming} />
         </div>
       </form>
+
+      {dragActive && (
+        <div className="drop-overlay" aria-hidden="true">
+          <div className="drop-overlay-card">
+            <PaperclipIcon />
+            <span>Drop files to attach</span>
+          </div>
+        </div>
+      )}
     </>
   )
 }

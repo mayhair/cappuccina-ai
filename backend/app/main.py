@@ -1,16 +1,18 @@
+import base64
 import json
 import time
 
-from fastapi import Depends, FastAPI, HTTPException, Request, Response
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, RedirectResponse
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
 from sse_starlette.sse import EventSourceResponse
 
 from agent.graph import GRAPH
 from agent.title import generate_title
 from agent.tools import TOOL_DISPLAY_NAMES
-from app import db, gmail, google_oauth
+from app import db, documents, gmail, google_oauth
 from app.auth import (
     clear_session_cookie,
     current_user,
@@ -201,9 +203,68 @@ def _mark_sent_drafts(chats: list[dict], sent_ids: set[str]) -> None:
                         tool["sent"] = True
 
 
-def _state(req: ChatRequest) -> dict:
+def _attachment_blocks(parts, user_id: str) -> list[dict]:
+    """LLM content blocks for a user turn's attachment parts.
+
+    Images become vision (`image_url`) blocks read from disk. Documents become
+    a text pointer naming the file and its id — the model calls read_attachment
+    to pull the extracted text on demand, so document bodies never sit in the
+    prompt or in the stored history.
+    """
+    blocks: list[dict] = []
+    for part in parts or []:
+        if not isinstance(part, dict) or part.get("type") != "attachment":
+            continue
+        attachment_id = part.get("attachmentId")
+        if not attachment_id:
+            continue
+        row = db.get_attachment(user_id, attachment_id)
+        if row is None:
+            continue
+        if row["kind"] == "image":
+            path = db.attachment_file_path(row["id"], row["filename"])
+            try:
+                raw = path.read_bytes()
+            except OSError:
+                continue
+            encoded = base64.b64encode(raw).decode("ascii")
+            blocks.append(
+                {
+                    "type": "image_url",
+                    "image_url": {"url": f"data:{row['mime']};base64,{encoded}"},
+                }
+            )
+        else:
+            blocks.append(
+                {
+                    "type": "text",
+                    "text": f'[Attached file "{row["filename"]}" '
+                    f"(id={row['id']}) — call read_attachment with that id to read it.]",
+                }
+            )
+    return blocks
+
+
+def _state(req: ChatRequest, user) -> dict:
+    messages = []
+    for m in req.messages:
+        if m.role == "assistant":
+            messages.append(AIMessage(content=m.content))
+            continue
+        if m.role != "user":
+            messages.append(SystemMessage(content=m.content))
+            continue
+        blocks = _attachment_blocks(m.parts, user["id"])
+        if not blocks:
+            messages.append(HumanMessage(content=m.content))
+            continue
+        content: list[dict] = []
+        if m.content:
+            content.append({"type": "text", "text": m.content})
+        content.extend(blocks)
+        messages.append(HumanMessage(content=content))
     return {
-        "messages": [(m.role, m.content) for m in req.messages],
+        "messages": messages,
         "reasoning": req.reasoning,
         "mode": req.mode,
         "subject": req.subject,
@@ -436,6 +497,89 @@ async def get_image(image_id: str, user=Depends(current_user)):
     return FileResponse(path, media_type=row["mime"])
 
 
+# ---------- attachments (user uploads) ----------
+
+MAX_IMAGE_BYTES = 20 * 1024 * 1024
+MAX_DOCUMENT_BYTES = 10 * 1024 * 1024
+
+
+def _attachment_response(row) -> dict:
+    return {
+        "id": row["id"],
+        "kind": row["kind"],
+        "filename": row["filename"],
+        "mime": row["mime"],
+        "size": row["size_bytes"],
+        "charCount": row["char_count"],
+    }
+
+
+@app.post("/api/v1/attachments")
+async def upload_attachment(
+    file: UploadFile = File(...),
+    chat_id: str = Form(..., alias="chatId"),
+    user=Depends(current_user),
+) -> dict:
+    """Store one uploaded file. Images keep their bytes; documents are parsed
+    to text here so read_attachment can serve it without re-parsing."""
+    if db.get_chat(user["id"], chat_id) is None:
+        raise HTTPException(status_code=404, detail="Chat not found")
+    filename = (file.filename or "file").strip() or "file"
+    data = await file.read()
+
+    if documents.is_image(filename):
+        if len(data) > MAX_IMAGE_BYTES:
+            raise HTTPException(status_code=413, detail="That image is too large (20MB max)")
+        kind, mime, text = "image", documents.mime_for(filename), ""
+    elif documents.is_document(filename):
+        if len(data) > MAX_DOCUMENT_BYTES:
+            raise HTTPException(status_code=413, detail="That file is too large (10MB max)")
+        try:
+            text = documents.extract_text(filename, data)
+        except documents.UnsupportedDocument as exc:
+            raise HTTPException(status_code=415, detail=str(exc))
+        kind, mime = "document", documents.mime_for(filename)
+    else:
+        raise HTTPException(
+            status_code=415,
+            detail="That file type isn't supported. Try an image, PDF, Word, "
+            "PowerPoint, Excel, or a text file.",
+        )
+    if not data:
+        raise HTTPException(status_code=400, detail="That file is empty")
+
+    row = db.create_attachment(
+        user["id"], chat_id, filename, data, kind=kind, mime=mime, text=text
+    )
+    return _attachment_response(row)
+
+
+@app.get("/api/v1/attachments/{attachment_id}")
+async def get_attachment_file(attachment_id: str, user=Depends(current_user)):
+    """Serve one uploaded file, user-scoped. Images render inline (used as the
+    preview source); documents download under their original name."""
+    row = db.get_attachment(user["id"], attachment_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Attachment not found")
+    path = db.attachment_file_path(row["id"], row["filename"])
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="Attachment not found")
+    inline = row["kind"] == "image"
+    return FileResponse(
+        path,
+        media_type=row["mime"],
+        filename=None if inline else row["filename"],
+        content_disposition_type="inline" if inline else "attachment",
+    )
+
+
+@app.delete("/api/v1/attachments/{attachment_id}")
+async def delete_attachment_file(attachment_id: str, user=Depends(current_user)) -> dict:
+    if not db.delete_attachment(user["id"], attachment_id):
+        raise HTTPException(status_code=404, detail="Attachment not found")
+    return {"ok": True}
+
+
 # ---------- chat completion ----------
 
 def _owned_chat_or_404(user, req: ChatRequest):
@@ -486,7 +630,7 @@ def _serialize_tool_calls(tool_calls: list[ToolCall]) -> list[dict]:
 async def chat(req: ChatRequest, user=Depends(current_user)) -> ChatResponse:
     _owned_chat_or_404(user, req)
     think_start = time.monotonic()
-    result = await GRAPH.ainvoke(_state(req), config=_graph_config(user, req))
+    result = await GRAPH.ainvoke(_state(req, user), config=_graph_config(user, req))
     thought_seconds = time.monotonic() - think_start
     messages = result["messages"]
     reasoning, tool_calls, parts = _final_extras(messages)
@@ -547,7 +691,7 @@ async def chat_stream(req: ChatRequest, user=Depends(current_user)):
                 block_first_index = len(parts)
 
         async for event in GRAPH.astream_events(
-            _state(req),
+            _state(req, user),
             config=_graph_config(user, req),
             version="v2",
         ):

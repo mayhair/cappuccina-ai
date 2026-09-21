@@ -1099,6 +1099,168 @@ img.user-avatar {
 .send:disabled { cursor: default; opacity: 1; filter: none; }
 .send svg { width: 52%; height: 52%; }
 
+/* ---------- attachments ---------- */
+.attach-input { display: none; }
+.attach {
+  flex: none;
+  width: clamp(42px, 3.1vw, 54px);
+  aspect-ratio: 1;
+  border-radius: 50%;
+  border: 1px solid var(--hairline);
+  background: var(--glass-strong);
+  color: var(--ink-faint);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  box-shadow: var(--shadow-sm);
+  transition: color 160ms ease, transform 140ms ease;
+}
+.attach:hover { color: var(--ink); transform: scale(1.06); }
+.attach:active { transform: scale(0.97); }
+.attach:disabled { cursor: default; opacity: 0.45; transform: none; }
+.attach svg { width: 46%; height: 46%; }
+
+/* The tooltip opens upward: the composer sits at the bottom of the viewport,
+   so a downward tooltip would be clipped. */
+.has-tip.tip-up::after {
+  top: auto;
+  bottom: calc(100% + 9px);
+  left: auto;
+  right: 0;
+  transform: translate(0, 3px);
+}
+.has-tip.tip-up:hover::after,
+.has-tip.tip-up:focus-visible::after { transform: translate(0, 0); }
+
+.attach-tray {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0 0.4rem 0.35rem 0.6rem;
+}
+.attach-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  max-width: 15rem;
+  padding: 0.3rem 0.35rem 0.3rem 0.55rem;
+  border-radius: 999px;
+  border: 1px solid var(--hairline);
+  background: var(--glass-strong);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  box-shadow: var(--shadow-sm);
+  font-family: var(--font-body);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ink);
+}
+.attach-chip > svg { width: 16px; height: 16px; flex: none; color: var(--ink-faint); }
+.attach-chip.image > img {
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  object-fit: cover;
+  flex: none;
+}
+.attach-chip-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.attach-chip-remove {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  display: grid;
+  place-items: center;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--ink-faint);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+.attach-chip-remove:hover { color: var(--pink-ink); }
+.attach-uploading { font-size: 12.5px; font-weight: 700; color: var(--ink-faint); }
+.attach-error {
+  margin: 0;
+  padding: 0 0.6rem 0.35rem;
+  font-family: var(--font-body);
+  font-size: 13px;
+  font-weight: 700;
+  color: #d64570;
+}
+
+.msg-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+.msg-attachment.image { display: block; }
+.msg-attachment.image img {
+  display: block;
+  max-width: min(320px, 60vw);
+  max-height: 260px;
+  border-radius: 14px;
+  border: 1px solid var(--hairline);
+  object-fit: cover;
+}
+.msg-attachment.file {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  max-width: 18rem;
+  padding: 0.5rem 0.7rem;
+  border-radius: 12px;
+  border: 1px solid var(--hairline);
+  background: var(--glass-strong);
+  color: var(--ink);
+  text-decoration: none;
+  font-size: 13.5px;
+  font-weight: 700;
+}
+.msg-attachment.file:hover { border-color: var(--pink); }
+.msg-attachment.file > svg { width: 18px; height: 18px; flex: none; color: var(--pink-strong); }
+.msg-attachment-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.msg-attachment-size { flex: none; color: var(--ink-faint); }
+
+.drop-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: grid;
+  place-items: center;
+  background: rgba(20, 16, 34, 0.28);
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
+  pointer-events: none;
+  animation: drop-fade 120ms ease both;
+}
+.drop-overlay-card {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 1rem 1.4rem;
+  border-radius: 18px;
+  border: 2px dashed var(--pink);
+  background: var(--glass-strong);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: 16px;
+  font-weight: 800;
+  box-shadow: var(--shadow);
+}
+.drop-overlay-card svg { width: 22px; height: 22px; color: var(--pink-strong); }
+@keyframes drop-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
 /* ---------- effort selector ---------- */
 .effort { position: relative; }
 .effort-pill {

@@ -5,10 +5,13 @@ import {
   createChatOnServer,
   renameChatOnServer,
   deleteChatOnServer,
+  uploadAttachment,
+  deleteAttachment,
 } from '../api/chatClient'
 
 const EFFORT_KEY = 'cappuccina-effort'
 const DEFAULT_TITLE = 'New chat'
+export const MAX_ATTACHMENTS = 5
 
 export const EFFORTS = [
   { label: 'Low', value: 'low' },
@@ -58,6 +61,11 @@ export function useChatController(enabled) {
   const [effort, setEffort] = useState(loadEffort)
   const [status, setStatus] = useState('idle')
   const [typingTitleId, setTypingTitleId] = useState(null)
+  // Files attached to the next message but not yet sent. They already live on
+  // the server (uploaded when picked); this is just the pending tray.
+  const [attachments, setAttachments] = useState([])
+  const [uploading, setUploading] = useState(false)
+  const [attachError, setAttachError] = useState('')
   const isStreaming = status === 'streaming'
   const inputRef = useRef(null)
   const chatsRef = useRef(chats)
@@ -123,6 +131,52 @@ export function useChatController(enabled) {
   }, [effort])
 
   const activeChat = chats.find((c) => c.id === activeChatId) ?? chats[0]
+
+  // Upload picked files to the server and stage them for the next message.
+  // The chat is persisted first so the files can be tied to a real chat id.
+  const addAttachments = useCallback(
+    async (fileList) => {
+      const files = Array.from(fileList || [])
+      if (!files.length || status === 'streaming') return
+      const room = MAX_ATTACHMENTS - attachments.length
+      if (room <= 0) {
+        setAttachError(`You can attach up to ${MAX_ATTACHMENTS} files per message.`)
+        return
+      }
+      const chosen = files.slice(0, room)
+      setAttachError(
+        files.length > room ? `Up to ${MAX_ATTACHMENTS} files per message.` : '',
+      )
+      setUploading(true)
+      try {
+        const chatId = await persistChat(activeChat)
+        for (const file of chosen) {
+          try {
+            const meta = await uploadAttachment(chatId, file)
+            setAttachments((list) => [...list, meta])
+          } catch (err) {
+            setAttachError(err.message || 'Could not attach that file.')
+          }
+        }
+      } catch {
+        setAttachError('Could not attach files — try again.')
+      } finally {
+        setUploading(false)
+      }
+    },
+    [activeChat, attachments.length, persistChat, status],
+  )
+
+  const removeAttachment = useCallback((attachmentId) => {
+    setAttachments((list) => list.filter((a) => a.id !== attachmentId))
+    setAttachError('')
+    deleteAttachment(attachmentId).catch(() => {})
+  }, [])
+
+  const clearAttachments = useCallback(() => {
+    setAttachments([])
+    setAttachError('')
+  }, [])
 
   const patchMessages = useCallback((chatId, fn) => {
     setChats((all) => all.map((c) => (c.id === chatId ? { ...c, messages: fn(c.messages) } : c)))
@@ -326,14 +380,28 @@ export function useChatController(enabled) {
 
   const sendMessage = useCallback(() => {
     const text = draft.trim()
-    if (!text || status !== 'idle') return
+    const pending = attachments
+    if ((!text && pending.length === 0) || status !== 'idle' || uploading) return
     const chat = activeChat
     const userMessage = { role: 'user', content: text }
+    if (pending.length) {
+      // Only ids travel with the message; bytes/text stay server-side.
+      userMessage.parts = pending.map((a) => ({
+        type: 'attachment',
+        attachmentId: a.id,
+        kind: a.kind,
+        name: a.filename,
+        mime: a.mime,
+        size: a.size,
+      }))
+    }
     const reasoning = EFFORTS.find((e) => e.label === effort)?.value ?? 'high'
     const history = [...chat.messages, userMessage]
 
     patchMessages(chat.id, () => history)
     setDraft('')
+    setAttachments([])
+    setAttachError('')
     ;(async () => {
       try {
         const chatId = await persistChat(chat)
@@ -346,7 +414,7 @@ export function useChatController(enabled) {
         setStatus('idle')
       }
     })()
-  }, [draft, status, activeChat, effort, patchMessages, streamReply, persistChat])
+  }, [draft, attachments, uploading, status, activeChat, effort, patchMessages, streamReply, persistChat])
 
   const retryMessage = useCallback(() => {
     if (status !== 'idle') return
@@ -384,6 +452,8 @@ export function useChatController(enabled) {
     setActiveChatId(chat.id)
     setDraft('')
     setStatus('idle')
+    setAttachments([])
+    setAttachError('')
     inputRef.current?.focus()
   }, [])
 
@@ -404,6 +474,14 @@ export function useChatController(enabled) {
     setTypingTitleId(null)
     setChats((all) => all.map((c) => (c.id === id ? { ...c, title: next } : c)))
     renameChatOnServer(id, next).catch(() => {})
+  }, [])
+
+  // Pending attachments belong to one chat; switching clears the tray so they
+  // never follow the user into a different conversation.
+  const selectChat = useCallback((id) => {
+    setActiveChatId(id)
+    setAttachments([])
+    setAttachError('')
   }, [])
 
   const q = query.trim().toLowerCase()
@@ -434,6 +512,12 @@ export function useChatController(enabled) {
     renameChat,
     clearTypingTitle,
     markDraftSent,
-    selectChat: setActiveChatId,
+    selectChat,
+    attachments,
+    uploading,
+    attachError,
+    addAttachments,
+    removeAttachment,
+    clearAttachments,
   }
 }

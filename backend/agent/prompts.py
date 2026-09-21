@@ -42,6 +42,13 @@ _TUTOR_VOICE_TRIM = {"Sample exchanges"}
 
 _JOINS = "\n\n---\n\n"
 
+ATTACHMENT_NOTE = """\
+The user can attach files to a message. Images arrive as pictures you can see \
+directly. An attached document is listed by filename and id — before answering \
+about it, call read_attachment with that id to read its text. Long documents \
+come back in chunks; keep calling with the offset shown until you have what \
+you need."""
+
 
 def build_system_prompt(mode: str, subject: str | None) -> str:
     if mode == "tutor":
@@ -56,4 +63,4 @@ def build_system_prompt(mode: str, subject: str | None) -> str:
     closing = f"Current Date: {CURRENT_DATE}"
     if tutor:
         closing = f"{tutor}\n\n{closing}"
-    return _JOINS.join([BOUNDARIES, persona, voice, closing])
+    return _JOINS.join([BOUNDARIES, persona, voice, ATTACHMENT_NOTE, closing])
