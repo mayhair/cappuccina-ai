@@ -1293,6 +1293,53 @@ img.user-avatar {
 .attach:disabled { cursor: default; opacity: 0.45; transform: none; }
 .attach svg { width: 46%; height: 46%; }
 
+/* ---------- voice input ---------- */
+.mic {
+  position: relative;
+  flex: none;
+  width: clamp(42px, 3.1vw, 54px);
+  aspect-ratio: 1;
+  border-radius: 50%;
+  border: 1px solid var(--hairline);
+  background: var(--glass-strong);
+  color: var(--ink-faint);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  box-shadow: var(--shadow-sm);
+  transition: color 160ms ease, transform 140ms ease, background 160ms ease, border-color 160ms ease;
+}
+.mic:hover { color: var(--ink); transform: scale(1.06); }
+.mic:active { transform: scale(0.97); }
+.mic:disabled { cursor: default; opacity: 0.45; transform: none; }
+.mic svg { width: 46%; height: 46%; }
+.mic.rec {
+  color: #ffffff;
+  background: var(--pink-strong);
+  border-color: var(--pink-strong);
+  box-shadow: var(--glow-pink);
+}
+.mic.rec::before {
+  content: '';
+  position: absolute;
+  inset: -3px;
+  border-radius: 50%;
+  border: 2px solid var(--pink);
+  animation: mic-pulse 1.4s ease-out infinite;
+}
+@keyframes mic-pulse {
+  0% { transform: scale(0.9); opacity: 0.75; }
+  70% { transform: scale(1.35); opacity: 0; }
+  100% { transform: scale(1.35); opacity: 0; }
+}
+.input.listening { border-color: var(--pink); }
+
+@media (prefers-reduced-motion: reduce) {
+  .mic { transition: none; }
+  .mic:hover, .mic:active { transform: none; }
+  .mic.rec::before { animation: none; opacity: 0.55; }
+}
+
 /* The tooltip opens upward: the composer sits at the bottom of the viewport,
    so a downward tooltip would be clipped. */
 .has-tip.tip-up::after {

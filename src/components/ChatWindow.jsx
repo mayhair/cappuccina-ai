@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { SendIcon, ChevronIcon, WrenchIcon, CopyIcon, CheckIcon, RetryIcon, MailIcon, PencilIcon, PaperclipIcon, FileIcon, CalendarIcon } from './Icons'
+import { SendIcon, ChevronIcon, WrenchIcon, CopyIcon, CheckIcon, RetryIcon, MailIcon, PencilIcon, PaperclipIcon, FileIcon, CalendarIcon, MicIcon } from './Icons'
 import { EffortSelector } from './EffortSelector'
 import { ModeSwitch } from './ModeSwitch'
 import { Markdown } from '../lib/markdown'
 import { EmojiText } from '../lib/emoji'
+import { useVoiceInput } from '../hooks/useVoiceInput'
 import { sendDraft, updateDraft } from '../api/gmailClient'
 import { deleteEvent } from '../api/calendarClient'
 
@@ -755,6 +756,21 @@ export function ChatWindow({ chat, user, isStreaming, draft, onDraft, onSend, on
 
   const canAttach = !isStreaming && !uploading
 
+  // Voice input: finals are appended to the draft so the kid reviews (and can
+  // fix misheard words) before sending; interim text only shows live.
+  const appendTranscript = useCallback(
+    (text) => {
+      const chunk = text.trim()
+      if (!chunk) return
+      onDraft?.((prev) => {
+        const base = prev ?? ''
+        return base ? `${base}${/\s$/.test(base) ? '' : ' '}${chunk}` : chunk
+      })
+    },
+    [onDraft],
+  )
+  const voice = useVoiceInput({ onTranscript: appendTranscript, disabled: isStreaming || uploading })
+
   // Window-level drag & drop. dragenter/dragleave fire for every child element
   // crossed, so a depth counter keeps the overlay visible until we really leave.
   const dragDepth = useRef(0)
@@ -831,16 +847,37 @@ export function ChatWindow({ chat, user, isStreaming, draft, onDraft, onSend, on
     const line = parseFloat(getComputedStyle(el).lineHeight) || 24
     const multi = el.scrollHeight > line * 1.5 || el.value.includes('\n')
     el.parentElement?.classList.toggle('expanded', multi)
-  }, [draft])
+  }, [draft, voice.interim])
+
+  const voiceSuffix = voice.listening && voice.interim ? voice.interim : ''
+  const composerValue = voiceSuffix
+    ? `${draft}${draft && !/\s$/.test(draft) ? ' ' : ''}${voiceSuffix}`
+    : draft
+
+  const handleDraftChange = (value) => {
+    // Typing takes over from dictation.
+    if (voice.listening) voice.stop()
+    onDraft?.(value)
+  }
+
+  const submit = () => {
+    if (voice.listening) voice.stop()
+    onSend()
+  }
 
   const handleComposerKeyDown = (e) => {
+    if (e.key === 'Escape' && voice.listening) {
+      e.preventDefault()
+      voice.stop()
+      return
+    }
     if (e.key !== 'Enter') return
     // Let IME candidate selection finish before acting on Enter.
     if (e.nativeEvent?.isComposing || e.keyCode === 229) return
     // Shift+Enter and touch keyboards insert a line break instead of sending.
     if (e.shiftKey || isTouchKeyboard()) return
     e.preventDefault()
-    if ((draft.trim() || attachments.length > 0) && !isStreaming && !uploading) onSend()
+    if ((draft.trim() || attachments.length > 0) && !isStreaming && !uploading) submit()
   }
 
   return (
@@ -960,7 +997,7 @@ export function ChatWindow({ chat, user, isStreaming, draft, onDraft, onSend, on
         className="composer"
         onSubmit={(e) => {
           e.preventDefault()
-          onSend()
+          submit()
         }}
       >
         {(attachments.length > 0 || uploading) && (
@@ -972,14 +1009,15 @@ export function ChatWindow({ chat, user, isStreaming, draft, onDraft, onSend, on
           </div>
         )}
         {attachError && <p className="attach-error" role="alert">{attachError}</p>}
+        {voice.error && <p className="attach-error" role="alert">{voice.error}</p>}
         <div className="composer-row">
-          <div className="input">
+          <div className={`input${voice.listening ? ' listening' : ''}`}>
             <textarea
               rows={1}
               placeholder={mode === 'tutor' ? 'What shall we learn today?' : 'Ask me anything...'}
               aria-label="Message Cappuccina"
-              value={draft}
-              onChange={(e) => onDraft(e.target.value)}
+              value={composerValue}
+              onChange={(e) => handleDraftChange(e.target.value)}
               onKeyDown={handleComposerKeyDown}
               ref={setComposer}
             />
@@ -993,6 +1031,19 @@ export function ChatWindow({ chat, user, isStreaming, draft, onDraft, onSend, on
             onChange={handleFiles}
             tabIndex={-1}
           />
+          {voice.supported && (
+            <button
+              type="button"
+              className={`mic has-tip tip-up${voice.listening ? ' rec' : ''}`}
+              data-tip={voice.listening ? 'Listening… tap to stop' : 'Speak your message'}
+              aria-label={voice.listening ? 'Stop voice input' : 'Speak your message'}
+              aria-pressed={voice.listening}
+              onClick={voice.toggle}
+              disabled={isStreaming || uploading}
+            >
+              <MicIcon />
+            </button>
+          )}
           <button
             type="button"
             className="attach has-tip tip-up"
