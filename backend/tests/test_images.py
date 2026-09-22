@@ -16,7 +16,7 @@ def test_generate_image_tool_saves_file_and_row(isolated_db, monkeypatch):
 
     user, chat = _user_and_chat()
     monkeypatch.setattr(
-        tools, "_openai_generate_image", lambda prompt: (FAKE_PNG, "image/png")
+        tools, "_openai_generate_image", lambda prompt, size: (FAKE_PNG, "image/png")
     )
 
     out = tools.generate_image.invoke(
@@ -53,7 +53,7 @@ def test_generate_image_schema_hides_injected_config():
     from agent import tools
 
     assert "config" not in tools.generate_image.args
-    assert set(tools.generate_image.args) == {"prompt"}
+    assert set(tools.generate_image.args) == {"prompt", "size"}
 
 
 def test_generate_image_tool_reports_api_failure(isolated_db, monkeypatch):
@@ -63,7 +63,7 @@ def test_generate_image_tool_reports_api_failure(isolated_db, monkeypatch):
 
     user, chat = _user_and_chat()
 
-    def boom(prompt):
+    def boom(prompt, size):
         raise httpx.ConnectError("offline")
 
     monkeypatch.setattr(tools, "_openai_generate_image", boom)
@@ -72,6 +72,41 @@ def test_generate_image_tool_reports_api_failure(isolated_db, monkeypatch):
         config={"configurable": {"user_id": user["id"], "chat_id": chat["id"]}},
     )
     assert "Couldn't draw that" in out
+
+
+def test_generate_image_tool_selects_resolution(isolated_db, monkeypatch):
+    from agent import tools
+
+    user, chat = _user_and_chat()
+    config = {"configurable": {"user_id": user["id"], "chat_id": chat["id"]}}
+    seen = []
+
+    def fake_generate(prompt, size):
+        seen.append(size)
+        return FAKE_PNG, "image/png"
+
+    monkeypatch.setattr(tools, "_openai_generate_image", fake_generate)
+
+    wide = json.loads(tools.generate_image.invoke(
+        {"prompt": "a wide landscape", "size": "1536x1024"}, config=config
+    ))
+    assert wide["size"] == "1536x1024"
+    assert (wide["width"], wide["height"]) == (1536, 1024)
+
+    tall = json.loads(tools.generate_image.invoke(
+        {"prompt": "a tall tower", "size": "1024x1536"}, config=config
+    ))
+    assert (tall["width"], tall["height"]) == (1024, 1536)
+
+    # The multiplication sign is normalized; junk falls back to the default.
+    tools.generate_image.invoke(
+        {"prompt": "a cat", "size": "1536×1024"}, config=config
+    )
+    fallback = json.loads(tools.generate_image.invoke(
+        {"prompt": "a cat", "size": "huge"}, config=config
+    ))
+    assert seen == ["1536x1024", "1024x1536", "1536x1024", "1024x1024"]
+    assert fallback["size"] == "1024x1024"
 
 
 def test_image_part_from_result():
@@ -308,6 +343,173 @@ def test_nonstream_chat_persists_image_part(signed_in, monkeypatch):
     stored = signed_in.get("/api/v1/chats").json()
     parts = stored[0]["messages"][-1]["parts"]
     assert [p for p in parts if p.get("type") == "image"][0]["imageId"] == image["id"]
+
+
+# ---------- image_edit ----------
+
+
+def test_image_edit_tool_saves_new_file_and_row(isolated_db, monkeypatch):
+    from agent import tools
+
+    user, chat = _user_and_chat()
+    source = db.create_image(user["id"], chat["id"], FAKE_PNG, prompt="a cat")
+    calls = []
+
+    def fake_edit(prompt, image_bytes, filename, mime, size):
+        calls.append((prompt, image_bytes, filename, mime, size))
+        return b"edited-bytes", "image/png"
+
+    monkeypatch.setattr(tools, "_openai_edit_image", fake_edit)
+
+    out = tools.image_edit.invoke(
+        {"prompt": "give it a hat", "image_id": source["id"]},
+        config={"configurable": {"user_id": user["id"], "chat_id": chat["id"]}},
+    )
+    data = json.loads(out)
+    assert data["status"] == "image_edited"
+    assert data["source_image_id"] == source["id"]
+    assert data["prompt"] == "give it a hat"
+
+    assert calls == [
+        ("give it a hat", FAKE_PNG, f"{source['id']}.png", "image/png", "1024x1024")
+    ]
+
+    row = db.get_image(user["id"], data["image_id"])
+    assert row is not None
+    assert row["chat_id"] == chat["id"]
+    assert row["size_bytes"] == len(b"edited-bytes")
+    assert db.image_file_path(row["id"], row["mime"]).read_bytes() == b"edited-bytes"
+
+    # The original picture is untouched (non-destructive edit).
+    original = db.get_image(user["id"], source["id"])
+    assert db.image_file_path(original["id"], original["mime"]).read_bytes() == FAKE_PNG
+
+
+def test_image_edit_tool_from_attachment(isolated_db, monkeypatch):
+    from agent import tools
+
+    user, chat = _user_and_chat()
+    attachment = db.create_attachment(
+        user["id"], chat["id"], "photo.png", FAKE_PNG,
+        kind="image", mime="image/png",
+    )
+    calls = []
+    monkeypatch.setattr(
+        tools,
+        "_openai_edit_image",
+        lambda prompt, image_bytes, filename, mime, size: (
+            calls.append((image_bytes, filename, mime, size))
+            or (b"edited", "image/png")
+        ),
+    )
+
+    out = tools.image_edit.invoke(
+        {
+            "prompt": "remove the background",
+            "attachment_id": attachment["id"],
+            "size": "1536x1024",
+        },
+        config={"configurable": {"user_id": user["id"], "chat_id": chat["id"]}},
+    )
+    edited = json.loads(out)
+    assert edited["status"] == "image_edited"
+    assert (edited["width"], edited["height"]) == (1536, 1024)
+    assert calls == [(FAKE_PNG, "photo.png", "image/png", "1536x1024")]
+
+
+def test_image_edit_tool_rejects_bad_source(isolated_db, monkeypatch):
+    from agent import tools
+
+    user, chat = _user_and_chat()
+    config = {"configurable": {"user_id": user["id"], "chat_id": chat["id"]}}
+    monkeypatch.setattr(
+        tools, "_openai_edit_image", lambda *a: (b"x", "image/png")
+    )
+
+    # No source at all.
+    out = tools.image_edit.invoke({"prompt": "tweak"}, config=config)
+    assert "which picture" in out
+
+    # Unknown / another user's image id.
+    out = tools.image_edit.invoke(
+        {"prompt": "tweak", "image_id": "nope"}, config=config
+    )
+    assert "couldn't find that picture" in out
+
+    # A document attachment isn't an image.
+    doc = db.create_attachment(
+        user["id"], chat["id"], "notes.txt", b"hi",
+        kind="document", mime="text/plain", text="hi",
+    )
+    out = tools.image_edit.invoke(
+        {"prompt": "tweak", "attachment_id": doc["id"]}, config=config
+    )
+    assert "couldn't find that picture" in out
+
+
+def test_image_edit_tool_without_context(isolated_db):
+    from agent import tools
+
+    out = tools.image_edit.invoke(
+        {"prompt": "tweak", "image_id": "x"}, config={"configurable": {}}
+    )
+    assert "isn't available" in out
+
+
+def test_image_edit_schema_hides_injected_config():
+    from agent import tools
+
+    assert "config" not in tools.image_edit.args
+    assert set(tools.image_edit.args) == {"prompt", "image_id", "attachment_id", "size"}
+
+
+def test_image_edit_part_from_result():
+    import app.main as main
+
+    marker = json.dumps(
+        {
+            "status": "image_edited",
+            "image_id": "img-2",
+            "source_image_id": "img-1",
+            "prompt": "add a hat",
+            "width": 1024,
+            "height": 1024,
+        }
+    )
+    part = main._image_part_from_result("image_edit", marker)
+    assert part == {
+        "type": "image",
+        "imageId": "img-2",
+        "prompt": "add a hat",
+        "width": 1024,
+        "height": 1024,
+    }
+    assert main._image_part_from_result("web_search", marker) is None
+    assert main._image_part_from_result("image_edit", "nope") is None
+    # A result without a saved image id never becomes an image part.
+    assert (
+        main._image_part_from_result(
+            "image_edit", json.dumps({"status": "image_edited"})
+        )
+        is None
+    )
+
+
+def test_attachment_blocks_include_image_id_pointer(isolated_db):
+    import app.main as main
+
+    user, chat = _user_and_chat()
+    attachment = db.create_attachment(
+        user["id"], chat["id"], "photo.png", FAKE_PNG,
+        kind="image", mime="image/png",
+    )
+    blocks = main._attachment_blocks(
+        [{"type": "attachment", "attachmentId": attachment["id"]}], user["id"]
+    )
+    assert blocks[0]["type"] == "image_url"
+    assert blocks[1]["type"] == "text"
+    assert attachment["id"] in blocks[1]["text"]
+    assert "image_edit" in blocks[1]["text"]
 
 
 def test_stream_stamps_each_thinking_block(signed_in, monkeypatch):

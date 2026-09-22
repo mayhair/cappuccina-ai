@@ -143,9 +143,9 @@ function deleteFromTool(tool) {
   }
 }
 
-// A generate_image result is a machine-readable pointer at the saved picture
-// (see backend/app/main.py); the picture itself renders as an image card
-// below the message, so the thinking panel only needs a one-liner.
+// A generate_image/image_edit result is a machine-readable pointer at the
+// saved picture (see backend/app/main.py); the picture itself renders as an
+// image card below the message, so the thinking panel only needs a one-liner.
 function imageFromPart(part) {
   if (part?.type !== 'image' || typeof part.imageId !== 'string' || !part.imageId) {
     return null
@@ -153,13 +153,17 @@ function imageFromPart(part) {
   return part
 }
 
+const IMAGE_TOOLS = ['generate_image', 'image_edit']
+const IMAGE_STATUSES = ['image_generated', 'image_edited']
+
 function imageResultSummary(tool) {
-  if (tool?.name !== 'generate_image' || typeof tool.result !== 'string') return null
+  if (!IMAGE_TOOLS.includes(tool?.name) || typeof tool.result !== 'string') return null
   try {
     const data = JSON.parse(tool.result)
-    return data?.status === 'image_generated' && data.image_id
-      ? 'Picture ready — see below ✨'
-      : null
+    if (!IMAGE_STATUSES.includes(data?.status) || !data.image_id) return null
+    return tool.name === 'image_edit'
+      ? 'Edit ready — see below ✨'
+      : 'Picture ready — see below ✨'
   } catch {
     return null
   }

@@ -13,10 +13,11 @@ MODEL_ID = os.getenv("MODEL_ID", "z-ai/glm-5.3-flash")
 TITLE_MODEL_ID = os.getenv("TITLE_MODEL_ID", "")
 PARALLEL_API_KEY = os.getenv("PARALLEL_API_KEY", "")
 
-# Image generation (generate_image agent tool). The model must return images
-# as base64; both the returned bytes and their dimensions are persisted.
+# Image generation/editing (generate_image and image_edit agent tools). The
+# model must return images as base64; both the returned bytes and their
+# dimensions are persisted. Resolutions are chosen per call (1024x1024,
+# 1536x1024, 1024x1536); there is no env-configured size.
 IMAGE_MODEL_ID = os.getenv("IMAGE_MODEL_ID", "gpt-image-2.5-flare")
-IMAGE_SIZE = os.getenv("IMAGE_SIZE", "1024x1024")
 
 # ---------- Google OAuth ----------
 GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "")

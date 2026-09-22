@@ -10,7 +10,7 @@ from parallel import Parallel
 from sympy import Eq, solve, sympify
 
 from app import calendar, db, gmail
-from app.config import IMAGE_MODEL_ID, IMAGE_SIZE, OPENAI_API_KEY, PARALLEL_API_KEY
+from app.config import IMAGE_MODEL_ID, OPENAI_API_KEY, PARALLEL_API_KEY
 from app.google_oauth import ServiceNotConnected
 
 
@@ -90,28 +90,29 @@ def _chat_id(config: RunnableConfig | None) -> str:
 
 # ---------- image generation ----------
 
-def _image_dimensions() -> tuple[int | None, int | None]:
-    """Requested pixel size from config (e.g. '1024x1024'), for metadata."""
+# Resolutions the image tools may request. The first is the default when the
+# agent doesn't pick one.
+IMAGE_SIZES = ("1024x1024", "1536x1024", "1024x1536")
+DEFAULT_IMAGE_SIZE = IMAGE_SIZES[0]
+
+
+def _image_size(requested: str = "") -> str:
+    """Validated resolution for an image API call, defaulting to the square."""
+    size = (requested or "").strip().lower().replace("×", "x")
+    return size if size in IMAGE_SIZES else DEFAULT_IMAGE_SIZE
+
+
+def _image_dimensions(size: str = "") -> tuple[int | None, int | None]:
+    """Pixel width/height for a resolution, for metadata."""
     try:
-        width, height = IMAGE_SIZE.lower().split("x", 1)
+        width, height = _image_size(size).split("x", 1)
         return int(width), int(height)
     except (ValueError, AttributeError):
         return None, None
 
 
-def _openai_generate_image(prompt: str) -> tuple[bytes, str]:
-    """Call the OpenAI image API. Returns (raw image bytes, mime type)."""
-    with httpx.Client(timeout=120) as client:
-        resp = client.post(
-            "https://api.openai.com/v1/images/generations",
-            headers={
-                "Authorization": f"Bearer {OPENAI_API_KEY}",
-                "Content-Type": "application/json",
-            },
-            json={"model": IMAGE_MODEL_ID, "prompt": prompt, "size": IMAGE_SIZE},
-        )
-        resp.raise_for_status()
-        data = (resp.json().get("data") or [{}])[0]
+def _image_bytes_from_response(data: dict) -> tuple[bytes, str]:
+    """Decode one image out of an OpenAI image API response entry."""
     if data.get("b64_json"):
         return base64.b64decode(data["b64_json"]), "image/png"
     if data.get("url"):
@@ -123,20 +124,83 @@ def _openai_generate_image(prompt: str) -> tuple[bytes, str]:
     raise ValueError("the image API returned neither b64_json nor url")
 
 
+def _openai_generate_image(prompt: str, size: str) -> tuple[bytes, str]:
+    """Call the OpenAI image API. Returns (raw image bytes, mime type)."""
+    with httpx.Client(timeout=120) as client:
+        resp = client.post(
+            "https://api.openai.com/v1/images/generations",
+            headers={
+                "Authorization": f"Bearer {OPENAI_API_KEY}",
+                "Content-Type": "application/json",
+            },
+            json={"model": IMAGE_MODEL_ID, "prompt": prompt, "size": size},
+        )
+        resp.raise_for_status()
+        data = (resp.json().get("data") or [{}])[0]
+    return _image_bytes_from_response(data)
+
+
+def _openai_edit_image(
+    prompt: str, image_bytes: bytes, filename: str, mime: str, size: str
+) -> tuple[bytes, str]:
+    """Edit an existing image through the OpenAI image API (multipart upload).
+
+    Returns (raw image bytes, mime type). httpx sets the multipart boundary
+    itself, so Content-Type is deliberately left unset.
+    """
+    with httpx.Client(timeout=180) as client:
+        resp = client.post(
+            "https://api.openai.com/v1/images/edits",
+            headers={"Authorization": f"Bearer {OPENAI_API_KEY}"},
+            data={"model": IMAGE_MODEL_ID, "prompt": prompt, "size": size},
+            files={"image": (filename, image_bytes, mime)},
+        )
+        resp.raise_for_status()
+        data = (resp.json().get("data") or [{}])[0]
+    return _image_bytes_from_response(data)
+
+
+def _load_edit_source(
+    user_id: str, image_id: str, attachment_id: str
+) -> tuple[bytes, str, str] | None:
+    """Bytes, mime and filename for an image_edit source, or None if missing.
+
+    Prefers a previously generated image (`image_id`); otherwise an uploaded
+    image attachment (`attachment_id`). Both lookups are user-scoped.
+    """
+    try:
+        if image_id:
+            row = db.get_image(user_id, image_id)
+            if row is None:
+                return None
+            path = db.image_file_path(row["id"], row["mime"])
+            return path.read_bytes(), row["mime"], f"{row['id']}{path.suffix}"
+        if attachment_id:
+            row = db.get_attachment(user_id, attachment_id)
+            if row is None or row["kind"] != "image":
+                return None
+            path = db.attachment_file_path(row["id"], row["filename"])
+            return path.read_bytes(), row["mime"], row["filename"]
+    except OSError:
+        return None
+    return None
+
+
 @tool
-def generate_image(prompt: str, config: RunnableConfig) -> str:
-    """Draw an original picture from a text description and show it in the chat. Use this whenever the user asks you to draw, paint, sketch, or make a picture or image of something. Describe the scene vividly in `prompt`: subject, style, colors, mood. The picture is saved automatically and appears in the chat — tell the user it's ready. Never invent an image_id yourself; the returned JSON describes the saved picture."""
+def generate_image(prompt: str, config: RunnableConfig, size: str = "") -> str:
+    """Draw an original picture from a text description and show it in the chat. Use this whenever the user asks you to draw, paint, sketch, or make a picture or image of something. Describe the scene vividly in `prompt`: subject, style, colors, mood. Optionally pick a `size`: "1024x1024" (square, default), "1536x1024" (wide), or "1024x1536" (tall) — match the subject's shape. The picture is saved automatically and appears in the chat — tell the user it's ready. Never invent an image_id yourself; the returned JSON describes the saved picture."""
     user_id = _user_id(config)
     chat_id = _chat_id(config)
     if not user_id or not chat_id:
         return "Drawing isn't available right now."
     if not OPENAI_API_KEY:
         return "Drawing isn't set up yet."
+    chosen_size = _image_size(size)
     try:
-        raw, mime = _openai_generate_image(prompt)
+        raw, mime = _openai_generate_image(prompt, chosen_size)
     except (httpx.HTTPError, ValueError) as exc:
         return f"Couldn't draw that right now ({exc})."
-    width, height = _image_dimensions()
+    width, height = _image_dimensions(chosen_size)
     try:
         image = db.create_image(
             user_id, chat_id, raw,
@@ -149,6 +213,56 @@ def generate_image(prompt: str, config: RunnableConfig) -> str:
             "status": "image_generated",
             "image_id": image["id"],
             "prompt": prompt,
+            "size": chosen_size,
+            "width": image["width"],
+            "height": image["height"],
+        }
+    )
+
+
+@tool
+def image_edit(
+    prompt: str,
+    config: RunnableConfig,
+    image_id: str = "",
+    attachment_id: str = "",
+    size: str = "",
+) -> str:
+    """Edit or modify a picture that already exists and show the result in the chat. Use this when the user asks to change, restyle, add to, remove from, or otherwise alter an image. Pass exactly one source: `image_id` for a picture made earlier in this chat (the id from a generate_image or image_edit result), or `attachment_id` for an image the user attached. Describe the change in `prompt`. Optionally set `size` to "1024x1024" (square, default), "1536x1024" (wide), or "1024x1536" (tall); omit it to keep the configured default. Never invent ids yourself. The edited picture is saved as a new image and appears in the chat — tell the user it's ready. The returned JSON describes the saved picture."""
+    user_id = _user_id(config)
+    chat_id = _chat_id(config)
+    if not user_id or not chat_id:
+        return "Editing pictures isn't available right now."
+    if not OPENAI_API_KEY:
+        return "Editing pictures isn't set up yet."
+    if not image_id and not attachment_id:
+        return "I need to know which picture to edit."
+    source = _load_edit_source(user_id, image_id, attachment_id)
+    if source is None:
+        return "I couldn't find that picture to edit."
+    raw_source, mime, filename = source
+    chosen_size = _image_size(size)
+    try:
+        raw, edited_mime = _openai_edit_image(
+            prompt, raw_source, filename, mime, chosen_size
+        )
+    except (httpx.HTTPError, ValueError) as exc:
+        return f"Couldn't edit that picture right now ({exc})."
+    width, height = _image_dimensions(chosen_size)
+    try:
+        image = db.create_image(
+            user_id, chat_id, raw,
+            mime=edited_mime, width=width, height=height, prompt=prompt,
+        )
+    except OSError as exc:
+        return f"Couldn't save the edited picture ({exc})."
+    return json.dumps(
+        {
+            "status": "image_edited",
+            "image_id": image["id"],
+            "source_image_id": image_id or None,
+            "prompt": prompt,
+            "size": chosen_size,
             "width": image["width"],
             "height": image["height"],
         }
@@ -252,7 +366,7 @@ def draft_email(to: str, subject: str, body: str, config: RunnableConfig) -> str
     return json.dumps({"status": "draft_created", **draft})
 
 
-ALL_TOOLS = [solve_equation, web_search, read_webpage, generate_image, read_attachment, search_emails, read_email, draft_email]
+ALL_TOOLS = [solve_equation, web_search, read_webpage, generate_image, image_edit, read_attachment, search_emails, read_email, draft_email]
 
 
 # ---------- Calendar tools ----------
@@ -409,7 +523,7 @@ def propose_event_deletion(event_id: str, config: RunnableConfig) -> str:
     )
 
 
-ALL_TOOLS = [solve_equation, web_search, read_webpage, generate_image, read_attachment, search_emails, read_email, draft_email, list_events, read_event, create_event, update_event, propose_event_deletion]
+ALL_TOOLS = [solve_equation, web_search, read_webpage, generate_image, image_edit, read_attachment, search_emails, read_email, draft_email, list_events, read_event, create_event, update_event, propose_event_deletion]
 
 # Human-friendly names for UI display ("Called Tool: ...").
 TOOL_DISPLAY_NAMES = {
@@ -417,6 +531,7 @@ TOOL_DISPLAY_NAMES = {
     "web_search": "Web Search",
     "read_webpage": "Read Webpage",
     "generate_image": "Drawing",
+    "image_edit": "Edit Picture",
     "read_attachment": "Read File",
     "search_emails": "Inbox Search",
     "read_email": "Read Email",

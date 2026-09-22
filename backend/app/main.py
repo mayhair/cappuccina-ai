@@ -102,14 +102,14 @@ def _tool_result_text(output) -> str:
 
 
 def _image_part_from_result(name: str, output_text: str) -> dict | None:
-    """An {"type": "image"} part for a successful generate_image result.
+    """An {"type": "image"} part for a successful generate_image/image_edit result.
 
     The part only references the saved image by id — the bytes live in
     backend/data/images and are served by GET /api/v1/images/{id}, so they
     never flow through the full-history sync payloads. Returns None for any
     other tool or a failed/malformed result.
     """
-    if name != "generate_image" or not output_text:
+    if name not in ("generate_image", "image_edit") or not output_text:
         return None
     try:
         data = json.loads(output_text)
@@ -117,7 +117,7 @@ def _image_part_from_result(name: str, output_text: str) -> dict | None:
         return None
     if (
         not isinstance(data, dict)
-        or data.get("status") != "image_generated"
+        or data.get("status") not in ("image_generated", "image_edited")
         or not data.get("image_id")
     ):
         return None
@@ -262,6 +262,14 @@ def _attachment_blocks(parts, user_id: str) -> list[dict]:
                 {
                     "type": "image_url",
                     "image_url": {"url": f"data:{row['mime']};base64,{encoded}"},
+                }
+            )
+            blocks.append(
+                {
+                    "type": "text",
+                    "text": f'[Attached image "{row["filename"]}" '
+                    f"(id={row['id']}) — call image_edit with this attachment_id "
+                    "to modify it.]",
                 }
             )
         else:
@@ -696,7 +704,7 @@ def _owned_chat_or_404(user, req: ChatRequest):
 
 def _graph_config(user, req: ChatRequest) -> RunnableConfig:
     """Invisible tool context: user id (auth scoping) and chat id (so
-    generate_image can persist the picture against the current chat)."""
+    generate_image/image_edit can persist pictures against the current chat)."""
     return {"configurable": {"user_id": user["id"], "chat_id": req.chat_id}}
 
 
