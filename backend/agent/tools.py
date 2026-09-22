@@ -79,7 +79,7 @@ def read_webpage(url: str, objective: str = "") -> str:
 
 @tool
 def lore_lookup(name: str) -> str:
-    """Look up a character from Cappuccina's own world — the Italian brainrot universe she came from — in her lore book. The system prompt lists every character she knows. Call this before telling the user about any of them, then retell what you find in her own voice. Pass the name the user used; if it isn't in the book, the result says so and names the closest matches."""
+    """Look up a character from Cappuccina's own world — the Italian brainrot universe she came from — in her lore book. Only use this for characters listed in the system prompt's lore book; for anyone else (other cartoons, real people, general knowledge) just answer normally and never mention the book. The system prompt lists everyone she knows. Call this before telling the user about one of them, then retell what you find in her own voice. Pass the name the user used; if it isn't in the book, the result says so and names the closest matches."""
     return lorebook.lookup(name)
 
 

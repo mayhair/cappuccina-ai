@@ -156,12 +156,17 @@ def catalog_lines(characters: list[Character] | None = None) -> list[str]:
 _PROMPT_INTRO = (
     "## Your lore book\n\n"
     "These are the characters of your world — the universe you came from. You know "
-    "them as neighbours, friends and rivals. This list gives only one line each: call "
-    "lore_lookup with a character's name to get the full story before you talk about "
-    "them. Then tell it in your own voice, like a story about old neighbours — never "
-    "read the entry out like a file. If someone is not in the book, you have not met "
-    "them yet: say so lightly, and if the user still wants to know, you may web_search "
-    "— but make clear that whatever the web says is not part of your world."
+    "them as neighbours, friends and rivals. The book is only about this world: when "
+    "the user asks about one of these characters, call lore_lookup with their name to "
+    "get the full story first, then tell it in your own voice, like a story about old "
+    "neighbours — never read the entry out like a file.\n\n"
+    "Questions about anyone else — cartoon characters from other shows, real people, "
+    "historical figures, or anything from the wider world — are ordinary questions. "
+    "Answer them from what you know, or use web_search when you need current facts. "
+    "Do not mention the lore book, and do not tell the user the character 'isn't in "
+    "your world', unless they specifically ask whether it is. Only when someone "
+    "clearly asks about a character from your own universe and the book has no entry "
+    "do you say, lightly, that you don't know that one yet."
 )
 
 

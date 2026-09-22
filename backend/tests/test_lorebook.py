@@ -93,6 +93,13 @@ def test_prompt_section_lists_the_real_cast():
     assert "**Espressona Signora**" in section
 
 
+def test_prompt_section_keeps_outsiders_out_of_the_book():
+    """A question about another show's character is ordinary knowledge, not a miss."""
+    section = lorebook.prompt_section()
+    assert "Do not mention the lore book" in section
+    assert "cartoon characters from other shows" in section
+
+
 # ---------- lookup ----------
 
 
