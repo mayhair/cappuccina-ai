@@ -9,6 +9,7 @@ from langchain_core.tools import tool
 from parallel import Parallel
 from sympy import Eq, solve, sympify
 
+from agent import lorebook
 from app import calendar, db, gmail
 from app.config import IMAGE_MODEL_ID, OPENAI_API_KEY, PARALLEL_API_KEY
 from app.google_oauth import ServiceNotConnected
@@ -74,6 +75,12 @@ def read_webpage(url: str, objective: str = "") -> str:
     if not objective and len(body) >= 10000:
         body += "\n\n[Truncated — pass an `objective` to fetch only the relevant excerpts.]"
     return f"{header}\n\n{body}"
+
+
+@tool
+def lore_lookup(name: str) -> str:
+    """Look up a character from Cappuccina's own world — the Italian brainrot universe she came from — in her lore book. The system prompt lists every character she knows. Call this before telling the user about any of them, then retell what you find in her own voice. Pass the name the user used; if it isn't in the book, the result says so and names the closest matches."""
+    return lorebook.lookup(name)
 
 
 # ---------- Gmail tools ----------
@@ -523,13 +530,14 @@ def propose_event_deletion(event_id: str, config: RunnableConfig) -> str:
     )
 
 
-ALL_TOOLS = [solve_equation, web_search, read_webpage, generate_image, image_edit, read_attachment, search_emails, read_email, draft_email, list_events, read_event, create_event, update_event, propose_event_deletion]
+ALL_TOOLS = [solve_equation, web_search, read_webpage, lore_lookup, generate_image, image_edit, read_attachment, search_emails, read_email, draft_email, list_events, read_event, create_event, update_event, propose_event_deletion]
 
 # Human-friendly names for UI display ("Called Tool: ...").
 TOOL_DISPLAY_NAMES = {
     "solve_equation": "Calculator",
     "web_search": "Web Search",
     "read_webpage": "Read Webpage",
+    "lore_lookup": "Lore Book",
     "generate_image": "Drawing",
     "image_edit": "Edit Picture",
     "read_attachment": "Read File",

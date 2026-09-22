@@ -18,9 +18,7 @@ MAX_CHARS = 64
 def _content_text(content) -> str:
     if isinstance(content, str):
         return content
-    return "".join(
-        part.get("text", "") for part in content if isinstance(part, dict)
-    )
+    return "".join(part.get("text", "") for part in content if isinstance(part, dict))
 
 
 def _clean(raw: str) -> str:

@@ -61,7 +61,8 @@ Chat:
 - `app/calendar.py` — Calendar REST client (list/read/create/update/delete) over httpx
 - `app/db.py` — SQLite (users, sessions, chats, messages, google_grants, oauth_states)
 - `agent/graph.py` — LangGraph: `call_model -> (tool?) -> tools -> call_model ... -> END`
-- `agent/tools.py` — `solve_equation`, `web_search`, `read_webpage`, `search_emails`, `read_email`, `draft_email`, `list_events`, `read_event`, `create_event`, `update_event`, `propose_event_deletion`
+- `agent/tools.py` — `solve_equation`, `web_search`, `read_webpage`, `lore_lookup`, `search_emails`, `read_email`, `draft_email`, `list_events`, `read_event`, `create_event`, `update_event`, `propose_event_deletion`
+- `agent/lorebook.py` — Cappuccina's lore book: `lore/characters/*.md` parsed into the system-prompt catalog + `lore_lookup` fuzzy name matching
 - `agent/model.py` — model factory (OpenRouter, `MODEL_ID` env, `glm-5.3-flash` default)
 
 The authenticated user id reaches the Google tools through LangGraph's

@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from agent import lorebook
 from app.config import CURRENT_DATE, TUTOR_FOR_SUBJECT, TUTOR_SUFFIX
 
 LORE_DIR = Path(__file__).resolve().parent / "lore"
@@ -56,11 +57,17 @@ def build_system_prompt(mode: str, subject: str | None) -> str:
         voice = _without_sections(VOICE, _TUTOR_VOICE_TRIM)
         for_subject = TUTOR_FOR_SUBJECT.format(subject=subject) if subject else ""
         tutor = TUTOR_SUFFIX.format(for_subject=for_subject)
+        lore = ""
     else:
         persona = PERSONA
         voice = VOICE
         tutor = ""
+        lore = lorebook.prompt_section()
     closing = f"Current Date: {CURRENT_DATE}"
     if tutor:
         closing = f"{tutor}\n\n{closing}"
-    return _JOINS.join([BOUNDARIES, persona, voice, ATTACHMENT_NOTE, closing])
+    sections = [BOUNDARIES, persona, voice]
+    if lore:
+        sections.append(lore)
+    sections += [ATTACHMENT_NOTE, closing]
+    return _JOINS.join(sections)
