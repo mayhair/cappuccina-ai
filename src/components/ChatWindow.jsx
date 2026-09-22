@@ -555,7 +555,7 @@ function EventDeleteCard({ proposal, onDeleted }) {
   )
 }
 
-function ToolCallBlock({ tool }) {
+function ToolCallBlock({ tool, onManualToggle }) {
   const [open, setOpen] = useState(false)
   const running = tool.result == null
   const failed = tool.ok === false
@@ -565,7 +565,10 @@ function ToolCallBlock({ tool }) {
       <button
         type="button"
         className="tool-call-head"
-        onClick={() => setOpen((o) => !o)}
+        onClick={() => {
+          onManualToggle?.()
+          setOpen((o) => !o)
+        }}
         aria-expanded={open}
       >
         <span className="tool-badge" aria-hidden="true">
@@ -608,13 +611,11 @@ function ToolCallBlock({ tool }) {
 }
 
 function ThinkingBlock({ parts: segmentParts, streaming, fallbackSeconds = null }) {
-  const [open, setOpen] = useState(false)
   // Draft and deletion calls are surfaced as their own cards below the
   // message, so hide the raw tool blocks to avoid showing them twice.
   const parts = segmentParts.filter(
     (p) => !(p.type === 'tool' && (draftFromTool(p) || deleteFromTool(p))),
   )
-  if (parts.length === 0) return null
 
   // Each thinking block carries its own duration (stamped on its parts when
   // the block closes — see backend/app/main.py). Messages stored before
@@ -630,12 +631,25 @@ function ThinkingBlock({ parts: segmentParts, streaming, fallbackSeconds = null 
       ? formatThought(seconds)
       : 'Thought'
 
+  // Auto-expand while thinking runs, auto-close once it's done. Any manual
+  // click on the block head or on a tool call inside it takes over for good.
+  const [open, setOpen] = useState(!done)
+  const [manual, setManual] = useState(false)
+  useEffect(() => {
+    if (!manual) setOpen(!done)
+  }, [done, manual])
+
+  if (parts.length === 0) return null
+
   return (
     <div className="thinking">
       <button
         type="button"
         className="thinking-head"
-        onClick={() => setOpen((o) => !o)}
+        onClick={() => {
+          setManual(true)
+          setOpen((o) => !o)
+        }}
         aria-expanded={open}
       >
         <span>{label}</span>
@@ -645,7 +659,11 @@ function ThinkingBlock({ parts: segmentParts, streaming, fallbackSeconds = null 
         <div className="thinking-body">
           {parts.map((p, i) =>
             p.type === 'tool' ? (
-              <ToolCallBlock key={p.id ?? `tool-${i}`} tool={p} />
+              <ToolCallBlock
+                key={p.id ?? `tool-${i}`}
+                tool={p}
+                onManualToggle={() => setManual(true)}
+              />
             ) : (
               <p key={`r-${i}`} className="thinking-reasoning">
                 <EmojiText text={p.text ?? ''} />
