@@ -131,8 +131,13 @@ def _image_bytes_from_response(data: dict) -> tuple[bytes, str]:
     raise ValueError("the image API returned neither b64_json nor url")
 
 
-def _openai_generate_image(prompt: str, size: str) -> tuple[bytes, str]:
+def _openai_generate_image(
+    prompt: str, size: str, transparent_background: bool = False
+) -> tuple[bytes, str]:
     """Call the OpenAI image API. Returns (raw image bytes, mime type)."""
+    body = {"model": IMAGE_MODEL_ID, "prompt": prompt, "size": size}
+    if transparent_background:
+        body["background"] = "transparent"
     with httpx.Client(timeout=120) as client:
         resp = client.post(
             "https://api.openai.com/v1/images/generations",
@@ -140,7 +145,7 @@ def _openai_generate_image(prompt: str, size: str) -> tuple[bytes, str]:
                 "Authorization": f"Bearer {OPENAI_API_KEY}",
                 "Content-Type": "application/json",
             },
-            json={"model": IMAGE_MODEL_ID, "prompt": prompt, "size": size},
+            json=body,
         )
         resp.raise_for_status()
         data = (resp.json().get("data") or [{}])[0]
@@ -148,18 +153,27 @@ def _openai_generate_image(prompt: str, size: str) -> tuple[bytes, str]:
 
 
 def _openai_edit_image(
-    prompt: str, image_bytes: bytes, filename: str, mime: str, size: str
+    prompt: str,
+    image_bytes: bytes,
+    filename: str,
+    mime: str,
+    size: str,
+    transparent_background: bool = False,
 ) -> tuple[bytes, str]:
     """Edit an existing image through the OpenAI image API (multipart upload).
 
     Returns (raw image bytes, mime type). httpx sets the multipart boundary
-    itself, so Content-Type is deliberately left unset.
+    itself, so Content-Type is deliberately left unset. A transparent
+    background is an OpenAI-only option.
     """
+    body = {"model": IMAGE_MODEL_ID, "prompt": prompt, "size": size}
+    if transparent_background:
+        body["background"] = "transparent"
     with httpx.Client(timeout=180) as client:
         resp = client.post(
             "https://api.openai.com/v1/images/edits",
             headers={"Authorization": f"Bearer {OPENAI_API_KEY}"},
-            data={"model": IMAGE_MODEL_ID, "prompt": prompt, "size": size},
+            data=body,
             files={"image": (filename, image_bytes, mime)},
         )
         resp.raise_for_status()
@@ -194,8 +208,13 @@ def _load_edit_source(
 
 
 @tool
-def generate_image(prompt: str, config: RunnableConfig, size: str = "") -> str:
-    """Draw an original picture from a text description and show it in the chat. Use this whenever the user asks you to draw, paint, sketch, or make a picture or image of something. Describe the scene vividly in `prompt`: subject, style, colors, mood. Optionally pick a `size`: "1024x1024" (square, default), "1536x1024" (wide), or "1024x1536" (tall) — match the subject's shape. The picture is saved automatically and appears in the chat — tell the user it's ready. Never invent an image_id yourself; the returned JSON describes the saved picture."""
+def generate_image(
+    prompt: str,
+    config: RunnableConfig,
+    size: str = "",
+    transparent_background: bool = False,
+) -> str:
+    """Draw an original picture from a text description and show it in the chat. Use this whenever the user asks you to draw, paint, sketch, or make a picture or image of something. Describe the scene vividly in `prompt`: subject, style, colors, mood. Optionally pick a `size`: "1024x1024" (square, default), "1536x1024" (wide), or "1024x1536" (tall) — match the subject's shape. Set `transparent_background` to true when the user wants a cut-out subject with no background (for example a sticker, logo, or icon) — an OpenAI-only option that returns a PNG with transparency. The picture is saved automatically and appears in the chat — tell the user it's ready. Never invent an image_id yourself; the returned JSON describes the saved picture."""
     user_id = _user_id(config)
     chat_id = _chat_id(config)
     if not user_id or not chat_id:
@@ -204,7 +223,7 @@ def generate_image(prompt: str, config: RunnableConfig, size: str = "") -> str:
         return "Drawing isn't set up yet."
     chosen_size = _image_size(size)
     try:
-        raw, mime = _openai_generate_image(prompt, chosen_size)
+        raw, mime = _openai_generate_image(prompt, chosen_size, transparent_background)
     except (httpx.HTTPError, ValueError) as exc:
         return f"Couldn't draw that right now ({exc})."
     width, height = _image_dimensions(chosen_size)
@@ -221,6 +240,7 @@ def generate_image(prompt: str, config: RunnableConfig, size: str = "") -> str:
             "image_id": image["id"],
             "prompt": prompt,
             "size": chosen_size,
+            "background": "transparent" if transparent_background else "auto",
             "width": image["width"],
             "height": image["height"],
         }
@@ -234,8 +254,9 @@ def image_edit(
     image_id: str = "",
     attachment_id: str = "",
     size: str = "",
+    transparent_background: bool = False,
 ) -> str:
-    """Edit or modify a picture that already exists and show the result in the chat. Use this when the user asks to change, restyle, add to, remove from, or otherwise alter an image. Pass exactly one source: `image_id` for a picture made earlier in this chat (the id from a generate_image or image_edit result), or `attachment_id` for an image the user attached. Describe the change in `prompt`. Optionally set `size` to "1024x1024" (square, default), "1536x1024" (wide), or "1024x1536" (tall); omit it to keep the configured default. Never invent ids yourself. The edited picture is saved as a new image and appears in the chat — tell the user it's ready. The returned JSON describes the saved picture."""
+    """Edit or modify a picture that already exists and show the result in the chat. Use this when the user asks to change, restyle, add to, remove from, or otherwise alter an image. Pass exactly one source: `image_id` for a picture made earlier in this chat (the id from a generate_image or image_edit result), or `attachment_id` for an image the user attached. Describe the change in `prompt`. Optionally set `size` to "1024x1024" (square, default), "1536x1024" (wide), or "1024x1536" (tall); omit it to keep the configured default. Set `transparent_background` to true when the user wants the result on a transparent background (for example removing a background to make a cut-out) — an OpenAI-only option that returns a PNG with transparency. Never invent ids yourself. The edited picture is saved as a new image and appears in the chat — tell the user it's ready. The returned JSON describes the saved picture."""
     user_id = _user_id(config)
     chat_id = _chat_id(config)
     if not user_id or not chat_id:
@@ -251,7 +272,7 @@ def image_edit(
     chosen_size = _image_size(size)
     try:
         raw, edited_mime = _openai_edit_image(
-            prompt, raw_source, filename, mime, chosen_size
+            prompt, raw_source, filename, mime, chosen_size, transparent_background
         )
     except (httpx.HTTPError, ValueError) as exc:
         return f"Couldn't edit that picture right now ({exc})."
@@ -270,6 +291,7 @@ def image_edit(
             "source_image_id": image_id or None,
             "prompt": prompt,
             "size": chosen_size,
+            "background": "transparent" if transparent_background else "auto",
             "width": image["width"],
             "height": image["height"],
         }

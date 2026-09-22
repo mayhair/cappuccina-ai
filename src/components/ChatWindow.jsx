@@ -243,6 +243,7 @@ function ImageCard({ image }) {
   const [open, setOpen] = useState(false)
   const src = `/api/v1/images/${image.imageId}`
   const alt = image.prompt ? `Picture Cappuccina drew: ${image.prompt}` : 'Picture Cappuccina drew'
+  const transparent = image.transparent === true
 
   useEffect(() => {
     if (!open) return
@@ -267,6 +268,7 @@ function ImageCard({ image }) {
         aria-label="View picture full size"
       >
         <img
+          className={transparent ? 'image-transparent' : undefined}
           src={src}
           alt={alt}
           loading="lazy"
@@ -286,7 +288,12 @@ function ImageCard({ image }) {
               if (e.target === e.currentTarget) setOpen(false)
             }}
           >
-            <img src={src} alt={alt} onClick={(e) => e.stopPropagation()} />
+            <img
+              className={transparent ? 'image-transparent' : undefined}
+              src={src}
+              alt={alt}
+              onClick={(e) => e.stopPropagation()}
+            />
             <button
               type="button"
               className="image-lightbox-close"

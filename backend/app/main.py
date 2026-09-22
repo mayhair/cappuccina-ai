@@ -121,13 +121,18 @@ def _image_part_from_result(name: str, output_text: str) -> dict | None:
         or not data.get("image_id")
     ):
         return None
-    return {
+    part = {
         "type": "image",
         "imageId": data["image_id"],
         "prompt": data.get("prompt", ""),
         "width": data.get("width"),
         "height": data.get("height"),
     }
+    # OpenAI-only: marks a PNG with a transparent background so the UI can
+    # show a checkerboard behind it.
+    if data.get("background") == "transparent":
+        part["transparent"] = True
+    return part
 
 
 def _final_extras(messages) -> tuple[str, list[ToolCall], list[dict]]:

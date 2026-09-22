@@ -371,6 +371,7 @@ export function useChatController(enabled) {
             width: image.width ?? null,
             height: image.height ?? null,
           }
+          if (image.transparent === true) part.transparent = true
           patchAssistant(chatId, (m) => ({ parts: [...(m.parts ?? []), part] }))
         },
         onTitle: (title) => applyTitle(chatId, title),

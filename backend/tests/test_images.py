@@ -1,3 +1,4 @@
+import base64
 import json
 
 from app import db
@@ -16,7 +17,9 @@ def test_generate_image_tool_saves_file_and_row(isolated_db, monkeypatch):
 
     user, chat = _user_and_chat()
     monkeypatch.setattr(
-        tools, "_openai_generate_image", lambda prompt, size: (FAKE_PNG, "image/png")
+        tools,
+        "_openai_generate_image",
+        lambda prompt, size, transparent_background=False: (FAKE_PNG, "image/png"),
     )
 
     out = tools.generate_image.invoke(
@@ -53,7 +56,7 @@ def test_generate_image_schema_hides_injected_config():
     from agent import tools
 
     assert "config" not in tools.generate_image.args
-    assert set(tools.generate_image.args) == {"prompt", "size"}
+    assert set(tools.generate_image.args) == {"prompt", "size", "transparent_background"}
 
 
 def test_generate_image_tool_reports_api_failure(isolated_db, monkeypatch):
@@ -63,7 +66,7 @@ def test_generate_image_tool_reports_api_failure(isolated_db, monkeypatch):
 
     user, chat = _user_and_chat()
 
-    def boom(prompt, size):
+    def boom(prompt, size, transparent_background=False):
         raise httpx.ConnectError("offline")
 
     monkeypatch.setattr(tools, "_openai_generate_image", boom)
@@ -81,7 +84,7 @@ def test_generate_image_tool_selects_resolution(isolated_db, monkeypatch):
     config = {"configurable": {"user_id": user["id"], "chat_id": chat["id"]}}
     seen = []
 
-    def fake_generate(prompt, size):
+    def fake_generate(prompt, size, transparent_background=False):
         seen.append(size)
         return FAKE_PNG, "image/png"
 
@@ -107,6 +110,72 @@ def test_generate_image_tool_selects_resolution(isolated_db, monkeypatch):
     ))
     assert seen == ["1536x1024", "1024x1536", "1536x1024", "1024x1024"]
     assert fallback["size"] == "1024x1024"
+
+
+def test_generate_image_tool_requests_transparent_background(isolated_db, monkeypatch):
+    from agent import tools
+
+    user, chat = _user_and_chat()
+    config = {"configurable": {"user_id": user["id"], "chat_id": chat["id"]}}
+    seen = []
+
+    def fake_generate(prompt, size, transparent_background=False):
+        seen.append(transparent_background)
+        return FAKE_PNG, "image/png"
+
+    monkeypatch.setattr(tools, "_openai_generate_image", fake_generate)
+
+    cut_out = json.loads(tools.generate_image.invoke(
+        {"prompt": "a sticker cat", "transparent_background": True}, config=config
+    ))
+    assert cut_out["background"] == "transparent"
+    assert seen == [True]
+
+    opaque = json.loads(tools.generate_image.invoke(
+        {"prompt": "a cat"}, config=config
+    ))
+    assert opaque["background"] == "auto"
+    assert seen == [True, False]
+
+
+def test_openai_image_calls_send_transparent_background(monkeypatch):
+    from agent import tools
+
+    calls = []
+
+    class FakeResponse:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"data": [{"b64_json": base64.b64encode(FAKE_PNG).decode()}]}
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def post(self, url, headers=None, json=None, data=None, files=None):
+            calls.append({"url": url, "json": json, "data": data, "files": files})
+            return FakeResponse()
+
+    monkeypatch.setattr("httpx.Client", FakeClient)
+
+    tools._openai_generate_image("a cat", "1024x1024", True)
+    tools._openai_edit_image(
+        "add a hat", FAKE_PNG, "in.png", "image/png", "1024x1024", True
+    )
+    tools._openai_generate_image("a cat", "1024x1024", False)
+
+    assert calls[0]["json"]["background"] == "transparent"
+    assert calls[1]["data"]["background"] == "transparent"
+    assert calls[1]["files"]["image"][0] == "in.png"
+    assert "background" not in calls[2]["json"]
 
 
 def test_image_part_from_result():
@@ -139,6 +208,29 @@ def test_image_part_from_result():
         )
         is None
     )
+
+
+def test_image_part_from_result_marks_transparent():
+    import app.main as main
+
+    marker = json.dumps(
+        {
+            "status": "image_generated",
+            "image_id": "img-3",
+            "prompt": "a sticker",
+            "background": "transparent",
+            "width": 1024,
+            "height": 1024,
+        }
+    )
+    part = main._image_part_from_result("generate_image", marker)
+    assert part["transparent"] is True
+    # An opaque/auto image never carries the marker.
+    opaque = main._image_part_from_result(
+        "generate_image",
+        json.dumps({"status": "image_generated", "image_id": "img-4"}),
+    )
+    assert "transparent" not in opaque
 
 
 def test_final_extras_appends_image_part():
@@ -355,7 +447,7 @@ def test_image_edit_tool_saves_new_file_and_row(isolated_db, monkeypatch):
     source = db.create_image(user["id"], chat["id"], FAKE_PNG, prompt="a cat")
     calls = []
 
-    def fake_edit(prompt, image_bytes, filename, mime, size):
+    def fake_edit(prompt, image_bytes, filename, mime, size, transparent_background=False):
         calls.append((prompt, image_bytes, filename, mime, size))
         return b"edited-bytes", "image/png"
 
@@ -397,7 +489,7 @@ def test_image_edit_tool_from_attachment(isolated_db, monkeypatch):
     monkeypatch.setattr(
         tools,
         "_openai_edit_image",
-        lambda prompt, image_bytes, filename, mime, size: (
+        lambda prompt, image_bytes, filename, mime, size, transparent_background=False: (
             calls.append((image_bytes, filename, mime, size))
             or (b"edited", "image/png")
         ),
@@ -415,6 +507,28 @@ def test_image_edit_tool_from_attachment(isolated_db, monkeypatch):
     assert edited["status"] == "image_edited"
     assert (edited["width"], edited["height"]) == (1536, 1024)
     assert calls == [(FAKE_PNG, "photo.png", "image/png", "1536x1024")]
+
+
+def test_image_edit_tool_requests_transparent_background(isolated_db, monkeypatch):
+    from agent import tools
+
+    user, chat = _user_and_chat()
+    source = db.create_image(user["id"], chat["id"], FAKE_PNG, prompt="a cat")
+    seen = []
+
+    def fake_edit(prompt, image_bytes, filename, mime, size, transparent_background=False):
+        seen.append(transparent_background)
+        return b"edited", "image/png"
+
+    monkeypatch.setattr(tools, "_openai_edit_image", fake_edit)
+
+    cut_out = json.loads(tools.image_edit.invoke(
+        {"prompt": "remove the background", "image_id": source["id"],
+         "transparent_background": True},
+        config={"configurable": {"user_id": user["id"], "chat_id": chat["id"]}},
+    ))
+    assert cut_out["background"] == "transparent"
+    assert seen == [True]
 
 
 def test_image_edit_tool_rejects_bad_source(isolated_db, monkeypatch):
@@ -460,7 +574,9 @@ def test_image_edit_schema_hides_injected_config():
     from agent import tools
 
     assert "config" not in tools.image_edit.args
-    assert set(tools.image_edit.args) == {"prompt", "image_id", "attachment_id", "size"}
+    assert set(tools.image_edit.args) == {
+        "prompt", "image_id", "attachment_id", "size", "transparent_background"
+    }
 
 
 def test_image_edit_part_from_result():
