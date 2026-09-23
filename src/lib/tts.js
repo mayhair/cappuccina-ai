@@ -7,11 +7,13 @@
 //   speak(message)    synthesize + play one assistant message (auto-read)
 //   stop()            stop playback and any in-flight request
 //   isOn()            current master-switch state
-//   speechText(m)     plain-text version of a message, for speech
 //
-// Playback streams: POST /api/v1/tts returns a job id, the job's GET endpoint
-// feeds an <audio> element, which starts playing while the server is still
-// generating audio.
+// Text preparation (markdown stripping, emoji -> emotion cues) lives in
+// lib/speech.js. Playback streams: POST /api/v1/tts returns a job id, the
+// job's GET endpoint feeds an <audio> element, which starts playing while the
+// server is still generating audio.
+
+import { speechText } from './speech'
 
 let enabled = false
 let audio = null
@@ -41,30 +43,6 @@ function stop() {
     audio.load()
     audio = null
   }
-}
-
-// Strips what should not be spoken: code blocks, images, LaTeX and markdown
-// decoration. Reasoning/tool parts are already filtered by the caller.
-function speechText(message) {
-  const raw = (message.parts ?? [])
-    .filter((part) => part.type === 'text')
-    .map((part) => part.text)
-    .join('\n\n')
-  if (!raw.trim()) return ''
-  return raw
-    .replace(/```[\s\S]*?(```|$)/g, ' ')
-    .replace(/`([^`]*)`/g, '$1')
-    .replace(/!\[[^\]]*\]\([^)]*\)/g, ' ')
-    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
-    .replace(/\$\$[\s\S]*?(?:\$\$|$)/g, ' ')
-    .replace(/\$([^$\n]*)\$/g, '$1')
-    .replace(/^\s{0,3}#{1,6}\s+/gm, '')
-    .replace(/(\*\*|__)(.*?)\1/g, '$2')
-    .replace(/(\*|_)(.*?)\1/g, '$2')
-    .replace(/~~(.*?)~~/g, '$1')
-    .replace(/^\s*[-*+]\s+/gm, '')
-    .replace(/\s+/g, ' ')
-    .trim()
 }
 
 async function startJob(text) {
