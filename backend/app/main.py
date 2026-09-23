@@ -273,8 +273,7 @@ def _attachment_blocks(parts, user_id: str) -> list[dict]:
                 {
                     "type": "text",
                     "text": f'[Attached image "{row["filename"]}" '
-                    f"(id={row['id']}) — call image_edit with this attachment_id "
-                    "to modify it.]",
+                    f"(id={row['id']})]",
                 }
             )
         else:
@@ -282,7 +281,7 @@ def _attachment_blocks(parts, user_id: str) -> list[dict]:
                 {
                     "type": "text",
                     "text": f'[Attached file "{row["filename"]}" '
-                    f"(id={row['id']}) — call read_attachment with that id to read it.]",
+                    f"(id={row['id']})]",
                 }
             )
     return blocks
@@ -298,7 +297,7 @@ def _assistant_content(m) -> str:
     """
     text = m.content or ""
     pointers = [
-        f"[Generated Picture {part.get('imageId')}]"
+        f"[Generated image {part.get('imageId')}]"
         for part in m.parts or []
         if isinstance(part, dict)
         and part.get("type") == "image"
