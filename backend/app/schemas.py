@@ -21,6 +21,7 @@ class ChatRequest(BaseModel):
     reasoning: str = "high"
     mode: str = "chat"
     subject: str | None = None
+    timezone: str | None = None
     generate_title: bool = Field(default=False, alias="generateTitle")
 
     model_config = {"populate_by_name": True}

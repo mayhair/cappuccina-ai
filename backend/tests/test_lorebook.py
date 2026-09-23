@@ -174,6 +174,38 @@ def test_system_prompt_omits_lore_in_tutor_mode():
     assert "Your lore book" not in prompt
 
 
+def test_today_uses_the_given_timezone():
+    from datetime import datetime, timezone
+
+    from agent.prompts import today
+
+    now = datetime(2026, 9, 15, 23, 30, tzinfo=timezone.utc)
+    assert today("Europe/Berlin", now) == "16 September 2026"
+    assert today("UTC", now) == "15 September 2026"
+
+
+def test_today_falls_back_to_utc_for_unknown_zone():
+    from datetime import datetime, timezone
+
+    from agent.prompts import today
+
+    now = datetime(2026, 9, 15, 12, 0, tzinfo=timezone.utc)
+    assert today("Not/AZone", now) == "15 September 2026"
+    assert today(None, now) == "15 September 2026"
+
+
+def test_system_prompt_date_uses_timezone(monkeypatch):
+    from datetime import datetime, timezone
+
+    from agent import prompts
+
+    fixed = datetime(2026, 9, 15, 23, 30, tzinfo=timezone.utc)
+    original = prompts.today
+    monkeypatch.setattr(prompts, "today", lambda tz=None: original(tz, fixed))
+    prompt = prompts.build_system_prompt("chat", None, "Europe/Berlin")
+    assert "Current Date: 16 September 2026" in prompt
+
+
 def test_lore_lookup_tool_returns_entry():
     from agent import tools
 

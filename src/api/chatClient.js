@@ -13,6 +13,7 @@ function buildRequest({ chatId, messages, reasoning, mode, subject, generateTitl
     reasoning: reasoning ?? 'high',
     mode: mode ?? 'chat',
     subject: subject ?? null,
+    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
     generateTitle: generateTitle ?? false,
   }
 }

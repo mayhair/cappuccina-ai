@@ -25,6 +25,11 @@ parser.add_argument(
 parser.add_argument("--mode", default="chat", choices=["chat", "tutor"])
 parser.add_argument("--subject", default=None)
 parser.add_argument(
+    "--timezone",
+    default="UTC",
+    help="IANA timezone for the current date (e.g. Europe/Berlin)",
+)
+parser.add_argument(
     "--no-stream", action="store_true", help="use POST /chat instead of SSE"
 )
 args = parser.parse_args()
@@ -40,6 +45,7 @@ settings = {
     "reasoning": args.reasoning,
     "mode": args.mode,
     "subject": args.subject,
+    "timezone": args.timezone,
     "showreasoning": "on",
 }
 
@@ -51,6 +57,7 @@ def request_body():
         "reasoning": settings["reasoning"],
         "mode": settings["mode"],
         "subject": settings["subject"],
+        "timezone": settings["timezone"],
     }
 
 

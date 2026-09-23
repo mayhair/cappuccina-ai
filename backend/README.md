@@ -45,10 +45,12 @@ be connected and disconnected independently.
 
 Chat:
 
-- `POST /api/v1/chat` — JSON `{chatId, messages, reasoning, mode, subject}` -> `{role, content, reasoning, tool_calls}`
+- `POST /api/v1/chat` — JSON `{chatId, messages, reasoning, mode, subject, timezone}` -> `{role, content, reasoning, tool_calls}`
 - `POST /api/v1/chat/stream` — same body, SSE stream (`start`/`token`/`reasoning`/`tool_call`/`tool_result`/`done` events)
 
 `reasoning`: `low|high|max`. `mode`: `chat|tutor` (tutor takes `subject`).
+`timezone`: optional IANA name (from the browser); the system prompt's current
+date is rendered in it, falling back to the connected calendar's zone, then UTC.
 
 ## Structure
 

@@ -1,9 +1,26 @@
+from datetime import datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from agent import lorebook
-from app.config import CURRENT_DATE, TUTOR_FOR_SUBJECT, TUTOR_SUFFIX
+from app.config import TUTOR_FOR_SUBJECT, TUTOR_SUFFIX
 
 LORE_DIR = Path(__file__).resolve().parent / "lore"
+
+
+def today(tz: str | None = None, now: datetime | None = None) -> str:
+    """The current date in ``tz``, formatted like "15 September 2026".
+
+    Falls back to UTC when the zone name is unknown or the tz database is
+    missing (Windows ships no zoneinfo data unless ``tzdata`` is installed).
+    ``now`` is injectable for tests.
+    """
+    try:
+        zone = ZoneInfo(tz) if tz else ZoneInfo("UTC")
+    except Exception:
+        zone = ZoneInfo("UTC")
+    current = (now or datetime.now(zone)).astimezone(zone)
+    return f"{current.day} {current.strftime('%B %Y')}"
 
 
 def _read(name: str) -> str:
@@ -51,7 +68,7 @@ come back in chunks; keep calling with the offset shown until you have what \
 you need."""
 
 
-def build_system_prompt(mode: str, subject: str | None) -> str:
+def build_system_prompt(mode: str, subject: str | None, timezone: str | None = None) -> str:
     if mode == "tutor":
         persona = _without_sections(PERSONA, _TUTOR_PERSONA_TRIM)
         voice = _without_sections(VOICE, _TUTOR_VOICE_TRIM)
@@ -63,7 +80,7 @@ def build_system_prompt(mode: str, subject: str | None) -> str:
         voice = VOICE
         tutor = ""
         lore = lorebook.prompt_section()
-    closing = f"Current Date: {CURRENT_DATE}"
+    closing = f"Current Date: {today(timezone)}"
     if tutor:
         closing = f"{tutor}\n\n{closing}"
     sections = [BOUNDARIES, persona, voice]

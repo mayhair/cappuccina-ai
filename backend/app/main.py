@@ -1,6 +1,7 @@
 import base64
 import json
 import time
+from zoneinfo import ZoneInfo
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -308,6 +309,30 @@ def _assistant_content(m) -> str:
     return text
 
 
+def _valid_timezone(tz: str | None) -> str | None:
+    if not tz:
+        return None
+    try:
+        ZoneInfo(tz)
+    except Exception:
+        return None
+    return tz
+
+
+def _resolve_timezone(req: ChatRequest, user) -> str:
+    """The user's IANA timezone: the browser's value when valid, else the
+    connected Google Calendar's zone, else UTC."""
+    tz = _valid_timezone(req.timezone)
+    if tz:
+        return tz
+    if db.get_google_grant(user["id"], "calendar") is not None:
+        try:
+            return calendar.get_timezone(user["id"])
+        except Exception:
+            pass
+    return "UTC"
+
+
 def _state(req: ChatRequest, user) -> dict:
     messages = []
     for m in req.messages:
@@ -331,6 +356,7 @@ def _state(req: ChatRequest, user) -> dict:
         "reasoning": req.reasoning,
         "mode": req.mode,
         "subject": req.subject,
+        "timezone": _resolve_timezone(req, user),
     }
 
 

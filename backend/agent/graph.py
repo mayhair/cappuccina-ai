@@ -10,11 +10,12 @@ class AgentState(MessagesState):
     reasoning: str
     mode: str
     subject: str | None
+    timezone: str | None
 
 
 def call_model(state: AgentState):
     model = make_model(state["reasoning"], ALL_TOOLS)
-    messages = [{"role": "system", "content": build_system_prompt(state["mode"], state.get("subject"))}, *state["messages"]]
+    messages = [{"role": "system", "content": build_system_prompt(state["mode"], state.get("subject"), state.get("timezone"))}, *state["messages"]]
     return {"messages": [model.invoke(messages)]}
 
 
