@@ -2,7 +2,7 @@ from langgraph.graph import END, START, MessagesState, StateGraph
 from langgraph.prebuilt import ToolNode
 
 from agent.model import make_model
-from agent.prompts import build_system_prompt
+from agent.prompts import build_messages
 from agent.tools import ALL_TOOLS
 
 
@@ -15,7 +15,7 @@ class AgentState(MessagesState):
 
 def call_model(state: AgentState):
     model = make_model(state["reasoning"], ALL_TOOLS)
-    messages = [{"role": "system", "content": build_system_prompt(state["mode"], state.get("subject"), state.get("timezone"))}, *state["messages"]]
+    messages = build_messages(state["mode"], state.get("subject"), state.get("timezone"), state["messages"])
     return {"messages": [model.invoke(messages)]}
 
 

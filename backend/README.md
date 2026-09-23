@@ -49,8 +49,9 @@ Chat:
 - `POST /api/v1/chat/stream` — same body, SSE stream (`start`/`token`/`reasoning`/`tool_call`/`tool_result`/`done` events)
 
 `reasoning`: `low|high|max`. `mode`: `chat|tutor` (tutor takes `subject`).
-`timezone`: optional IANA name (from the browser); the system prompt's current
-date is rendered in it, falling back to the connected calendar's zone, then UTC.
+`timezone`: optional IANA name (from the browser). The current date is sent as
+a system message after the chat history, rendered in that zone (falling back to
+the connected calendar's zone, then UTC), so long chats always read the live date.
 
 ## Structure
 

@@ -68,7 +68,7 @@ come back in chunks; keep calling with the offset shown until you have what \
 you need."""
 
 
-def build_system_prompt(mode: str, subject: str | None, timezone: str | None = None) -> str:
+def build_system_prompt(mode: str, subject: str | None) -> str:
     if mode == "tutor":
         persona = _without_sections(PERSONA, _TUTOR_PERSONA_TRIM)
         voice = _without_sections(VOICE, _TUTOR_VOICE_TRIM)
@@ -80,11 +80,29 @@ def build_system_prompt(mode: str, subject: str | None, timezone: str | None = N
         voice = VOICE
         tutor = ""
         lore = lorebook.prompt_section()
-    closing = f"Current Date: {today(timezone)}"
-    if tutor:
-        closing = f"{tutor}\n\n{closing}"
     sections = [BOUNDARIES, persona, voice]
     if lore:
         sections.append(lore)
-    sections += [ATTACHMENT_NOTE, closing]
+    sections.append(ATTACHMENT_NOTE)
+    if tutor:
+        sections.append(tutor)
     return _JOINS.join(sections)
+
+
+def date_line(timezone: str | None = None) -> str:
+    return f"Current Date: {today(timezone)}"
+
+
+def build_messages(mode: str, subject: str | None, timezone: str | None, history):
+    """One model call's full message list.
+
+    The system prompt leads (stable, so it stays cache-friendly), the chat
+    history follows, and a trailing system note carries the current date. The
+    date sits *after* the history so a long-running chat reads the live value
+    instead of a date frozen at the top of the conversation.
+    """
+    return [
+        {"role": "system", "content": build_system_prompt(mode, subject)},
+        *history,
+        {"role": "system", "content": date_line(timezone)},
+    ]

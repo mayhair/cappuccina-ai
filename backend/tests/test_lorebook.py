@@ -194,7 +194,13 @@ def test_today_falls_back_to_utc_for_unknown_zone():
     assert today(None, now) == "15 September 2026"
 
 
-def test_system_prompt_date_uses_timezone(monkeypatch):
+def test_system_prompt_has_no_date():
+    from agent.prompts import build_system_prompt
+
+    assert "Current Date" not in build_system_prompt("chat", None)
+
+
+def test_build_messages_puts_live_date_below_history(monkeypatch):
     from datetime import datetime, timezone
 
     from agent import prompts
@@ -202,8 +208,17 @@ def test_system_prompt_date_uses_timezone(monkeypatch):
     fixed = datetime(2026, 9, 15, 23, 30, tzinfo=timezone.utc)
     original = prompts.today
     monkeypatch.setattr(prompts, "today", lambda tz=None: original(tz, fixed))
-    prompt = prompts.build_system_prompt("chat", None, "Europe/Berlin")
-    assert "Current Date: 16 September 2026" in prompt
+    history = [{"role": "user", "content": "hi"}]
+
+    messages = prompts.build_messages("chat", None, "Europe/Berlin", history)
+
+    assert messages[0]["role"] == "system"
+    assert "Current Date" not in messages[0]["content"]
+    assert messages[1] is history[0]
+    assert messages[-1] == {
+        "role": "system",
+        "content": "Current Date: 16 September 2026",
+    }
 
 
 def test_lore_lookup_tool_returns_entry():
