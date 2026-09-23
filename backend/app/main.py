@@ -5,7 +5,7 @@ from zoneinfo import ZoneInfo
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.responses import FileResponse, RedirectResponse, StreamingResponse
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
 from sse_starlette.sse import EventSourceResponse
@@ -13,7 +13,7 @@ from sse_starlette.sse import EventSourceResponse
 from agent.graph import GRAPH
 from agent.title import generate_title
 from agent.tools import TOOL_DISPLAY_NAMES
-from app import calendar, db, documents, gmail, google_oauth
+from app import calendar, db, documents, gmail, google_oauth, tts
 from app.auth import (
     clear_session_cookie,
     current_user,
@@ -22,6 +22,7 @@ from app.auth import (
 )
 from app.config import (
     APP_ORIGIN,
+    FISH_API_KEY,
     GOOGLE_CALENDAR_SCOPES,
     GOOGLE_GMAIL_SCOPES,
     GOOGLE_LOGIN_SCOPES,
@@ -34,6 +35,8 @@ from app.schemas import (
     CreateChatRequest,
     GmailStatusResponse,
     RenameChatRequest,
+    TtsJobResponse,
+    TtsRequest,
     ToolCall,
     UpdateDraftRequest,
     UpdateProfileRequest,
@@ -990,3 +993,32 @@ async def chat_stream(req: ChatRequest, user=Depends(current_user)):
             )
 
     return EventSourceResponse(events(), ping=15)
+
+
+# ---------- text-to-speech (read replies aloud) ----------
+
+
+@app.post("/api/v1/tts")
+async def start_tts(req: TtsRequest, user=Depends(current_user)) -> TtsJobResponse:
+    """Register the text for speech synthesis. Returns a job id whose audio
+    /api/v1/tts/{id} streams as audio/mpeg (fetchable once)."""
+    if not FISH_API_KEY:
+        raise HTTPException(status_code=503, detail="Text-to-speech is not configured")
+    return TtsJobResponse(id=tts.create_job(user["id"], req.text))
+
+
+@app.get("/api/v1/tts/{job_id}")
+async def stream_tts(job_id: str, user=Depends(current_user)):
+    """Stream the synthesized MP3. The <audio> element starts playing as soon
+    as the first bytes arrive; Fish Audio may still be generating the rest."""
+    text = tts.pop_job(job_id, user["id"])
+    if text is None:
+        raise HTTPException(status_code=404, detail="Audio not found")
+    try:
+        client, response = await tts.open_audio_stream(text)
+    except tts.UpstreamError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+    return StreamingResponse(
+        tts.audio_chunks(client, response),
+        media_type="audio/mpeg",
+    )

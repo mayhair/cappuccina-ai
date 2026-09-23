@@ -48,6 +48,13 @@ Chat:
 - `POST /api/v1/chat` — JSON `{chatId, messages, reasoning, mode, subject, timezone}` -> `{role, content, reasoning, tool_calls}`
 - `POST /api/v1/chat/stream` — same body, SSE stream (`start`/`token`/`reasoning`/`tool_call`/`tool_result`/`done` events)
 
+Text-to-speech (reads replies aloud; needs `FISH_API_KEY`, else 503):
+
+- `POST /api/v1/tts` — JSON `{text}` -> `{id}` (registers one synthesis job)
+- `GET /api/v1/tts/{id}` — streams the MP3 (`audio/mpeg`); fetchable once,
+  only by the owning user. `app/tts.py` proxies Fish Audio, so the browser's
+  `<audio>` element can start playing while the audio is still generating.
+
 `reasoning`: `low|high|max`. `mode`: `chat|tutor` (tutor takes `subject`).
 `timezone`: optional IANA name (from the browser). The current date is sent as
 a system message after the chat history, rendered in that zone (falling back to
@@ -63,6 +70,7 @@ the connected calendar's zone, then UTC), so long chats always read the live dat
 - `app/gmail.py` — Gmail REST client (search/read/draft/send) over httpx
 - `app/calendar.py` — Calendar REST client (list/read/create/update/delete) over httpx
 - `app/db.py` — SQLite (users, sessions, chats, messages, google_grants, oauth_states)
+- `app/tts.py` — Fish Audio TTS proxy: pending jobs + MP3 streaming
 - `agent/graph.py` — LangGraph: `call_model -> (tool?) -> tools -> call_model ... -> END`
 - `agent/tools.py` — `solve_equation`, `web_search`, `read_webpage`, `lore_lookup`, `search_emails`, `read_email`, `draft_email`, `list_events`, `read_event`, `create_event`, `update_event`, `propose_event_deletion`
 - `agent/lorebook.py` — Cappuccina's lore book: `lore/characters/*.md` parsed into the system-prompt catalog + `lore_lookup` fuzzy name matching

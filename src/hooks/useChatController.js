@@ -8,6 +8,7 @@ import {
   uploadAttachment,
   deleteAttachment,
 } from '../api/chatClient'
+import tts from '../lib/tts'
 
 const EFFORT_KEY = 'cappuccina-effort'
 const DEFAULT_TITLE = 'New chat'
@@ -279,6 +280,8 @@ export function useChatController(enabled) {
       // reasoning/tool parts is one block; it is stamped with its duration
       // when text follows or the stream ends.
       let blockStart = null
+      // All text streamed for this reply, so it can be read aloud at the end.
+      let spokenText = ''
       const openBlock = () => {
         if (blockStart === null) blockStart = Date.now()
       }
@@ -305,6 +308,7 @@ export function useChatController(enabled) {
         generateTitle: history.length === 1,
       }, {
         onToken: (word) => {
+          spokenText += word
           const seconds = closeBlock()
           patchAssistant(chatId, (m) => {
             const parts = [...(m.parts ?? [])]
@@ -379,6 +383,11 @@ export function useChatController(enabled) {
           if (streamSeq.current === seq) setStatus('idle')
         },
       })
+      // The reply is complete: read it aloud when voice replies are on. Only
+      // the streamed text is spoken (never reasoning/tool parts).
+      if (streamSeq.current === seq) {
+        tts.speak({ parts: [{ type: 'text', text: spokenText }] })
+      }
       // Stamp the final thinking block (the stream ended while still thinking).
       const trailingSeconds = closeBlock()
       if (trailingSeconds != null) {
@@ -435,6 +444,7 @@ export function useChatController(enabled) {
     const reasoning = EFFORTS.find((e) => e.label === effort)?.value ?? 'high'
     const history = [...chat.messages, userMessage]
 
+    tts.stop()
     patchMessages(chat.id, () => history)
     setDraft('')
     setAttachments([])
@@ -467,6 +477,7 @@ export function useChatController(enabled) {
     if (lastUser === -1) return
     const history = messages.slice(0, lastUser + 1)
     const reasoning = EFFORTS.find((e) => e.label === effort)?.value ?? 'high'
+    tts.stop()
     patchMessages(chat.id, () => history)
     ;(async () => {
       try {
@@ -487,6 +498,7 @@ export function useChatController(enabled) {
     // Only one pristine new chat can exist; drop any other empty ones.
     setChats((all) => [chat, ...all.filter((c) => !c.pending || c.messages.length > 0)])
     setActiveChatId(chat.id)
+    tts.stop()
     setDraft('')
     setStatus('idle')
     setAttachments([])
@@ -517,6 +529,7 @@ export function useChatController(enabled) {
   // never follow the user into a different conversation.
   const selectChat = useCallback((id) => {
     setActiveChatId(id)
+    tts.stop()
     setAttachments([])
     setAttachError('')
   }, [])

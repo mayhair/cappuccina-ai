@@ -84,6 +84,7 @@ nano .env
 | `OPENROUTER_API_KEY`   | Yes        | Chat model + reasoning (via OpenRouter)                      |
 | `OPENAI_API_KEY`       | For images | Image generation tool; chat works without it                 |
 | `PARALLEL_API_KEY`     | For search | Web-search tool; chat works without it                       |
+| `FISH_API_KEY`         | For voice  | Fish Audio key; reads replies aloud (speaker icon); optional |
 | `MODEL_ID`             | No         | Defaults to `z-ai/glm-5.3-flash` (OpenRouter)                |
 | `GOOGLE_CLIENT_ID`     | Yes        | Google OAuth web client (see §4)                             |
 | `GOOGLE_CLIENT_SECRET` | Yes        | Google OAuth web client (see §4)                             |

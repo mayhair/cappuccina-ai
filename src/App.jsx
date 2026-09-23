@@ -4,12 +4,14 @@ import { SidebarControls } from './components/SidebarControls'
 import { TopBarTitle } from './components/TopBarTitle'
 import { ChatWindow } from './components/ChatWindow'
 import { ThemeToggle } from './components/ThemeToggle'
+import { SpeakerToggle } from './components/SpeakerToggle'
 import { SparkleIcon } from './components/Icons'
 import { Sky, LandingPage } from './components/LandingPage'
 import { AlphaGate } from './components/AlphaGate'
 import { SettingsDialog } from './components/SettingsDialog'
 import { getMe, logout } from './api/authClient'
 import { useChatController } from './hooks/useChatController'
+import tts from './lib/tts'
 
 export default function App() {
   const [theme, setTheme] = useState(() => {
@@ -22,6 +24,14 @@ export default function App() {
     document.documentElement.dataset.theme = theme
     localStorage.setItem('cappuccina-theme', theme)
   }, [theme])
+
+  // Voice replies (TTS) are off until the user opts in.
+  const [voice, setVoice] = useState(() => localStorage.getItem('cappuccina-voice') === '1')
+
+  useEffect(() => {
+    localStorage.setItem('cappuccina-voice', voice ? '1' : '0')
+    tts.setEnabled(voice)
+  }, [voice])
 
   const [collapsed, setCollapsed] = useState(
     () => localStorage.getItem('cappuccina-sidebar-collapsed') === '1',
@@ -88,6 +98,7 @@ export default function App() {
   const chat = useChatController(Boolean(user), user?.id)
 
   const handleLogout = async () => {
+    tts.stop()
     await logout()
     setUser(null)
     setAuthPhase('landing')
@@ -193,6 +204,7 @@ export default function App() {
             />
           </div>
           <div className="top-bar-right">
+            <SpeakerToggle enabled={voice} onChange={setVoice} />
             <ThemeToggle theme={theme} onChange={setTheme} />
             <span className="ai-badge">
               <SparkleIcon />

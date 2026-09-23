@@ -81,3 +81,11 @@ class CreateChatRequest(BaseModel):
 
 class RenameChatRequest(BaseModel):
     title: str
+
+
+class TtsRequest(BaseModel):
+    text: str = Field(min_length=1, max_length=10_000)
+
+
+class TtsJobResponse(BaseModel):
+    id: str

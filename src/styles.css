@@ -678,6 +678,8 @@ img.user-avatar {
 .ctrl-btn:hover { background: var(--hover-tint); color: var(--ink); }
 .ctrl-btn:focus-visible { outline: 2px solid var(--pink-strong); outline-offset: 1px; }
 .ctrl-btn svg { width: 19px; height: 19px; }
+.ctrl-btn.is-on { color: var(--pink-strong); }
+.ctrl-btn.is-on:hover { color: var(--pink-strong); }
 
 /* Active chat name in the top bar. A branded glass chip that stays readable
    over the sky in both themes; becomes an auto-sized input when clicked. */

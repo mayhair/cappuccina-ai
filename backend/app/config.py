@@ -18,6 +18,16 @@ PARALLEL_API_KEY = os.getenv("PARALLEL_API_KEY", "")
 # 1536x1024, 1024x1536); there is no env-configured size.
 IMAGE_MODEL_ID = os.getenv("IMAGE_MODEL_ID", "gpt-image-2.5-flare")
 
+# ---------- Text-to-speech (Fish Audio) ----------
+# Reads assistant replies aloud. POST https://api.fish.audio/v1/tts is proxied
+# behind /api/v1/tts (see app/tts.py). Leave FISH_API_KEY empty to disable TTS
+# (the endpoint answers 503 and the frontend silently skips speaking).
+FISH_API_KEY = os.getenv("FISH_API_KEY", "")
+FISH_TTS_REFERENCE_ID = os.getenv(
+    "FISH_TTS_REFERENCE_ID", "6c273b36364b415ea25e588b688c506d"
+)
+FISH_TTS_MODEL = os.getenv("FISH_TTS_MODEL", "s2.1-pro-free")
+
 # ---------- Google OAuth ----------
 GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "")
 GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET", "")
