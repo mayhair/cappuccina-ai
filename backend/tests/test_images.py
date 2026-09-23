@@ -233,6 +233,58 @@ def test_image_part_from_result_marks_transparent():
     assert "transparent" not in opaque
 
 
+def test_state_replays_image_ids_to_the_model(isolated_db):
+    import app.main as main
+
+    user, chat = _user_and_chat()
+    image = db.create_image(user["id"], chat["id"], FAKE_PNG, prompt="a penguin")
+    req = main.ChatRequest(
+        chatId=chat["id"],
+        messages=[
+            {"role": "user", "content": "draw a penguin"},
+            {
+                "role": "assistant",
+                "content": "Here you go!",
+                "parts": [
+                    {"type": "text", "text": "Here you go!"},
+                    {
+                        "type": "image",
+                        "imageId": image["id"],
+                        "prompt": "a penguin",
+                    },
+                ],
+            },
+            {"role": "user", "content": "remove the background"},
+        ],
+    )
+    state = main._state(req, user)
+    assistant = state["messages"][1]
+    # The model can see the earlier picture's id and knows how to edit it.
+    assert f"[Generated Picture {image['id']}]" in assistant.content
+    # The user turns stay untouched.
+    assert state["messages"][0].content == "draw a penguin"
+    assert state["messages"][2].content == "remove the background"
+
+
+def test_state_assistant_without_images_is_plain_text(isolated_db):
+    import app.main as main
+
+    user, chat = _user_and_chat()
+    req = main.ChatRequest(
+        chatId=chat["id"],
+        messages=[
+            {"role": "user", "content": "hi"},
+            {
+                "role": "assistant",
+                "content": "Hello!",
+                "parts": [{"type": "text", "text": "Hello!"}],
+            },
+        ],
+    )
+    state = main._state(req, user)
+    assert state["messages"][1].content == "Hello!"
+
+
 def test_final_extras_appends_image_part():
     import app.main as main
     from langchain_core.messages import AIMessage, ToolMessage

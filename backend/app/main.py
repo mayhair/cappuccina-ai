@@ -288,11 +288,32 @@ def _attachment_blocks(parts, user_id: str) -> list[dict]:
     return blocks
 
 
+def _assistant_content(m) -> str:
+    """Assistant text plus pointers to any pictures it produced.
+
+    Prior turns are replayed as plain text, so an image's id would otherwise be
+    invisible to the model and it could not call image_edit on an earlier
+    picture (it would redraw from scratch instead). The pointer names the id;
+    the bytes stay server-side.
+    """
+    text = m.content or ""
+    pointers = [
+        f"[Generated Picture {part.get('imageId')}]"
+        for part in m.parts or []
+        if isinstance(part, dict)
+        and part.get("type") == "image"
+        and part.get("imageId")
+    ]
+    if pointers:
+        text = (text + "\n" + "\n".join(pointers)).strip()
+    return text
+
+
 def _state(req: ChatRequest, user) -> dict:
     messages = []
     for m in req.messages:
         if m.role == "assistant":
-            messages.append(AIMessage(content=m.content))
+            messages.append(AIMessage(content=_assistant_content(m)))
             continue
         if m.role != "user":
             messages.append(SystemMessage(content=m.content))
