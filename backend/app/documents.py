@@ -68,6 +68,57 @@ def mime_for(filename: str) -> str:
     return guessed or "application/octet-stream"
 
 
+# Vision models see at most ~2 megapixels of detail, so a larger upload only
+# costs bandwidth, disk and prompt tokens. Anything above this is downscaled on
+# the way in; small images pass through untouched.
+MAX_IMAGE_PIXELS = 2_000_000
+
+
+def _encode_image(image, mime: str) -> bytes:
+    """Re-encode a Pillow image to ``mime``, preserving alpha where it exists."""
+    buffer = io.BytesIO()
+    if mime == "image/jpeg":
+        if image.mode not in ("RGB", "L"):
+            image = image.convert("RGB")
+        image.save(buffer, format="JPEG", quality=85, optimize=True)
+    elif mime == "image/webp":
+        image.save(buffer, format="WEBP", quality=85)
+    else:
+        image.save(buffer, format="PNG", optimize=True)
+    return buffer.getvalue()
+
+
+def downscale_image(
+    data: bytes, mime: str, max_pixels: int = MAX_IMAGE_PIXELS
+) -> bytes:
+    """Shrink an oversized image to at most ``max_pixels``, keeping its format.
+
+    Best-effort: the original bytes come back unchanged when the image already
+    fits, is animated, or cannot be decoded (so an odd-but-valid upload is never
+    rejected here).
+    """
+    try:
+        from PIL import Image, ImageOps
+    except ImportError:  # defensive: Pillow is in requirements.txt
+        return data
+    try:
+        with Image.open(io.BytesIO(data)) as image:
+            if getattr(image, "is_animated", False):
+                return data
+            image = ImageOps.exif_transpose(image)
+            width, height = image.size
+            if width * height <= max_pixels:
+                return data
+            scale = (max_pixels / (width * height)) ** 0.5
+            resized = image.resize(
+                (max(1, round(width * scale)), max(1, round(height * scale))),
+                Image.Resampling.LANCZOS,
+            )
+            return _encode_image(resized, mime)
+    except Exception:
+        return data
+
+
 def _truncate(text: str) -> str:
     if len(text) <= MAX_EXTRACTED_CHARS:
         return text

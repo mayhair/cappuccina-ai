@@ -753,7 +753,11 @@ async def upload_attachment(
     if documents.is_image(filename):
         if len(data) > MAX_IMAGE_BYTES:
             raise HTTPException(status_code=413, detail="That image is too large (20MB max)")
-        kind, mime, text = "image", documents.mime_for(filename), ""
+        mime = documents.mime_for(filename)
+        # Oversized pictures are shrunk before storage so they stay cheap to
+        # serve and to send to the model.
+        data = documents.downscale_image(data, mime)
+        kind, text = "image", ""
     elif documents.is_document(filename):
         if len(data) > MAX_DOCUMENT_BYTES:
             raise HTTPException(status_code=413, detail="That file is too large (10MB max)")

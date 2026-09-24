@@ -118,6 +118,58 @@ def test_is_image_and_is_document():
     assert not documents.is_document("song.mp3")
 
 
+# ---------- image downscaling ----------
+
+def _png_bytes(width: int, height: int, mode: str = "RGB") -> bytes:
+    from PIL import Image
+
+    color = (120, 80, 200) if mode == "RGB" else (120, 80, 200, 128)
+    buf = io.BytesIO()
+    Image.new(mode, (width, height), color).save(buf, format="PNG")
+    return buf.getvalue()
+
+
+def test_downscale_image_shrinks_oversized():
+    from PIL import Image
+
+    original = _png_bytes(3000, 3000)
+    shrunk = documents.downscale_image(original, "image/png")
+    assert shrunk != original
+    with Image.open(io.BytesIO(shrunk)) as image:
+        width, height = image.size
+    assert width * height <= documents.MAX_IMAGE_PIXELS
+    assert width < 3000 and height < 3000
+
+
+def test_downscale_image_leaves_small_images_untouched():
+    original = _png_bytes(100, 100)
+    assert documents.downscale_image(original, "image/png") == original
+
+
+def test_downscale_image_preserves_png_alpha():
+    from PIL import Image
+
+    shrunk = documents.downscale_image(_png_bytes(3000, 3000, "RGBA"), "image/png")
+    with Image.open(io.BytesIO(shrunk)) as image:
+        assert image.mode == "RGBA"
+        assert image.size[0] * image.size[1] <= documents.MAX_IMAGE_PIXELS
+
+
+def test_downscale_image_handles_jpeg():
+    from PIL import Image
+
+    buf = io.BytesIO()
+    Image.new("RGB", (3000, 3000), (10, 20, 30)).save(buf, format="JPEG")
+    shrunk = documents.downscale_image(buf.getvalue(), "image/jpeg")
+    assert shrunk.startswith(b"\xff\xd8")  # still a JPEG
+    with Image.open(io.BytesIO(shrunk)) as image:
+        assert image.size[0] * image.size[1] <= documents.MAX_IMAGE_PIXELS
+
+
+def test_downscale_image_returns_original_on_garbage():
+    assert documents.downscale_image(b"not an image", "image/png") == b"not an image"
+
+
 # ---------- upload endpoint ----------
 
 def _chat(signed_in):
@@ -154,6 +206,26 @@ def test_upload_image_keeps_bytes_no_text(signed_in):
     body = res.json()
     assert body["kind"] == "image"
     assert body["charCount"] == 0
+
+
+def test_upload_downscales_oversized_image(signed_in):
+    from PIL import Image
+
+    chat = _chat(signed_in)
+    res = signed_in.post(
+        "/api/v1/attachments",
+        files={"file": ("huge.png", _png_bytes(3000, 3000), "image/png")},
+        data={"chatId": chat["id"]},
+    )
+    assert res.status_code == 200
+    body = res.json()
+    assert body["kind"] == "image"
+
+    user = db.get_user_by_email("kid@example.com")
+    row = db.get_attachment(user["id"], body["id"])
+    stored = db.attachment_file_path(row["id"], row["filename"]).read_bytes()
+    with Image.open(io.BytesIO(stored)) as image:
+        assert image.size[0] * image.size[1] <= documents.MAX_IMAGE_PIXELS
 
 
 def test_upload_rejects_unsupported_type(signed_in):
