@@ -395,9 +395,6 @@ def draft_email(to: str, subject: str, body: str, config: RunnableConfig) -> str
     return json.dumps({"status": "draft_created", **draft})
 
 
-ALL_TOOLS = [solve_equation, web_search, read_webpage, generate_image, image_edit, read_attachment, search_emails, read_email, draft_email]
-
-
 # ---------- Calendar tools ----------
 
 CALENDAR_NOT_CONNECTED = (
@@ -571,4 +568,9 @@ TOOL_DISPLAY_NAMES = {
     "create_event": "New Event",
     "update_event": "Edit Event",
     "propose_event_deletion": "Delete Event",
+    "fmhy_media_sites": "Free Media Sites",
+    "fmhy_search": "Free Media Search",
+    "fmhy_get_links": "Free Media Links",
+    "fmhy_get_section": "Media Guide Section",
+    "fmhy_list_sections": "Media Guide Categories",
 }

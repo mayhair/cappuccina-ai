@@ -12,6 +12,13 @@ MODEL_ID = os.getenv("MODEL_ID", "z-ai/glm-5.3-flash")
 TITLE_MODEL_ID = os.getenv("TITLE_MODEL_ID", "")
 PARALLEL_API_KEY = os.getenv("PARALLEL_API_KEY", "")
 
+# FMHY (Free Media Heck Yeah) free-media guide, reached through its MCP server.
+# The agent tools fmhy_media_sites/fmhy_search/fmhy_get_links/fmhy_get_section/
+# fmhy_list_sections
+# proxy to this Streamable HTTP endpoint. Leave empty to disable the feature
+# (the chat still runs, just without the free-media tools).
+FMHY_MCP_URL = os.getenv("FMHY_MCP_URL", "https://fmhy-mcp.ken.tools/mcp")
+
 # Image generation/editing (generate_image and image_edit agent tools). The
 # model must return images as base64; both the returned bytes and their
 # dimensions are persisted. Resolutions are chosen per call (1024x1024,
@@ -24,7 +31,7 @@ IMAGE_MODEL_ID = os.getenv("IMAGE_MODEL_ID", "gpt-image-2.5-flare")
 # (the endpoint answers 503 and the frontend silently skips speaking).
 FISH_API_KEY = os.getenv("FISH_API_KEY", "")
 FISH_TTS_REFERENCE_ID = os.getenv(
-    "FISH_TTS_REFERENCE_ID", "6c273b36364b415ea25e588b688c506d"
+    "FISH_TTS_REFERENCE_ID", "b676533aa3e6410db69373c197847582"
 )
 FISH_TTS_MODEL = os.getenv("FISH_TTS_MODEL", "s2.1-pro-free")
 

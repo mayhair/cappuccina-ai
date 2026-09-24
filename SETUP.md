@@ -90,6 +90,7 @@ nano .env
 | `GOOGLE_CLIENT_SECRET` | Yes        | Google OAuth web client (see §4)                             |
 | `TOKEN_ENC_KEY`        | Yes        | Encrypts Gmail tokens at rest; `openssl rand -hex 32`        |
 | `APP_ORIGIN`           | No         | Origin users browse; defaults to `http://localhost:5173`     |
+| `FMHY_MCP_URL`         | No         | FMHY free-media MCP endpoint; blank disables those tools     |
 
 `.env` is gitignored — never commit it.
 

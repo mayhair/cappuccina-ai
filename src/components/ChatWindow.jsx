@@ -46,12 +46,17 @@ function thinkingParts(message) {
 // thinking segment and emit each text part as its own segment, so the UI can
 // render a new thinking block immediately after a chat message.
 function messageSegments(message) {
-  const raw = thinkingParts(message)
+  // Drop whitespace-only text parts: the model sometimes streams a lone space
+  // before a tool call, which would otherwise render as an empty bubble.
+  const raw = thinkingParts(message).filter(
+    (p) => p.type !== 'text' || (p.text ?? '').trim() !== '',
+  )
+  const content = message.content ?? ''
   const hasTextPart = raw.some((p) => p.type === 'text')
   const parts = hasTextPart
     ? raw
-    : message.content
-      ? [...raw, { type: 'text', text: message.content }]
+    : content.trim()
+      ? [...raw, { type: 'text', text: content }]
       : raw
   const segments = []
   let thinking = []

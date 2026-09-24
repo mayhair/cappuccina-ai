@@ -77,11 +77,24 @@ function splitChunkEmoji(chunk, hasPrevious) {
 }
 
 // Converts emoji to emotion cues and drops the rest. Emoji detection reuses the
-// same parser that renders them, which also means math glyphs like ° are left
-// alone.
+// same parser that renders them, which also means math glyphs like ° are
+// left alone. Returns one speakable string per input line: every newline is a
+// paragraph break and becomes a separate TTS request, because the voice model
+// does not leave enough space between paragraphs otherwise.
 function applyEmotionTags(text) {
-  const chunks = text.split(/(?<=[.!?…])\s+|\n+/)
-  const parts = chunks.map((chunk) => ({ text: chunk, cues: [] }))
+  const lines = text
+    .split(/\n+/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+  const parts = []
+  const lineOf = []
+  lines.forEach((line, lineIndex) => {
+    for (const chunk of line.split(/(?<=[.!?…])\s+/)) {
+      if (!chunk.trim()) continue
+      parts.push({ text: chunk, cues: [] })
+      lineOf.push(lineIndex)
+    }
+  })
 
   parts.forEach((part, i) => {
     const { text: stripped, own, leading } = splitChunkEmoji(part.text, i > 0)
@@ -90,21 +103,27 @@ function applyEmotionTags(text) {
     if (leading.length && i > 0) parts[i - 1].cues.push(...leading)
   })
 
-  // Nothing but emoji is not something to read aloud.
-  if (!parts.some((part) => /\p{L}|\p{N}/u.test(part.text))) return ''
-
-  return parts
-    .map((part) => {
-      const cues = uniqueCues(part.cues)
-      // Cues stack visually but a later cue replaces an earlier one, so keep
-      // them in a single bracket.
-      const prefix = cues.length ? `[${cues.join(', ')}] ` : ''
-      return `${prefix}${part.text.trim()}`
-    })
-    .join(' ')
-    .replace(/\s+([.,!?;:…])/g, '$1')
-    .replace(/\s+/g, ' ')
-    .trim()
+  const out = []
+  lines.forEach((_, lineIndex) => {
+    const chunks = parts.filter((_, i) => lineOf[i] === lineIndex)
+    // Nothing but emoji is not something to read aloud.
+    if (!chunks.some((part) => /\p{L}|\p{N}/u.test(part.text))) return
+    out.push(
+      chunks
+        .map((part) => {
+          const cues = uniqueCues(part.cues)
+          // Cues stack visually but a later cue replaces an earlier one, so keep
+          // them in a single bracket.
+          const prefix = cues.length ? `[${cues.join(', ')}] ` : ''
+          return `${prefix}${part.text.trim()}`
+        })
+        .join(' ')
+        .replace(/\s+([.,!?;:…])/g, '$1')
+        .replace(/\s+/g, ' ')
+        .trim()
+    )
+  })
+  return out
 }
 
 function stripMarkdown(raw) {
@@ -122,14 +141,14 @@ function stripMarkdown(raw) {
     .replace(/^\s*[-*+]\s+/gm, '')
 }
 
-// Plain, speakable text for one assistant message: markdown and LaTeX removed,
-// emoji turned into emotion cues (or stripped). Reasoning/tool parts are
-// filtered by the caller.
-export function speechText(message) {
+// Plain, speakable paragraphs for one assistant message: markdown and LaTeX
+// removed, emoji turned into emotion cues (or stripped), one entry per input
+// line. Reasoning/tool parts are filtered by the caller.
+export function speechParagraphs(message) {
   const raw = (message.parts ?? [])
     .filter((part) => part.type === 'text')
     .map((part) => part.text)
     .join('\n\n')
-  if (!raw.trim()) return ''
+  if (!raw.trim()) return []
   return applyEmotionTags(stripMarkdown(raw))
 }

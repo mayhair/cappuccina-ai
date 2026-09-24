@@ -1,6 +1,7 @@
 import base64
 import json
 import time
+from contextlib import asynccontextmanager
 from zoneinfo import ZoneInfo
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, Response, UploadFile
@@ -10,9 +11,10 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
 from sse_starlette.sse import EventSourceResponse
 
-from agent.graph import GRAPH
+from agent.fmhy import load_fmhy_tools
+from agent.graph import build_graph
 from agent.title import generate_title
-from agent.tools import TOOL_DISPLAY_NAMES
+from agent.tools import ALL_TOOLS, TOOL_DISPLAY_NAMES
 from app import calendar, db, documents, gmail, google_oauth, tts
 from app.auth import (
     clear_session_cookie,
@@ -43,7 +45,23 @@ from app.schemas import (
     UserResponse,
 )
 
-app = FastAPI(title="Cappuccina Chatbot")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Load the FMHY free-media tools, then compile the graph around them.
+
+    The endpoint is best-effort: if it is down, the tools are simply absent and
+    the rest of the chatbot boots as usual.
+    """
+    global GRAPH
+    fmhy_tools = await load_fmhy_tools()
+    GRAPH = build_graph([*ALL_TOOLS, *fmhy_tools])
+    yield
+
+
+GRAPH = build_graph(ALL_TOOLS)
+
+app = FastAPI(title="Cappuccina Chatbot", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -154,8 +172,9 @@ def _final_extras(messages) -> tuple[str, list[ToolCall], list[dict]]:
             parts.append({"type": "reasoning", "text": step_reasoning})
         # Text the model emitted on this turn. Kept as its own part so the
         # UI can interleave it between thinking blocks and tool calls. Tool
-        # results are not model text, so they never become text parts.
-        if msg.__class__.__name__ != "ToolMessage":
+        # results are not model text, so they never become text parts; system
+        # messages (including the injected FMHY safety note) never surface.
+        if msg.__class__.__name__ not in ("ToolMessage", "SystemMessage"):
             step_text = _text(content)
             if step_text:
                 parts.append({"type": "text", "text": step_text})

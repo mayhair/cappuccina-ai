@@ -71,8 +71,9 @@ the connected calendar's zone, then UTC), so long chats always read the live dat
 - `app/calendar.py` — Calendar REST client (list/read/create/update/delete) over httpx
 - `app/db.py` — SQLite (users, sessions, chats, messages, google_grants, oauth_states)
 - `app/tts.py` — Fish Audio TTS proxy: pending jobs + MP3 streaming
-- `agent/graph.py` — LangGraph: `call_model -> (tool?) -> tools -> call_model ... -> END`
+- `agent/graph.py` — LangGraph: `call_model -> (tool?) -> tools -> call_model ... -> END`; appends the FMHY ad-blocker safety note as a system message after FMHY tools run
 - `agent/tools.py` — `solve_equation`, `web_search`, `read_webpage`, `lore_lookup`, `search_emails`, `read_email`, `draft_email`, `list_events`, `read_event`, `create_event`, `update_event`, `propose_event_deletion`
+- `agent/fmhy.py` — FMHY free-media tools (`fmhy_media_sites`, `fmhy_search`, `fmhy_get_links`, `fmhy_get_section`, `fmhy_list_sections`) discovered over MCP at startup (the server cache is force-refreshed once at startup); filters NSFW-tagged entries and gates use until the user insists. `fmhy_media_sites` is the recommended path for "where can I watch X" — FMHY lists sites, not titles, so a title is looked up by reading the guide's full sections (Stream Aggregators, Download Games, Ebooks, …) rather than searching for it; results are starred-first and capped
 - `agent/lorebook.py` — Cappuccina's lore book: `lore/characters/*.md` parsed into the system-prompt catalog + `lore_lookup` fuzzy name matching
 - `agent/model.py` — model factory (OpenRouter, `MODEL_ID` env, `glm-5.3-flash` default)
 

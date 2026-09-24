@@ -308,19 +308,22 @@ export function useChatController(enabled) {
         generateTitle: history.length === 1,
       }, {
         onToken: (word) => {
+          if (!word) return
           spokenText += word
           const seconds = closeBlock()
           patchAssistant(chatId, (m) => {
             const parts = [...(m.parts ?? [])]
             const last = parts[parts.length - 1]
             // Text becomes a part so it can sit between thinking blocks:
-            // the model may say "Let me check..." then think again.
+            // the model may say "Let me check..." then think again. A
+            // whitespace-only chunk with no open text part is skipped — it
+            // would otherwise render as an empty bubble.
             if (last && last.type === 'text') {
               parts[parts.length - 1] = { ...last, text: (last.text ?? '') + word }
-            } else {
+            } else if (word.trim()) {
               parts.push({ type: 'text', text: word })
             }
-            return { parts: stampParts(parts, seconds), content: m.content + word }
+            return { parts: stampParts(parts, seconds), content: (m.content ?? '') + word }
           })
         },
         onReasoning: (piece) => {

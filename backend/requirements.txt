@@ -3,6 +3,9 @@ uvicorn[standard]>=0.32
 langgraph>=0.2.60
 langchain-openai>=0.2.14
 langchain-core>=0.3.28
+# MCP support lives in the main langchain package (langchain.mcp.MCPAdapter),
+# built on FastMCP. Pulls in fastmcp + mcp.
+langchain[mcp]>=1.4.0
 httpx>=0.28
 sympy>=1.13.3
 sse-starlette>=2.1
