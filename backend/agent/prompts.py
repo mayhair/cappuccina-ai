@@ -67,6 +67,11 @@ about it, call read_attachment with that id to read its text. Long documents \
 come back in chunks; keep calling with the offset shown until you have what \
 you need."""
 
+PICTURE_NOTE = """\
+Pictures you draw or edit are saved and shown back to you, each with an id. \
+When the user wants to change a picture you made earlier, call image_edit with \
+that id instead of drawing a new one from scratch."""
+
 
 def build_system_prompt(mode: str, subject: str | None) -> str:
     if mode == "tutor":
@@ -84,6 +89,7 @@ def build_system_prompt(mode: str, subject: str | None) -> str:
     if lore:
         sections.append(lore)
     sections.append(ATTACHMENT_NOTE)
+    sections.append(PICTURE_NOTE)
     if tutor:
         sections.append(tutor)
     return _JOINS.join(sections)

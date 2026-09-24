@@ -207,6 +207,42 @@ def _load_edit_source(
     return None
 
 
+# Tools whose successful result is a saved picture. The graph watches for these
+# to show the model the image it just made (see agent/graph.py).
+IMAGE_TOOL_NAMES = ("generate_image", "image_edit")
+_IMAGE_STATUSES = ("image_generated", "image_edited")
+
+
+def image_id_from_tool_result(name: str, output_text: str) -> str | None:
+    """The saved image id from a successful image-tool result, or None.
+
+    Shared by app/main.py (to build the UI's image part) and agent/graph.py (to
+    show the model the picture it just made).
+    """
+    if name not in IMAGE_TOOL_NAMES or not output_text:
+        return None
+    try:
+        data = json.loads(output_text)
+    except (ValueError, TypeError):
+        return None
+    if (
+        isinstance(data, dict)
+        and data.get("status") in _IMAGE_STATUSES
+        and data.get("image_id")
+    ):
+        return data["image_id"]
+    return None
+
+
+def image_url_block(mime: str, raw: bytes) -> dict:
+    """One OpenAI vision content block for raw image bytes."""
+    encoded = base64.b64encode(raw).decode("ascii")
+    return {
+        "type": "image_url",
+        "image_url": {"url": f"data:{mime};base64,{encoded}"},
+    }
+
+
 @tool
 def generate_image(
     prompt: str,

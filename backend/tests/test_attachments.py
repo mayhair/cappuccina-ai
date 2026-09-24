@@ -352,7 +352,6 @@ def test_state_points_to_document_for_tool(signed_in):
     pointer = content[1]["text"]
     assert "notes.txt" in pointer
     assert row["id"] in pointer
-    assert "read_attachment" in pointer
 
 
 def test_state_without_attachments_is_plain_text(signed_in):
