@@ -280,8 +280,17 @@ export function useChatController(enabled) {
       // reasoning/tool parts is one block; it is stamped with its duration
       // when text follows or the stream ends.
       let blockStart = null
-      // All text streamed for this reply, so it can be read aloud at the end.
+      // Text streamed for the bubble currently open. Each bubble is read
+      // aloud the moment it finishes — when thinking, a tool call or an image
+      // follows, or the stream ends — instead of waiting for the whole run.
       let spokenText = ''
+      const flushSpoken = () => {
+        const text = spokenText
+        spokenText = ''
+        if (!text.trim() || streamSeq.current !== seq) return
+        // Only the streamed text is spoken (never reasoning/tool parts).
+        tts.enqueue({ parts: [{ type: 'text', text }] })
+      }
       const openBlock = () => {
         if (blockStart === null) blockStart = Date.now()
       }
@@ -327,6 +336,7 @@ export function useChatController(enabled) {
           })
         },
         onReasoning: (piece) => {
+          flushSpoken()
           openBlock()
           patchAssistant(chatId, (m) => {
             const parts = [...(m.parts ?? [])]
@@ -340,6 +350,7 @@ export function useChatController(enabled) {
           })
         },
         onToolCall: (call) => {
+          flushSpoken()
           openBlock()
           const tool = {
             type: 'tool',
@@ -369,6 +380,7 @@ export function useChatController(enabled) {
           }))
         },
         onImage: (image) => {
+          flushSpoken()
           // A saved server-side image; only the reference travels with the
           // history, so the next turn's full-history sync stays small.
           const part = {
@@ -386,11 +398,8 @@ export function useChatController(enabled) {
           if (streamSeq.current === seq) setStatus('idle')
         },
       })
-      // The reply is complete: read it aloud when voice replies are on. Only
-      // the streamed text is spoken (never reasoning/tool parts).
-      if (streamSeq.current === seq) {
-        tts.speak({ parts: [{ type: 'text', text: spokenText }] })
-      }
+      // The stream ended: any trailing bubble ends with it and is read now.
+      flushSpoken()
       // Stamp the final thinking block (the stream ended while still thinking).
       const trailingSeconds = closeBlock()
       if (trailingSeconds != null) {

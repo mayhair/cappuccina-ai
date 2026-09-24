@@ -4,26 +4,32 @@
 // to the same player state.
 //
 //   setEnabled(bool)  master switch; turning it off also stops playback
-//   speak(message)    synthesize + play one assistant message (auto-read)
-//   stop()            stop playback and any in-flight request
+//   enqueue(message)  queue one finished bubble to be read aloud (auto-read)
+//   stop()            stop playback, clear the queue, abort in-flight requests
 //   isOn()            current master-switch state
 //
-// Text preparation (markdown stripping, emoji -> emotion cues) lives in
-// lib/speech.js. Each speakable line becomes its own TTS request so the voice
-// leaves real space between paragraphs: playback streams chunk by chunk (POST
-// /api/v1/tts returns a job id, the job's GET endpoint feeds an <audio>
-// element, which starts playing while the server is still generating audio),
-// chunks are separated by PARAGRAPH_PAUSE_MS of silence, and the next chunk is
-// prefetched while the current one plays so the gap is the intended pause
-// rather than API latency.
+// Text preparation (markdown stripping, em/en dashes -> semicolons, emoji ->
+// emotion cues) lives in lib/speech.js. Each speakable line becomes its own
+// TTS request so the voice leaves real space between paragraphs: playback
+// streams clip by clip (POST /api/v1/tts returns a job id, the job's GET
+// endpoint feeds an <audio> element, which starts playing while the server is
+// still generating audio), the lines of one bubble are separated by
+// PARAGRAPH_PAUSE_MS of silence, and the next clip is prefetched while the
+// current one plays so the gap is the intended pause rather than API latency.
+// Bubbles are enqueued the moment they finish and follow each other back to
+// back — a bubble never waits for the rest of the run to complete.
 
 import { speechParagraphs } from './speech'
 
 let enabled = false
 let audio = null
 let pendingNext = null
+let prefetch = null
 let abortPlay = null
 let fetchId = 0
+// Clips waiting to play, in order: { text, gap } with gap = silence before it.
+let queue = []
+let draining = false
 
 const PARAGRAPH_PAUSE_MS = 350
 
@@ -38,13 +44,15 @@ const ttsApi = {
   },
 
   stop,
-  speak,
+  enqueue,
 }
 
 export default ttsApi
 
 function stop() {
   fetchId += 1
+  draining = false
+  queue = []
   abortPlay?.()
   abortPlay = null
   if (audio) {
@@ -53,8 +61,11 @@ function stop() {
   }
   const pending = pendingNext
   pendingNext = null
-  // A prefetch that resolves after this point must not keep downloading.
+  const ahead = prefetch
+  prefetch = null
+  // Players created after this point must not keep downloading.
   if (pending) pending.then((player) => teardown(player))
+  if (ahead) ahead.promise.then((player) => teardown(player))
 }
 
 function teardown(player) {
@@ -80,8 +91,8 @@ async function startJob(text) {
   return `/api/v1/tts/${id}`
 }
 
-// Prepares one paragraph's player ahead of its turn. Resolves to null when the
-// job fails or a newer speak()/stop() has superseded this queue.
+// Prepares one clip's player ahead of its turn. Resolves to null when the job
+// fails or a newer enqueue/stop cycle has superseded this queue.
 function prepare(text, id) {
   return (async () => {
     try {
@@ -95,6 +106,15 @@ function prepare(text, id) {
       return null
     }
   })()
+}
+
+// Starts downloading the next queued clip while the current one plays, so
+// paragraphs and bubbles follow each other without API-latency gaps.
+function kickPrefetch(id) {
+  if (prefetch) return
+  const next = queue[0]
+  if (!next) return
+  prefetch = { item: next, promise: prepare(next.text, id) }
 }
 
 // Resolves true when the clip played to its end, false on an error, an autoplay
@@ -125,42 +145,64 @@ function playThrough(player) {
   })
 }
 
-export async function speak(message) {
+// Queues one finished bubble to be read aloud. Its lines are separated by
+// PARAGRAPH_PAUSE_MS; consecutive bubbles play back to back.
+export function enqueue(message) {
   if (!enabled) return
   const paragraphs = speechParagraphs(message)
   if (!paragraphs.length) return
-  stop()
-  const id = ++fetchId
+  paragraphs.forEach((text, i) => {
+    queue.push({ text, gap: i === 0 ? 0 : PARAGRAPH_PAUSE_MS })
+  })
+  kickPrefetch(fetchId)
+  void drain()
+}
 
-  let upcoming = prepare(paragraphs[0], id)
-  for (let i = 0; i < paragraphs.length; i += 1) {
-    if (id !== fetchId) return
-    pendingNext = upcoming
-    let player = null
-    try {
-      player = await upcoming
-    } finally {
-      pendingNext = null
+async function drain() {
+  if (draining) return
+  draining = true
+  const id = fetchId
+  try {
+    while (queue.length) {
+      if (id !== fetchId) return
+      const item = queue.shift()
+      if (item.gap) {
+        await sleep(item.gap)
+        if (id !== fetchId) return
+      }
+
+      let prep
+      if (prefetch && prefetch.item === item) {
+        prep = prefetch.promise
+      } else {
+        if (prefetch) prefetch.promise.then((player) => teardown(player))
+        prep = prepare(item.text, id)
+      }
+      prefetch = null
+      pendingNext = prep
+      let player = null
+      try {
+        player = await prep
+      } finally {
+        if (pendingNext === prep) pendingNext = null
+      }
+      if (id !== fetchId) {
+        teardown(player)
+        return
+      }
+
+      kickPrefetch(id)
+
+      // A failed clip is skipped; the rest still get read.
+      if (!player) continue
+
+      audio = player
+      const played = await playThrough(player)
+      if (audio === player) audio = null
+      if (id !== fetchId) return
+      if (!played) continue
     }
-    if (id !== fetchId) {
-      teardown(player)
-      return
-    }
-
-    const hasNext = i + 1 < paragraphs.length
-    if (hasNext) upcoming = prepare(paragraphs[i + 1], id)
-
-    // A failed paragraph is skipped; the rest still get read.
-    if (!player) continue
-
-    audio = player
-    const played = await playThrough(player)
-    audio = null
-    if (id !== fetchId) return
-    if (!played) continue
-
-    if (!hasNext) return
-    await sleep(PARAGRAPH_PAUSE_MS)
-    if (id !== fetchId) return
+  } finally {
+    if (id === fetchId) draining = false
   }
 }
