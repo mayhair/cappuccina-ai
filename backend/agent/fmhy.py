@@ -216,12 +216,31 @@ def _result_text(result) -> str:
     return str(result)
 
 
+async def _invoke_untraced(tool, args: dict):
+    """Call the upstream MCP tool without spawning a nested tool run.
+
+    The wrapper tools are themselves tools, so calling the original through
+    ``ainvoke`` makes LangChain emit a second ``on_tool_start`` for the same
+    name; the chat stream surfaces every one of those as its own tool card,
+    which looks like the model called the tool twice. The plain coroutine
+    keeps the call internal to this wrapper. It returns ``(blocks, artifact)``
+    where ``ainvoke`` returns just the blocks, so unwrap it.
+    """
+    coroutine = getattr(tool, "coroutine", None)
+    if not callable(coroutine):
+        return await tool.ainvoke(args)
+    result = await coroutine(**args)
+    if isinstance(result, tuple) and result:
+        return result[0]
+    return result
+
+
 async def _call(name: str, args: dict) -> str:
     original = _originals.get(name)
     if original is None:
         return "The free-media guide isn't available right now."
     try:
-        result = await original.ainvoke(args)
+        result = await _invoke_untraced(original, args)
     except Exception as exc:  # noqa: BLE001 - surfaced to the model, not raised
         logger.warning("FMHY tool %s failed: %s", name, exc)
         return f"Couldn't reach the free-media guide ({exc})."
@@ -335,7 +354,7 @@ async def _refresh_dataset(timeout: float = 10.0) -> None:
     if refresher is None:
         return
     try:
-        await asyncio.wait_for(refresher.ainvoke({}), timeout=timeout)
+        await asyncio.wait_for(_invoke_untraced(refresher, {}), timeout=timeout)
     except Exception:  # noqa: BLE001 - startup must not depend on this
         logger.info("FMHY cache refresh skipped", exc_info=True)
 

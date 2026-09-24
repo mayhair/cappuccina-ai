@@ -383,6 +383,46 @@ def test_refresh_dataset_noop_without_the_tool(monkeypatch):
     asyncio.run(fmhy._refresh_dataset())
 
 
+# ---------- internal calls stay untraced (no phantom tool cards) ----------
+
+
+def test_call_uses_the_untraced_coroutine(monkeypatch):
+    class _Original:
+        def __init__(self):
+            self.calls = []
+            self.ainvoked = False
+
+        async def coroutine(self, **args):
+            self.calls.append(args)
+            return (
+                [{"type": "text", "text": "* [Cinejoy](https://cinejoy.pk/)"}],
+                {"found": True},
+            )
+
+        async def ainvoke(self, args):
+            self.ainvoked = True
+            return [{"type": "text", "text": "should not be reached"}]
+
+    original = _Original()
+    monkeypatch.setattr(fmhy, "_originals", {"fmhy_get_section": original})
+    out = asyncio.run(
+        fmhy._call(
+            "fmhy_get_section", {"title_or_slug": "TV Streaming", "max_chars": 500}
+        )
+    )
+    assert original.calls == [{"title_or_slug": "TV Streaming", "max_chars": 500}]
+    assert original.ainvoked is False
+    assert "Cinejoy" in out
+
+
+def test_call_falls_back_to_ainvoke_without_coroutine(monkeypatch):
+    rec = _RecordingTool("* [Good](https://good.example/)")
+    monkeypatch.setattr(fmhy, "_originals", {"fmhy_get_section": rec})
+    out = asyncio.run(fmhy._call("fmhy_get_section", {"title_or_slug": "TV Streaming"}))
+    assert rec.calls == [{"title_or_slug": "TV Streaming"}]
+    assert "Good" in out
+
+
 # ---------- title-query guards on the free-form search tools ----------
 
 
@@ -480,3 +520,77 @@ def test_fmhy_display_names_registered():
     assert TOOL_DISPLAY_NAMES["fmhy_media_sites"] == "Free Media Sites"
     assert TOOL_DISPLAY_NAMES["fmhy_search"] == "Free Media Search"
     assert TOOL_DISPLAY_NAMES["fmhy_get_links"] == "Free Media Links"
+
+
+# ---------- the stream shows one card per model tool call ----------
+
+
+def test_stream_hides_nested_tool_runs(signed_in, monkeypatch):
+    from types import SimpleNamespace
+
+    import app.main as main
+
+    chat = signed_in.post("/api/v1/chats", json={"mode": "chat"}).json()
+
+    class FakeGraph:
+        async def astream_events(self, state, config=None, version=None):
+            yield {"event": "on_chat_model_start", "data": {}}
+            yield {
+                "event": "on_tool_start",
+                "run_id": "outer",
+                "parent_ids": [],
+                "name": "fmhy_search",
+                "data": {"input": {"query": "Windows activation"}},
+            }
+            yield {
+                "event": "on_tool_start",
+                "run_id": "inner",
+                "parent_ids": ["outer"],
+                "name": "fmhy_search",
+                "data": {
+                    "input": {
+                        "query": "Windows activation",
+                        "max_results": 5,
+                        "include_urls": True,
+                    }
+                },
+            }
+            yield {
+                "event": "on_tool_end",
+                "run_id": "inner",
+                "parent_ids": ["outer"],
+                "name": "fmhy_search",
+                "data": {"output": "raw upstream text"},
+            }
+            yield {
+                "event": "on_tool_end",
+                "run_id": "outer",
+                "parent_ids": [],
+                "name": "fmhy_search",
+                "data": {"output": "filtered text + caveat"},
+            }
+            yield {
+                "event": "on_chat_model_stream",
+                "data": {"chunk": SimpleNamespace(content="Here you go!")},
+            }
+
+    monkeypatch.setattr(main, "GRAPH", FakeGraph())
+    res = signed_in.post(
+        "/api/v1/chat/stream",
+        json={
+            "chatId": chat["id"],
+            "messages": [{"role": "user", "content": "windows activation"}],
+            "generateTitle": False,
+        },
+    )
+    assert res.status_code == 200
+    assert res.text.count("event: tool_call") == 1
+    assert res.text.count("event: tool_result") == 1
+    assert '"id": "inner"' not in res.text
+    assert "raw upstream text" not in res.text
+    assert "filtered text + caveat" in res.text
+
+    assistant = signed_in.get("/api/v1/chats").json()[0]["messages"][-1]
+    assert [t["name"] for t in assistant["tools"]] == ["fmhy_search"]
+    assert len([p for p in assistant["parts"] if p["type"] == "tool"]) == 1
+    assert len([p for p in assistant["parts"] if p["type"] == "reasoning"]) == 0

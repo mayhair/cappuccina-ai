@@ -852,6 +852,9 @@ async def chat_stream(req: ChatRequest, user=Depends(current_user)):
         tools_by_id: dict[str, dict] = {}
         parts: list[dict] = []
         parts_by_tool_id: dict[str, dict] = {}
+        # Every tool run we have seen, so a tool that calls another tool (an
+        # internal, nested run) is not mistaken for a second model tool call.
+        tool_run_ids: set[str] = set()
         # Per-thinking-block timing: a "block" is a run of consecutive
         # reasoning/tool parts. It opens when the first of the run arrives and
         # closes when text follows (or the stream ends), at which point every
@@ -915,6 +918,12 @@ async def chat_stream(req: ChatRequest, user=Depends(current_user)):
                     }
             elif kind == "on_tool_start":
                 call_id = event.get("run_id", "")
+                # A run whose parent is another tool run is the tool calling
+                # itself internally — surface it once, as the outer call.
+                nested = bool(set(event.get("parent_ids") or ()) & tool_run_ids)
+                tool_run_ids.add(call_id)
+                if nested:
+                    continue
                 args = event["data"].get("input", {}) or {}
                 if not isinstance(args, dict):
                     args = {"input": args}
@@ -952,10 +961,13 @@ async def chat_stream(req: ChatRequest, user=Depends(current_user)):
                     ),
                 }
             elif kind == "on_tool_end":
+                call_id = event.get("run_id", "")
+                if call_id not in tools_by_id:
+                    # A nested internal run we deliberately did not surface.
+                    continue
                 output_text = _tool_result_text(event["data"].get("output", ""))
-                if event.get("run_id", "") in tools_by_id:
-                    tools_by_id[event["run_id"]]["result"] = output_text
-                tool_part = parts_by_tool_id.get(str(event.get("run_id", "")))
+                tools_by_id[call_id]["result"] = output_text
+                tool_part = parts_by_tool_id.get(str(call_id))
                 if tool_part is not None:
                     tool_part["result"] = output_text
                     tool_part["ok"] = True
@@ -963,7 +975,7 @@ async def chat_stream(req: ChatRequest, user=Depends(current_user)):
                     "event": "tool_result",
                     "data": json.dumps(
                         {
-                            "id": str(event.get("run_id", "")),
+                            "id": str(call_id),
                             "name": event.get("name", ""),
                             "content": output_text,
                             "ok": True,
@@ -977,11 +989,13 @@ async def chat_stream(req: ChatRequest, user=Depends(current_user)):
                     parts.append(image_part)
                     yield {"event": "image", "data": json.dumps(image_part)}
             elif kind == "on_tool_error":
+                call_id = event.get("run_id", "")
+                if call_id not in tools_by_id:
+                    continue
                 error_text = str(event["data"].get("error", ""))
-                if event.get("run_id", "") in tools_by_id:
-                    tools_by_id[event["run_id"]]["result"] = error_text
-                    tools_by_id[event["run_id"]]["ok"] = False
-                tool_part = parts_by_tool_id.get(str(event.get("run_id", "")))
+                tools_by_id[call_id]["result"] = error_text
+                tools_by_id[call_id]["ok"] = False
+                tool_part = parts_by_tool_id.get(str(call_id))
                 if tool_part is not None:
                     tool_part["result"] = error_text
                     tool_part["ok"] = False
@@ -989,7 +1003,7 @@ async def chat_stream(req: ChatRequest, user=Depends(current_user)):
                     "event": "tool_result",
                     "data": json.dumps(
                         {
-                            "id": str(event.get("run_id", "")),
+                            "id": str(call_id),
                             "name": event.get("name", ""),
                             "content": error_text,
                             "ok": False,
