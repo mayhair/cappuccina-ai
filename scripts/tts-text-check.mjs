@@ -22,6 +22,12 @@ const cases = [
   ["First paragraph.\n\nSecond paragraph.", ["First paragraph.", "Second paragraph."]],
   ["I'm sad.\n😭 What next?", ["[sad] I'm sad.", "What next?"]],
   ["🎵\nRead me", ["Read me"]],
+  ["Hmm, my memory's a little foggy there — let me not guess. Quick check! 🔍", ["Hmm, my memory's a little foggy there; let me not guess. Quick check!"]],
+  ["Wait – what?", ["Wait; what?"]],
+  ["foggy there—let me not guess", ["foggy there; let me not guess"]],
+  ["Pages 10–20 cover it.", ["Pages 10–20 cover it."]],
+  ["The 2019 – 2024 era.", ["The 2019 – 2024 era."]],
+  ["Score 3–5, then 12—midnight.", ["Score 3–5, then 12; midnight."]],
 ];
 
 let failures = 0;

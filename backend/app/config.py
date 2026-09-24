@@ -31,7 +31,7 @@ IMAGE_MODEL_ID = os.getenv("IMAGE_MODEL_ID", "gpt-image-2.5-flare")
 # (the endpoint answers 503 and the frontend silently skips speaking).
 FISH_API_KEY = os.getenv("FISH_API_KEY", "")
 FISH_TTS_REFERENCE_ID = os.getenv(
-    "FISH_TTS_REFERENCE_ID", "b676533aa3e6410db69373c197847582"
+    "FISH_TTS_REFERENCE_ID", "e9f4485fdde24821835dfe129d3c22b0"
 )
 FISH_TTS_MODEL = os.getenv("FISH_TTS_MODEL", "s2.1-pro-free")
 

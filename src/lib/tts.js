@@ -25,7 +25,7 @@ let pendingNext = null
 let abortPlay = null
 let fetchId = 0
 
-const PARAGRAPH_PAUSE_MS = 500
+const PARAGRAPH_PAUSE_MS = 350
 
 const ttsApi = {
   setEnabled(value) {

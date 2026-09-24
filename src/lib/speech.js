@@ -141,14 +141,23 @@ function stripMarkdown(raw) {
     .replace(/^\s*[-*+]\s+/gm, '')
 }
 
+// Em/en dashes used as sentence punctuation become semicolons — the voice
+// model rushes across a dash pause. Numeric ranges (10–20) keep their dash.
+function normalizeDashes(text) {
+  return text.replace(/(\d\s*[—–]\s*\d)|[—–]/g, (match, range) =>
+    range ? range : '; '
+  )
+}
+
 // Plain, speakable paragraphs for one assistant message: markdown and LaTeX
-// removed, emoji turned into emotion cues (or stripped), one entry per input
-// line. Reasoning/tool parts are filtered by the caller.
+// removed, em/en dashes turned into semicolons, emoji turned into emotion cues
+// (or stripped), one entry per input line. Reasoning/tool parts are filtered by
+// the caller.
 export function speechParagraphs(message) {
   const raw = (message.parts ?? [])
     .filter((part) => part.type === 'text')
     .map((part) => part.text)
     .join('\n\n')
   if (!raw.trim()) return []
-  return applyEmotionTags(stripMarkdown(raw))
+  return applyEmotionTags(normalizeDashes(stripMarkdown(raw)))
 }
