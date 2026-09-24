@@ -258,74 +258,12 @@ def test_state_replays_image_ids_to_the_model(isolated_db):
         ],
     )
     state = main._state(req, user)
-    messages = state["messages"]
-    assistant = messages[1]
+    assistant = state["messages"][1]
     # The model can see the earlier picture's id and knows how to edit it.
-    assert f"[Generated image (id={image['id']})]" in assistant.content
-    # The picture itself follows as a synthetic user turn with a vision block.
-    picture_turn = messages[2]
-    assert picture_turn.__class__.__name__ == "HumanMessage"
-    assert picture_turn.additional_kwargs.get("generated_image_context") is True
-    image_block = picture_turn.content[1]
-    assert image_block["type"] == "image_url"
-    assert image_block["image_url"]["url"].startswith("data:image/png;base64,")
-    assert any(
-        isinstance(part, dict) and image["id"] in part.get("text", "")
-        for part in picture_turn.content
-    )
+    assert f"[Generated Picture {image['id']}]" in assistant.content
     # The user turns stay untouched.
-    assert messages[0].content == "draw a penguin"
-    assert messages[3].content == "remove the background"
-
-
-def test_state_injects_every_generated_image(isolated_db):
-    import app.main as main
-
-    user, chat = _user_and_chat()
-    first = db.create_image(user["id"], chat["id"], FAKE_PNG, prompt="one")
-    second = db.create_image(user["id"], chat["id"], FAKE_PNG, prompt="two")
-    req = main.ChatRequest(
-        chatId=chat["id"],
-        messages=[
-            {
-                "role": "assistant",
-                "content": "two pics",
-                "parts": [
-                    {"type": "image", "imageId": first["id"], "prompt": "one"},
-                    {"type": "image", "imageId": second["id"], "prompt": "two"},
-                ],
-            },
-            {"role": "user", "content": "edit both"},
-        ],
-    )
-    state = main._state(req, user)
-    picture_turn = state["messages"][1]
-    urls = [p for p in picture_turn.content if p.get("type") == "image_url"]
-    assert len(urls) == 2
-
-
-def test_state_skips_generated_image_without_file(isolated_db):
-    import app.main as main
-
-    user, chat = _user_and_chat()
-    req = main.ChatRequest(
-        chatId=chat["id"],
-        messages=[
-            {
-                "role": "assistant",
-                "content": "gone",
-                "parts": [{"type": "image", "imageId": "does-not-exist"}],
-            },
-            {"role": "user", "content": "hi"},
-        ],
-    )
-    state = main._state(req, user)
-    # No picture turn is added, so the assistant is followed by the real user.
-    assert [m.__class__.__name__ for m in state["messages"]] == [
-        "AIMessage",
-        "HumanMessage",
-    ]
-    assert state["messages"][1].content == "hi"
+    assert state["messages"][0].content == "draw a penguin"
+    assert state["messages"][2].content == "remove the background"
 
 
 def test_state_assistant_without_images_is_plain_text(isolated_db):
@@ -379,138 +317,6 @@ def test_final_extras_appends_image_part():
     assert parts[1]["imageId"] == "img-9"
     assert parts[2]["text"] == "Here you go!"
     assert tool_calls[0].result == marker
-
-
-def test_final_extras_ignores_generated_image_context():
-    import app.main as main
-    from langchain_core.messages import AIMessage, HumanMessage
-
-    messages = [
-        AIMessage(content="Here you go!"),
-        HumanMessage(
-            content=[{"type": "text", "text": "Pictures you drew earlier..."}],
-            additional_kwargs={"generated_image_context": True},
-        ),
-    ]
-    reasoning, tool_calls, parts = main._final_extras(messages)
-    # The synthetic picture turn is input, not model output — never a text part.
-    assert [p["type"] for p in parts] == ["text"]
-    assert parts[0]["text"] == "Here you go!"
-
-
-def test_graph_image_messages_show_generated_picture(isolated_db):
-    from agent import graph as G
-    from langchain_core.messages import ToolMessage
-
-    user, chat = _user_and_chat()
-    image = db.create_image(user["id"], chat["id"], FAKE_PNG, prompt="a cat")
-    marker = json.dumps(
-        {"status": "image_generated", "image_id": image["id"], "prompt": "a cat"}
-    )
-    batch = [ToolMessage(content=marker, name="generate_image", tool_call_id="t1")]
-    msgs = G._image_messages(batch, user["id"])
-    assert len(msgs) == 1
-    assert msgs[0].additional_kwargs.get("generated_image_context") is True
-    image_block = msgs[0].content[1]
-    assert image_block["type"] == "image_url"
-    assert image_block["image_url"]["url"].startswith("data:image/png;base64,")
-
-    # Non-image tools and unknown ids never produce a message.
-    other = ToolMessage(content="hi", name="web_search", tool_call_id="t2")
-    assert G._image_messages([other], user["id"]) == []
-    gone = ToolMessage(
-        content=json.dumps({"status": "image_generated", "image_id": "nope"}),
-        name="generate_image",
-        tool_call_id="t3",
-    )
-    assert G._image_messages([gone], user["id"]) == []
-
-
-def test_post_tool_messages_keep_fmhy_note_with_images(isolated_db):
-    from agent import graph as G
-    from langchain_core.messages import ToolMessage
-
-    user, chat = _user_and_chat()
-    image = db.create_image(user["id"], chat["id"], FAKE_PNG, prompt="a cat")
-    marker = json.dumps({"status": "image_generated", "image_id": image["id"]})
-    batch = [
-        ToolMessage(content=marker, name="generate_image", tool_call_id="t1"),
-        ToolMessage(content="sites", name="fmhy_search", tool_call_id="t2"),
-    ]
-    out = G.post_tool_messages(batch, [], user["id"])
-    assert any(m.__class__.__name__ == "HumanMessage" for m in out)
-    assert any(
-        (getattr(m, "additional_kwargs", None) or {}).get("fmhy_safety_note")
-        for m in out
-    )
-
-
-def test_graph_injects_generated_picture(isolated_db, monkeypatch):
-    import asyncio
-
-    from agent import graph as G
-    from langchain_core.messages import AIMessage, HumanMessage
-    from langchain_core.tools import tool
-
-    user, chat = _user_and_chat()
-    image = db.create_image(user["id"], chat["id"], FAKE_PNG, prompt="a cat")
-    marker = json.dumps({"status": "image_generated", "image_id": image["id"]})
-
-    @tool
-    async def generate_image(prompt: str) -> str:
-        """Draw."""
-        return marker
-
-    class FakeModel:
-        def __init__(self, script):
-            self._script = list(script)
-
-        def bind_tools(self, tools):
-            return self
-
-        def invoke(self, messages):
-            return self._script.pop(0)
-
-    model = FakeModel(
-        [
-            AIMessage(
-                content="",
-                tool_calls=[
-                    {
-                        "name": "generate_image",
-                        "args": {"prompt": "a cat"},
-                        "id": "1",
-                        "type": "tool_call",
-                    }
-                ],
-            ),
-            AIMessage(content="done"),
-        ]
-    )
-    monkeypatch.setattr(G, "make_model", lambda reasoning, tools: model)
-
-    graph = G.build_graph([generate_image])
-    state = {
-        "messages": [HumanMessage(content="draw a cat")],
-        "reasoning": "low",
-        "mode": "chat",
-        "subject": None,
-        "timezone": "UTC",
-    }
-    out = asyncio.run(
-        graph.ainvoke(state, config={"configurable": {"user_id": user["id"]}})
-    )
-    kinds = [m.__class__.__name__ for m in out["messages"]]
-    assert kinds == [
-        "HumanMessage",
-        "AIMessage",
-        "ToolMessage",
-        "HumanMessage",
-        "AIMessage",
-    ]
-    picture_turn = out["messages"][3]
-    assert picture_turn.additional_kwargs.get("generated_image_context") is True
-    assert any(p.get("type") == "image_url" for p in picture_turn.content)
 
 
 def test_serve_image_round_trip(signed_in):
@@ -871,7 +677,7 @@ def test_attachment_blocks_include_image_id_pointer(isolated_db):
     assert blocks[0]["type"] == "image_url"
     assert blocks[1]["type"] == "text"
     assert attachment["id"] in blocks[1]["text"]
-    assert "photo.png" in blocks[1]["text"]
+    assert "image_edit" in blocks[1]["text"]
 
 
 def test_stream_stamps_each_thinking_block(signed_in, monkeypatch):

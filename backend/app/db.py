@@ -783,22 +783,6 @@ def get_image(user_id: str, image_id: str) -> sqlite3.Row | None:
     ).fetchone()
 
 
-def read_image_bytes(user_id: str, image_id: str) -> tuple[bytes, str] | None:
-    """The bytes and mime of one generated image, or None if missing/unreadable.
-
-    Used to show the model a picture it made (see ``_generated_image_blocks`` in
-    app/main.py and the post-tools node in agent/graph.py). Missing rows and
-    vanished files both read as None so callers can skip gracefully.
-    """
-    row = get_image(user_id, image_id)
-    if row is None:
-        return None
-    try:
-        return image_file_path(row["id"], row["mime"]).read_bytes(), row["mime"]
-    except OSError:
-        return None
-
-
 # ---------- attachments (user uploads) ----------
 
 def create_attachment(

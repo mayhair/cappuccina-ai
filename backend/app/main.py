@@ -1,3 +1,4 @@
+import base64
 import json
 import time
 from contextlib import asynccontextmanager
@@ -13,12 +14,7 @@ from sse_starlette.sse import EventSourceResponse
 from agent.fmhy import load_fmhy_tools
 from agent.graph import build_graph
 from agent.title import generate_title
-from agent.tools import (
-    ALL_TOOLS,
-    TOOL_DISPLAY_NAMES,
-    image_id_from_tool_result,
-    image_url_block,
-)
+from agent.tools import ALL_TOOLS, TOOL_DISPLAY_NAMES
 from app import calendar, db, documents, gmail, google_oauth, tts
 from app.auth import (
     clear_session_cookie,
@@ -135,13 +131,21 @@ def _image_part_from_result(name: str, output_text: str) -> dict | None:
     never flow through the full-history sync payloads. Returns None for any
     other tool or a failed/malformed result.
     """
-    image_id = image_id_from_tool_result(name, output_text)
-    if image_id is None:
+    if name not in ("generate_image", "image_edit") or not output_text:
         return None
-    data = json.loads(output_text)
+    try:
+        data = json.loads(output_text)
+    except (ValueError, TypeError):
+        return None
+    if (
+        not isinstance(data, dict)
+        or data.get("status") not in ("image_generated", "image_edited")
+        or not data.get("image_id")
+    ):
+        return None
     part = {
         "type": "image",
-        "imageId": image_id,
+        "imageId": data["image_id"],
         "prompt": data.get("prompt", ""),
         "width": data.get("width"),
         "height": data.get("height"),
@@ -170,12 +174,7 @@ def _final_extras(messages) -> tuple[str, list[ToolCall], list[dict]]:
         # UI can interleave it between thinking blocks and tool calls. Tool
         # results are not model text, so they never become text parts; system
         # messages (including the injected FMHY safety note) never surface.
-        # Synthetic picture-context turns are input we built, not model output.
-        kwargs = getattr(msg, "additional_kwargs", None) or {}
-        if (
-            msg.__class__.__name__ not in ("ToolMessage", "SystemMessage")
-            and not kwargs.get("generated_image_context")
-        ):
+        if msg.__class__.__name__ not in ("ToolMessage", "SystemMessage"):
             step_text = _text(content)
             if step_text:
                 parts.append({"type": "text", "text": step_text})
@@ -286,7 +285,13 @@ def _attachment_blocks(parts, user_id: str) -> list[dict]:
                 raw = path.read_bytes()
             except OSError:
                 continue
-            blocks.append(image_url_block(row["mime"], raw))
+            encoded = base64.b64encode(raw).decode("ascii")
+            blocks.append(
+                {
+                    "type": "image_url",
+                    "image_url": {"url": f"data:{row['mime']};base64,{encoded}"},
+                }
+            )
             blocks.append(
                 {
                     "type": "text",
@@ -303,39 +308,13 @@ def _attachment_blocks(parts, user_id: str) -> list[dict]:
     return blocks
 
 
-def _generated_image_blocks(parts, user_id: str) -> list[dict]:
-    """Vision blocks for an assistant turn's generated pictures.
-
-    The model can only receive images in a user message, so a prior turn's
-    pictures are re-emitted as a synthetic user turn (see `_state`). Each is
-    read from disk by id and paired with a pointer naming that id, so the model
-    can still call image_edit on it.
-    """
-    blocks: list[dict] = []
-    for part in parts or []:
-        if not isinstance(part, dict) or part.get("type") != "image":
-            continue
-        image_id = part.get("imageId")
-        if not image_id:
-            continue
-        found = db.read_image_bytes(user_id, image_id)
-        if found is None:
-            continue
-        raw, mime = found
-        blocks.append(image_url_block(mime, raw))
-        prompt = part.get("prompt") or ""
-        label = f"[Picture you drew (id={image_id})"
-        label += f": {prompt}]" if prompt else "]"
-        blocks.append({"type": "text", "text": label})
-    return blocks
-
-
 def _assistant_content(m) -> str:
     """Assistant text plus pointers to any pictures it produced.
 
-    Prior turns are replayed as text, so an image's id would otherwise be
-    invisible to the model. The pointer names the id for image_edit; the bytes
-    themselves are re-emitted as a synthetic user turn by `_state`.
+    Prior turns are replayed as plain text, so an image's id would otherwise be
+    invisible to the model and it could not call image_edit on an earlier
+    picture (it would redraw from scratch instead). The pointer names the id;
+    the bytes stay server-side.
     """
     text = m.content or ""
     pointers = [
@@ -375,28 +354,10 @@ def _resolve_timezone(req: ChatRequest, user) -> str:
 
 
 def _state(req: ChatRequest, user) -> dict:
-    messages: list = []
+    messages = []
     for m in req.messages:
         if m.role == "assistant":
             messages.append(AIMessage(content=_assistant_content(m)))
-            picture_blocks = _generated_image_blocks(m.parts, user["id"])
-            if picture_blocks:
-                messages.append(
-                    HumanMessage(
-                        content=[
-                            {
-                                "type": "text",
-                                "text": (
-                                    "Pictures you drew earlier in this chat are "
-                                    "shown here so you can see them. Use a "
-                                    "picture's id with image_edit to change it."
-                                ),
-                            },
-                            *picture_blocks,
-                        ],
-                        additional_kwargs={"generated_image_context": True},
-                    )
-                )
             continue
         if m.role != "user":
             messages.append(SystemMessage(content=m.content))
