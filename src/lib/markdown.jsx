@@ -13,6 +13,7 @@ const INLINE = new RegExp(
     '~~([^\\s~](?:[\\s\\S]*?[^\\s~])?)~~', // 4  ~~strike~~
     '\\*([^\\s*](?:[^*\\n]*?[^\\s*])?)\\*', // 5  *italic*
     '\\[([^\\]]+)\\]\\(([^)\\s]+)\\)', // 6,7  [text](href)
+    '(https?:\\/\\/[^\\s<>()\\[\\]]*[^\\s<>()\\[\\].,!?;:])', // 8  bare url
   ].join('|'),
   'g',
 )
@@ -57,6 +58,12 @@ function renderInline(text, prefix) {
         ) : (
           m[0]
         ),
+      )
+    } else if (m[8] !== undefined) {
+      out.push(
+        <a key={key} href={m[8]} target="_blank" rel="noopener noreferrer">
+          {m[8]}
+        </a>,
       )
     }
     last = m.index + m[0].length
