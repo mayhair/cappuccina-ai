@@ -6,6 +6,12 @@ import { renderEmoji } from './emoji'
 // ponytail: handles the common chat cases (bold, italic, code, code blocks,
 // lists, headings, quotes, links). If fuller CommonMark fidelity is ever
 // needed, swap this for react-markdown.
+// Bare domains (github.com/user/repo, cinejoy.pk) that the model forgot to
+// prefix with a scheme. TLDs are allow-listed so file names (readme.md,
+// app.jsx, install.sh) are not mistaken for links.
+const BARE_DOMAIN_TLDS =
+  'com|org|net|io|dev|app|co|me|tv|fm|gg|xyz|info|edu|gov|uk|us|ca|au|in|ai|to|cc|ly|st|nu|ws|sx|pk|gl|pw|ru|is|be|de|fr|it|nl|se|no|es|pl|jp|kr|cn|br|mx|ch|at|ie|nz|sg|hk|link|live|site|online|store|tech|wiki|club|page|space|news|blog|stream|website|art|fun|games'
+
 const INLINE = new RegExp(
   [
     '(`+)([\\s\\S]*?)\\1', // 1,2  code span
@@ -14,6 +20,9 @@ const INLINE = new RegExp(
     '\\*([^\\s*](?:[^*\\n]*?[^\\s*])?)\\*', // 5  *italic*
     '\\[([^\\]]+)\\]\\(([^)\\s]+)\\)', // 6,7  [text](href)
     '(https?:\\/\\/[^\\s<>()\\[\\]]*[^\\s<>()\\[\\].,!?;:])', // 8  bare url
+    '(?<![\\w@./-])((?:www\\.)?(?:[a-z0-9-]+\\.)+(?:' +
+      BARE_DOMAIN_TLDS +
+      ')(?:\\/[^\\s<>()\\[\\]]*[^\\s<>()\\[\\].,!?;:])?)', // 9  bare domain
   ].join('|'),
   'g',
 )
@@ -63,6 +72,12 @@ function renderInline(text, prefix) {
       out.push(
         <a key={key} href={m[8]} target="_blank" rel="noopener noreferrer">
           {m[8]}
+        </a>,
+      )
+    } else if (m[9] !== undefined) {
+      out.push(
+        <a key={key} href={`https://${m[9]}`} target="_blank" rel="noopener noreferrer">
+          {m[9]}
         </a>,
       )
     }
