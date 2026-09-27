@@ -58,8 +58,9 @@ FMHY_SAFETY_NOTE = (
     "share free-media links, include a short, friendly safety reminder in your "
     "own voice: free-media sites are full of shady ads and pop-ups, so use a "
     "proper ad-blocker before visiting them. Recommend the AdGuard browser "
-    "extension or the Brave web browser. Keep it to a sentence or two and do not "
-    "let it crowd out the actual answer."
+    "extension (https://adguard.com/en/adguard-browser-extension/overview.html) "
+    "or the Brave web browser (https://brave.com). Keep it to a sentence or two "
+    "and do not let it crowd out the actual answer."
 )
 
 # FMHY tags entries in their descriptions: "/ NSFW" or "Some NSFW". The dataset
