@@ -262,7 +262,7 @@ def test_state_replays_image_ids_to_the_model(isolated_db):
     state = main._state(req, user)
     assistant = state["messages"][1]
     # The model can see the earlier picture's id and knows how to edit it.
-    assert f"[Generated Picture {image['id']}]" in assistant.content
+    assert f"[Generated image (id={image['id']})]" in assistant.content
     # The user turns stay untouched.
     assert state["messages"][0].content == "draw a penguin"
     assert state["messages"][2].content == "remove the background"
@@ -684,7 +684,7 @@ def test_attachment_blocks_include_image_id_pointer(isolated_db):
     assert blocks[0]["type"] == "image_url"
     assert blocks[1]["type"] == "text"
     assert attachment["id"] in blocks[1]["text"]
-    assert "image_edit" in blocks[1]["text"]
+    assert blocks[1]["text"] == f'[Attached image "photo.png" (id={attachment["id"]})]'
 
 
 def test_stream_stamps_each_thinking_block(signed_in, monkeypatch):
