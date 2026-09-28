@@ -1012,11 +1012,19 @@ export function ChatWindow({ chat, user, isStreaming, draft, onDraft, onSend, on
 
   // Window-level drag & drop. dragenter/dragleave fire for every child element
   // crossed, so a depth counter keeps the overlay visible until we really leave.
+  // A dragover watchdog is the safety net: touch browsers often never fire
+  // dragleave/drop when a drag is cancelled, which otherwise strands the overlay.
   const dragDepth = useRef(0)
   const [dragActive, setDragActive] = useState(false)
 
   useEffect(() => {
     const hasFiles = (e) => Array.from(e.dataTransfer?.types || []).includes('Files')
+    let hideTimer = null
+    const hide = () => {
+      if (hideTimer) { clearTimeout(hideTimer); hideTimer = null }
+      dragDepth.current = 0
+      setDragActive(false)
+    }
     const onDragEnter = (e) => {
       if (!hasFiles(e)) return
       e.preventDefault()
@@ -1030,31 +1038,56 @@ export function ChatWindow({ chat, user, isStreaming, draft, onDraft, onSend, on
       if (!hasFiles(e)) return
       e.preventDefault()
       e.dataTransfer.dropEffect = canAttach ? 'copy' : 'none'
+      if (!canAttach) return
+      // dragover fires repeatedly while a drag is live (~every 350ms), so a
+      // timeout that outlives that cadence hides the overlay once the drag
+      // ends without a drop or dragleave.
+      setDragActive(true)
+      if (hideTimer) clearTimeout(hideTimer)
+      hideTimer = setTimeout(hide, 600)
     }
-    const onDragLeave = () => {
+    const onDragLeave = (e) => {
+      if (!hasFiles(e)) return
+      // relatedTarget is null when the pointer left the window entirely.
+      if (e.relatedTarget == null) { hide(); return }
       dragDepth.current = Math.max(0, dragDepth.current - 1)
-      if (dragDepth.current === 0) setDragActive(false)
+      if (dragDepth.current === 0) hide()
     }
     const onDrop = (e) => {
       if (!hasFiles(e)) return
       e.preventDefault()
-      dragDepth.current = 0
-      setDragActive(false)
+      hide()
       if (!canAttach) return
       const files = e.dataTransfer?.files
       if (files?.length) onAttach?.(files)
     }
+    const onVisibility = () => { if (document.hidden) hide() }
     window.addEventListener('dragenter', onDragEnter)
     window.addEventListener('dragover', onDragOver)
     window.addEventListener('dragleave', onDragLeave)
     window.addEventListener('drop', onDrop)
+    window.addEventListener('dragend', hide)
+    window.addEventListener('blur', hide)
+    document.addEventListener('visibilitychange', onVisibility)
     return () => {
+      if (hideTimer) clearTimeout(hideTimer)
       window.removeEventListener('dragenter', onDragEnter)
       window.removeEventListener('dragover', onDragOver)
       window.removeEventListener('dragleave', onDragLeave)
       window.removeEventListener('drop', onDrop)
+      window.removeEventListener('dragend', hide)
+      window.removeEventListener('blur', hide)
+      document.removeEventListener('visibilitychange', onVisibility)
     }
   }, [canAttach, onAttach])
+
+  // If the composer becomes unable to attach mid-drag, drop the overlay.
+  useEffect(() => {
+    if (!canAttach) {
+      dragDepth.current = 0
+      setDragActive(false)
+    }
+  }, [canAttach])
 
   // Paste files from the clipboard (e.g. a copied screenshot). Text pastes fall
   // through to the browser so the composer behaves normally.
