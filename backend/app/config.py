@@ -25,6 +25,18 @@ FMHY_MCP_URL = os.getenv("FMHY_MCP_URL", "https://fmhy-mcp.ken.tools/mcp")
 # 1536x1024, 1024x1536); there is no env-configured size.
 IMAGE_MODEL_ID = os.getenv("IMAGE_MODEL_ID", "gpt-image-2.5-flare")
 
+# Character reference images. When on, the image tools attach a character's
+# official look from lore/characters/refs/ whenever the model names them in the
+# `characters` argument, routing the call through the edit endpoint. Set to
+# 0/false/no/off to always draw from text alone.
+CHARACTER_REF_IMAGES = os.getenv("CHARACTER_REF_IMAGES", "1").strip().lower() not in (
+    "",
+    "0",
+    "false",
+    "no",
+    "off",
+)
+
 # ---------- Text-to-speech (Fish Audio) ----------
 # Reads assistant replies aloud. POST https://api.fish.audio/v1/tts is proxied
 # behind /api/v1/tts (see app/tts.py). Leave FISH_API_KEY empty to disable TTS

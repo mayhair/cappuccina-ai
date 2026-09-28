@@ -18,6 +18,11 @@ Rules:
 - Names and aliases must be unique across the book — loading fails loudly
   otherwise, because they are the keys the lookup matches on.
 
+An optional official look lives in ``lore/characters/refs/``: one image named
+after the markdown file stem (``refs/espressona-signora.png``). The image tools
+attach it when the model names the character, so drawings stay consistent.
+Extensions are tried in ``_REF_EXTENSIONS`` order.
+
 The book is loaded once at import; edit the files and restart to change it.
 """
 
@@ -26,11 +31,13 @@ from __future__ import annotations
 import difflib
 import re
 import unicodedata
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 LORE_DIR = Path(__file__).resolve().parent / "lore"
 CHARACTERS_DIR = LORE_DIR / "characters"
+REFS_DIRNAME = "refs"
+_REF_EXTENSIONS = (".png", ".jpg", ".jpeg", ".webp")
 
 _HEADER_RE = re.compile(r"^(aliases|blurb)\s*:\s*(.*)$", re.IGNORECASE)
 _ALIAS_SPLIT_RE = re.compile(r"[,;]")
@@ -53,6 +60,7 @@ class Character:
     aliases: tuple[str, ...]
     blurb: str
     body: str
+    ref_path: Path | None = None
 
     @property
     def keys(self) -> tuple[str, ...]:
@@ -129,12 +137,27 @@ def _check_unique(characters: list[Character]) -> None:
             seen[normalized] = character.id
 
 
+def _ref_path(folder: Path, character_id: str) -> Path | None:
+    """The character's reference image, trying each supported extension."""
+    for extension in _REF_EXTENSIONS:
+        candidate = folder / REFS_DIRNAME / f"{character_id}{extension}"
+        if candidate.is_file():
+            return candidate
+    return None
+
+
 def load_characters(directory: Path | None = None) -> list[Character]:
     """Parse every ``*.md`` in the corpus, loud on any mistake."""
     folder = CHARACTERS_DIR if directory is None else Path(directory)
     if not folder.is_dir():
         return []
-    characters = [_parse(path) for path in sorted(folder.glob("*.md"))]
+    characters: list[Character] = []
+    for path in sorted(folder.glob("*.md")):
+        character = _parse(path)
+        ref = _ref_path(folder, character.id)
+        if ref is not None:
+            character = replace(character, ref_path=ref)
+        characters.append(character)
     _check_unique(characters)
     return characters
 
@@ -149,7 +172,8 @@ def catalog_lines(characters: list[Character] | None = None) -> list[str]:
     for character in chars:
         aliases = ", ".join(character.aliases)
         suffix = f" ({aliases})" if aliases else ""
-        lines.append(f"- **{character.name}**{suffix} — {character.blurb}")
+        look = " [official look available]" if character.ref_path else ""
+        lines.append(f"- **{character.name}**{suffix} — {character.blurb}{look}")
     return lines
 
 
@@ -160,6 +184,8 @@ _PROMPT_INTRO = (
     "the user asks about one of these characters, call lore_lookup with their name to "
     "get the full story first, then tell it in your own voice, like a story about old "
     "neighbours — never read the entry out like a file.\n\n"
+    "When you draw one of them, pass their name in the `characters` argument of "
+    "generate_image or image_edit so they keep their official look.\n\n"
     "Questions about anyone else — cartoon characters from other shows, real people, "
     "historical figures, or anything from the wider world — are ordinary questions. "
     "Answer them from what you know, or use web_search when you need current facts. "
@@ -224,6 +250,28 @@ def _contained(query: str, characters: list[Character]) -> list[Character]:
     return hits
 
 
+def find(name: str, characters: list[Character] | None = None) -> list[Character]:
+    """Characters matching a name: exact, then contained, then one fuzzy near-miss."""
+    chars = CHARACTERS if characters is None else characters
+    index = _key_index(chars)
+    query = _normalize(name)
+    if not query or not index:
+        return []
+
+    if query in index:
+        return [index[query]]
+
+    contained = _contained(query, chars)
+    if contained:
+        return contained
+
+    close = difflib.get_close_matches(query, list(index), n=1, cutoff=_FUZZY_CUTOFF)
+    if close:
+        return [index[close[0]]]
+
+    return []
+
+
 def lookup(name: str, characters: list[Character] | None = None) -> str:
     """Find the character(s) matching a name and return their entries.
 
@@ -232,20 +280,7 @@ def lookup(name: str, characters: list[Character] | None = None) -> str:
     can correct itself or fall back to web_search.
     """
     chars = CHARACTERS if characters is None else characters
-    index = _key_index(chars)
-    query = _normalize(name)
-    if not query or not index:
-        return _miss(name, index)
-
-    if query in index:
-        return _entry_text(index[query])
-
-    contained = _contained(query, chars)
-    if contained:
-        return "\n\n---\n\n".join(_entry_text(character) for character in contained)
-
-    close = difflib.get_close_matches(query, list(index), n=1, cutoff=_FUZZY_CUTOFF)
-    if close:
-        return _entry_text(index[close[0]])
-
-    return _miss(name, index)
+    matches = find(name, chars)
+    if not matches:
+        return _miss(name, _key_index(chars))
+    return "\n\n---\n\n".join(_entry_text(character) for character in matches)

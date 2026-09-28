@@ -11,7 +11,12 @@ from sympy import Eq, solve, sympify
 
 from agent import lorebook
 from app import calendar, db, gmail
-from app.config import IMAGE_MODEL_ID, OPENAI_API_KEY, PARALLEL_API_KEY
+from app.config import (
+    CHARACTER_REF_IMAGES,
+    IMAGE_MODEL_ID,
+    OPENAI_API_KEY,
+    PARALLEL_API_KEY,
+)
 from app.google_oauth import ServiceNotConnected
 
 
@@ -102,6 +107,17 @@ def _chat_id(config: RunnableConfig | None) -> str:
 IMAGE_SIZES = ("1024x1024", "1536x1024", "1024x1536")
 DEFAULT_IMAGE_SIZE = IMAGE_SIZES[0]
 
+# How many character reference images one call may attach. The image API takes
+# at most ten input images, and the source of an edit counts towards that.
+MAX_CHARACTER_REFS = 4
+
+_REF_MIME_BY_SUFFIX = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".webp": "image/webp",
+}
+
 
 def _image_size(requested: str = "") -> str:
     """Validated resolution for an image API call, defaulting to the square."""
@@ -151,27 +167,30 @@ def _openai_generate_image(
 
 def _openai_edit_image(
     prompt: str,
-    image_bytes: bytes,
-    filename: str,
-    mime: str,
+    images: list[tuple[str, bytes, str]],
     size: str,
     transparent_background: bool = False,
 ) -> tuple[bytes, str]:
-    """Edit an existing image through the OpenAI image API (multipart upload).
+    """Edit or redraw from reference images through the OpenAI image API.
 
-    Returns (raw image bytes, mime type). httpx sets the multipart boundary
-    itself, so Content-Type is deliberately left unset. A transparent
-    background is an OpenAI-only option.
+    ``images`` are ``(filename, bytes, mime)`` in order: the first is the picture
+    to edit (or the primary reference), the rest are extra references. One image
+    is sent as the plain ``image`` field; several as the ``image[]`` array.
+    httpx sets the multipart boundary itself, so Content-Type is left unset.
     """
     body = {"model": IMAGE_MODEL_ID, "prompt": prompt, "size": size}
     if transparent_background:
         body["background"] = "transparent"
+    if len(images) == 1:
+        files: dict | list = {"image": images[0]}
+    else:
+        files = [("image[]", image) for image in images]
     with httpx.Client(timeout=180) as client:
         resp = client.post(
             "https://api.openai.com/v1/images/edits",
             headers={"Authorization": f"Bearer {OPENAI_API_KEY}"},
             data=body,
-            files={"image": (filename, image_bytes, mime)},
+            files=files,
         )
         resp.raise_for_status()
         data = (resp.json().get("data") or [{}])[0]
@@ -202,6 +221,59 @@ def _load_edit_source(
     except OSError:
         return None
     return None
+
+
+def _character_refs(
+    names: str,
+) -> list[tuple[lorebook.Character, tuple[str, bytes, str]]]:
+    """Reference images for the lore-book characters named in ``names``.
+
+    ``names`` is a comma- or semicolon-separated list; each resolves through the
+    lore book's forgiving matching. Characters without a reference file are
+    skipped, duplicates are collapsed by id, and the list is capped at
+    ``MAX_CHARACTER_REFS``. Unreadable files are skipped rather than failing the
+    whole call.
+    """
+    if not CHARACTER_REF_IMAGES:
+        return []
+    refs: list[tuple[lorebook.Character, tuple[str, bytes, str]]] = []
+    seen: set[str] = set()
+    for raw_name in names.replace(";", ",").split(","):
+        name = raw_name.strip()
+        if not name:
+            continue
+        for character in lorebook.find(name):
+            if character.id in seen or character.ref_path is None:
+                continue
+            mime = _REF_MIME_BY_SUFFIX.get(character.ref_path.suffix.lower())
+            if mime is None:
+                continue
+            try:
+                data = character.ref_path.read_bytes()
+            except OSError:
+                continue
+            seen.add(character.id)
+            refs.append((character, (character.ref_path.name, data, mime)))
+            if len(refs) >= MAX_CHARACTER_REFS:
+                return refs
+    return refs
+
+
+def _reference_prompt(prompt: str, names: list[str], editing: bool) -> str:
+    """The scene prompt with an explicit note on which images are which."""
+    listed = ", ".join(names)
+    if editing:
+        lead = (
+            f"The first image is the picture to edit; the images after it are "
+            f"the official reference looks for {listed}. "
+        )
+    else:
+        lead = f"The provided images are the official reference looks for {listed}. "
+    return (
+        lead
+        + "Keep every character's face, colours, proportions and outfit exactly "
+        "consistent with its reference. " + prompt
+    )
 
 
 def _save_image_result(
@@ -247,8 +319,9 @@ def generate_image(
     config: RunnableConfig,
     size: str = "",
     transparent_background: bool = False,
+    characters: str = "",
 ) -> str:
-    """Draw an original picture from a text description and show it in the chat. Use this whenever the user asks you to draw, paint, sketch, or make a picture or image of something. Describe the scene vividly in `prompt`: subject, style, colors, mood. Optionally pick a `size`: "1024x1024" (square, default), "1536x1024" (wide), or "1024x1536" (tall) — match the subject's shape. Set `transparent_background` to true when the user wants a cut-out subject with no background (for example a sticker, logo, or icon) — an OpenAI-only option that returns a PNG with transparency. The picture is saved automatically and appears in the chat — tell the user it's ready. Never invent an image_id yourself; the returned JSON describes the saved picture."""
+    """Draw an original picture from a text description and show it in the chat. Use this whenever the user asks you to draw, paint, sketch, or make a picture or image of something. Describe the scene vividly in `prompt`: subject, style, colors, mood. Optionally pick a `size`: "1024x1024" (square, default), "1536x1024" (wide), or "1024x1536" (tall) — match the subject's shape. When the picture shows one or more characters from your lore book, pass their names in `characters`, comma-separated (for example "Tralalero Tralala, Bombardiro Crocodilo"), so each keeps its official look; leave it empty for anything else. Set `transparent_background` to true when the user wants a cut-out subject with no background (for example a sticker, logo, or icon) — an OpenAI-only option that returns a PNG with transparency. The picture is saved automatically and appears in the chat — tell the user it's ready. Never invent an image_id yourself; the returned JSON describes the saved picture."""
     user_id = _user_id(config)
     chat_id = _chat_id(config)
     if not user_id or not chat_id:
@@ -256,8 +329,19 @@ def generate_image(
     if not OPENAI_API_KEY:
         return "Drawing isn't set up yet."
     chosen_size = _image_size(size)
+    refs = _character_refs(characters)
     try:
-        raw, mime = _openai_generate_image(prompt, chosen_size, transparent_background)
+        if refs:
+            raw, mime = _openai_edit_image(
+                _reference_prompt(prompt, [c.name for c, _ in refs], editing=False),
+                [image for _, image in refs],
+                chosen_size,
+                transparent_background,
+            )
+        else:
+            raw, mime = _openai_generate_image(
+                prompt, chosen_size, transparent_background
+            )
     except (httpx.HTTPError, ValueError) as exc:
         return f"Couldn't draw that right now ({exc})."
     return _save_image_result(
@@ -270,6 +354,7 @@ def generate_image(
         transparent_background=transparent_background,
         status="image_generated",
         save_error="the drawing",
+        extra={"character_refs": [c.id for c, _ in refs]} if refs else None,
     )
 
 
@@ -281,8 +366,9 @@ def image_edit(
     attachment_id: str = "",
     size: str = "",
     transparent_background: bool = False,
+    characters: str = "",
 ) -> str:
-    """Edit or modify a picture that already exists and show the result in the chat. Use this when the user asks to change, restyle, add to, remove from, or otherwise alter an image. Pass exactly one source: `image_id` for a picture made earlier in this chat (the id from a generate_image or image_edit result), or `attachment_id` for an image the user attached. Describe the change in `prompt`. Optionally set `size` to "1024x1024" (square, default), "1536x1024" (wide), or "1024x1536" (tall); omit it to keep the configured default. Set `transparent_background` to true when the user wants the result on a transparent background (for example removing a background to make a cut-out) — an OpenAI-only option that returns a PNG with transparency. Never invent ids yourself. The edited picture is saved as a new image and appears in the chat — tell the user it's ready. The returned JSON describes the saved picture."""
+    """Edit or modify a picture that already exists and show the result in the chat. Use this when the user asks to change, restyle, add to, remove from, or otherwise alter an image. Pass exactly one source: `image_id` for a picture made earlier in this chat (the id from a generate_image or image_edit result), or `attachment_id` for an image the user attached. Describe the change in `prompt`. When the picture shows one or more characters from your lore book, pass their names in `characters`, comma-separated, so each keeps its official look; leave it empty for anything else. Optionally set `size` to "1024x1024" (square, default), "1536x1024" (wide), or "1024x1536" (tall); omit it to keep the configured default. Set `transparent_background` to true when the user wants the result on a transparent background (for example removing a background to make a cut-out) — an OpenAI-only option that returns a PNG with transparency. Never invent ids yourself. The edited picture is saved as a new image and appears in the chat — tell the user it's ready. The returned JSON describes the saved picture."""
     user_id = _user_id(config)
     chat_id = _chat_id(config)
     if not user_id or not chat_id:
@@ -296,9 +382,16 @@ def image_edit(
         return "I couldn't find that picture to edit."
     raw_source, mime, filename = source
     chosen_size = _image_size(size)
+    refs = _character_refs(characters)
+    call_prompt = prompt
+    if refs:
+        call_prompt = _reference_prompt(
+            prompt, [c.name for c, _ in refs], editing=True
+        )
+    images = [(filename, raw_source, mime), *(image for _, image in refs)]
     try:
         raw, edited_mime = _openai_edit_image(
-            prompt, raw_source, filename, mime, chosen_size, transparent_background
+            call_prompt, images, chosen_size, transparent_background
         )
     except (httpx.HTTPError, ValueError) as exc:
         return f"Couldn't edit that picture right now ({exc})."
@@ -312,7 +405,10 @@ def image_edit(
         transparent_background=transparent_background,
         status="image_edited",
         save_error="the edited picture",
-        extra={"source_image_id": image_id or None},
+        extra={
+            "source_image_id": image_id or None,
+            "character_refs": [c.id for c, _ in refs] if refs else [],
+        },
     )
 
 

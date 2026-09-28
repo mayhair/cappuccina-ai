@@ -75,6 +75,58 @@ def test_missing_directory_is_empty():
     assert lorebook.load_characters(Path("does-not-exist-anywhere")) == []
 
 
+# ---------- reference images ----------
+
+
+def _with_ref(tmp_path: Path, character_id: str, extension: str) -> Path:
+    refs = tmp_path / "refs"
+    refs.mkdir(exist_ok=True)
+    ref = refs / f"{character_id}{extension}"
+    ref.write_bytes(b"ref-bytes")
+    return ref
+
+
+def test_reference_image_is_resolved(tmp_path):
+    _corpus(tmp_path)
+    ref = _with_ref(tmp_path, "test-character", ".png")
+    characters = lorebook.load_characters(tmp_path)
+    character = next(c for c in characters if c.id == "test-character")
+    assert character.ref_path == ref
+    assert next(c for c in characters if c.id == "second").ref_path is None
+
+
+def test_reference_extension_precedence(tmp_path):
+    _corpus(tmp_path)
+    _with_ref(tmp_path, "test-character", ".png")
+    _with_ref(tmp_path, "test-character", ".jpg")
+    character = next(
+        c for c in lorebook.load_characters(tmp_path) if c.id == "test-character"
+    )
+    assert character.ref_path.suffix == ".png"
+
+
+def test_catalog_marks_characters_with_a_reference(tmp_path):
+    _corpus(tmp_path)
+    _with_ref(tmp_path, "test-character", ".png")
+    lines = lorebook.catalog_lines(lorebook.load_characters(tmp_path))
+    assert "[official look available]" in next(
+        line for line in lines if "Test Character" in line
+    )
+    assert "[official look available]" not in next(
+        line for line in lines if "Second One" in line
+    )
+
+
+# ---------- find ----------
+
+
+def test_find_returns_character_objects(tmp_path):
+    characters = _corpus(tmp_path)
+    assert lorebook.find("Testy", characters)[0].id == "test-character"
+    assert lorebook.find("TEST CHARACTER", characters)[0].name == "Test Character"
+    assert lorebook.find("nobody here", characters) == []
+
+
 # ---------- catalog ----------
 
 

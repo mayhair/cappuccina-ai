@@ -56,7 +56,9 @@ def test_generate_image_schema_hides_injected_config():
     from agent import tools
 
     assert "config" not in tools.generate_image.args
-    assert set(tools.generate_image.args) == {"prompt", "size", "transparent_background"}
+    assert set(tools.generate_image.args) == {
+        "prompt", "size", "transparent_background", "characters"
+    }
 
 
 def test_generate_image_tool_reports_api_failure(isolated_db, monkeypatch):
@@ -168,7 +170,7 @@ def test_openai_image_calls_send_transparent_background(monkeypatch):
 
     tools._openai_generate_image("a cat", "1024x1024", True)
     tools._openai_edit_image(
-        "add a hat", FAKE_PNG, "in.png", "image/png", "1024x1024", True
+        "add a hat", [("in.png", FAKE_PNG, "image/png")], "1024x1024", True
     )
     tools._openai_generate_image("a cat", "1024x1024", False)
 
@@ -499,8 +501,8 @@ def test_image_edit_tool_saves_new_file_and_row(isolated_db, monkeypatch):
     source = db.create_image(user["id"], chat["id"], FAKE_PNG, prompt="a cat")
     calls = []
 
-    def fake_edit(prompt, image_bytes, filename, mime, size, transparent_background=False):
-        calls.append((prompt, image_bytes, filename, mime, size))
+    def fake_edit(prompt, images, size, transparent_background=False):
+        calls.append((prompt, images, size))
         return b"edited-bytes", "image/png"
 
     monkeypatch.setattr(tools, "_openai_edit_image", fake_edit)
@@ -515,7 +517,11 @@ def test_image_edit_tool_saves_new_file_and_row(isolated_db, monkeypatch):
     assert data["prompt"] == "give it a hat"
 
     assert calls == [
-        ("give it a hat", FAKE_PNG, f"{source['id']}.png", "image/png", "1024x1024")
+        (
+            "give it a hat",
+            [(f"{source['id']}.png", FAKE_PNG, "image/png")],
+            "1024x1024",
+        )
     ]
 
     row = db.get_image(user["id"], data["image_id"])
@@ -541,8 +547,8 @@ def test_image_edit_tool_from_attachment(isolated_db, monkeypatch):
     monkeypatch.setattr(
         tools,
         "_openai_edit_image",
-        lambda prompt, image_bytes, filename, mime, size, transparent_background=False: (
-            calls.append((image_bytes, filename, mime, size))
+        lambda prompt, images, size, transparent_background=False: (
+            calls.append((images, size))
             or (b"edited", "image/png")
         ),
     )
@@ -558,7 +564,7 @@ def test_image_edit_tool_from_attachment(isolated_db, monkeypatch):
     edited = json.loads(out)
     assert edited["status"] == "image_edited"
     assert (edited["width"], edited["height"]) == (1536, 1024)
-    assert calls == [(FAKE_PNG, "photo.png", "image/png", "1536x1024")]
+    assert calls == [([("photo.png", FAKE_PNG, "image/png")], "1536x1024")]
 
 
 def test_image_edit_tool_requests_transparent_background(isolated_db, monkeypatch):
@@ -568,7 +574,7 @@ def test_image_edit_tool_requests_transparent_background(isolated_db, monkeypatc
     source = db.create_image(user["id"], chat["id"], FAKE_PNG, prompt="a cat")
     seen = []
 
-    def fake_edit(prompt, image_bytes, filename, mime, size, transparent_background=False):
+    def fake_edit(prompt, images, size, transparent_background=False):
         seen.append(transparent_background)
         return b"edited", "image/png"
 
@@ -627,7 +633,8 @@ def test_image_edit_schema_hides_injected_config():
 
     assert "config" not in tools.image_edit.args
     assert set(tools.image_edit.args) == {
-        "prompt", "image_id", "attachment_id", "size", "transparent_background"
+        "prompt", "image_id", "attachment_id", "size", "transparent_background",
+        "characters",
     }
 
 
@@ -752,3 +759,238 @@ def test_stream_stamps_each_thinking_block(signed_in, monkeypatch):
     # Second block gets its own duration.
     assert isinstance(parts[4]["seconds"], float)
     assert "seconds" not in parts[5]
+
+
+# ---------- character reference images ----------
+
+
+def _character_with_ref(tmp_path, name, ref=True):
+    from agent import lorebook
+
+    character_id = name.lower().replace(" ", "-")
+    ref_path = None
+    if ref:
+        ref_path = tmp_path / f"{character_id}.png"
+        ref_path.write_bytes(FAKE_PNG)
+    return lorebook.Character(
+        id=character_id,
+        name=name,
+        aliases=(),
+        blurb="A character for tests.",
+        body="Body.",
+        ref_path=ref_path,
+    )
+
+
+def test_generate_image_attaches_character_reference(isolated_db, monkeypatch, tmp_path):
+    from agent import lorebook, tools
+
+    user, chat = _user_and_chat()
+    character = _character_with_ref(tmp_path, "Tralalero Tralala")
+    monkeypatch.setattr(lorebook, "CHARACTERS", [character])
+    monkeypatch.setattr(tools, "CHARACTER_REF_IMAGES", True)
+    calls = []
+
+    def fake_edit(prompt, images, size, transparent_background=False):
+        calls.append((prompt, images, size))
+        return b"drawn", "image/png"
+
+    monkeypatch.setattr(tools, "_openai_edit_image", fake_edit)
+    monkeypatch.setattr(
+        tools,
+        "_openai_generate_image",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("should use edit")),
+    )
+
+    out = tools.generate_image.invoke(
+        {"prompt": "at the beach", "characters": "Tralalero Tralala"},
+        config={"configurable": {"user_id": user["id"], "chat_id": chat["id"]}},
+    )
+    data = json.loads(out)
+    assert data["character_refs"] == ["tralalero-tralala"]
+    (prompt, images, size), = calls
+    assert "official reference looks for Tralalero Tralala" in prompt
+    assert prompt.endswith("at the beach")
+    assert images == [("tralalero-tralala.png", FAKE_PNG, "image/png")]
+
+
+def test_generate_image_skips_characters_without_references(
+    isolated_db, monkeypatch, tmp_path
+):
+    from agent import lorebook, tools
+
+    user, chat = _user_and_chat()
+    character = _character_with_ref(tmp_path, "Tralalero Tralala", ref=False)
+    monkeypatch.setattr(lorebook, "CHARACTERS", [character])
+    monkeypatch.setattr(tools, "CHARACTER_REF_IMAGES", True)
+    calls = []
+    monkeypatch.setattr(
+        tools,
+        "_openai_generate_image",
+        lambda prompt, size, transparent_background=False: (
+            calls.append(prompt) or (b"drawn", "image/png")
+        ),
+    )
+    monkeypatch.setattr(
+        tools,
+        "_openai_edit_image",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("should generate")),
+    )
+
+    out = tools.generate_image.invoke(
+        {"prompt": "at the beach", "characters": "Tralalero Tralala"},
+        config={"configurable": {"user_id": user["id"], "chat_id": chat["id"]}},
+    )
+    assert "character_refs" not in json.loads(out)
+    assert calls == ["at the beach"]
+
+
+def test_character_references_can_be_disabled(isolated_db, monkeypatch, tmp_path):
+    from agent import lorebook, tools
+
+    user, chat = _user_and_chat()
+    character = _character_with_ref(tmp_path, "Tralalero Tralala")
+    monkeypatch.setattr(lorebook, "CHARACTERS", [character])
+    monkeypatch.setattr(tools, "CHARACTER_REF_IMAGES", False)
+    monkeypatch.setattr(
+        tools,
+        "_openai_generate_image",
+        lambda prompt, size, transparent_background=False: (FAKE_PNG, "image/png"),
+    )
+    monkeypatch.setattr(
+        tools,
+        "_openai_edit_image",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("should generate")),
+    )
+
+    out = tools.generate_image.invoke(
+        {"prompt": "at the beach", "characters": "Tralalero Tralala"},
+        config={"configurable": {"user_id": user["id"], "chat_id": chat["id"]}},
+    )
+    assert "character_refs" not in json.loads(out)
+
+
+def test_character_references_are_capped(monkeypatch, tmp_path):
+    from agent import lorebook, tools
+
+    characters = [_character_with_ref(tmp_path, f"Char {i}") for i in range(1, 6)]
+    monkeypatch.setattr(lorebook, "CHARACTERS", characters)
+    monkeypatch.setattr(tools, "CHARACTER_REF_IMAGES", True)
+
+    refs = tools._character_refs(", ".join(f"Char {i}" for i in range(1, 6)))
+    assert len(refs) == tools.MAX_CHARACTER_REFS
+
+
+def test_character_references_dedupe_by_identity(monkeypatch, tmp_path):
+    from agent import lorebook, tools
+
+    ref = tmp_path / "tralalero-tralala.png"
+    ref.write_bytes(FAKE_PNG)
+    character = lorebook.Character(
+        id="tralalero-tralala",
+        name="Tralalero Tralala",
+        aliases=("Tralalero",),
+        blurb="A character for tests.",
+        body="Body.",
+        ref_path=ref,
+    )
+    monkeypatch.setattr(lorebook, "CHARACTERS", [character])
+    monkeypatch.setattr(tools, "CHARACTER_REF_IMAGES", True)
+
+    assert len(tools._character_refs("Tralalero, Tralalero Tralala")) == 1
+
+
+def test_character_references_skip_unreadable(monkeypatch, tmp_path):
+    from agent import lorebook, tools
+
+    character = lorebook.Character(
+        id="ghost",
+        name="Ghost",
+        aliases=(),
+        blurb="A character for tests.",
+        body="Body.",
+        ref_path=tmp_path / "missing.png",
+    )
+    monkeypatch.setattr(lorebook, "CHARACTERS", [character])
+    monkeypatch.setattr(tools, "CHARACTER_REF_IMAGES", True)
+
+    assert tools._character_refs("Ghost") == []
+
+
+def test_image_edit_appends_character_reference(isolated_db, monkeypatch, tmp_path):
+    from agent import lorebook, tools
+
+    user, chat = _user_and_chat()
+    source = db.create_image(user["id"], chat["id"], FAKE_PNG, prompt="a cat")
+    character = _character_with_ref(tmp_path, "Tralalero Tralala")
+    monkeypatch.setattr(lorebook, "CHARACTERS", [character])
+    monkeypatch.setattr(tools, "CHARACTER_REF_IMAGES", True)
+    calls = []
+    monkeypatch.setattr(
+        tools,
+        "_openai_edit_image",
+        lambda prompt, images, size, transparent_background=False: (
+            calls.append((prompt, images)) or (b"edited", "image/png")
+        ),
+    )
+
+    out = tools.image_edit.invoke(
+        {
+            "prompt": "add a hat",
+            "image_id": source["id"],
+            "characters": "Tralalero Tralala",
+        },
+        config={"configurable": {"user_id": user["id"], "chat_id": chat["id"]}},
+    )
+    data = json.loads(out)
+    assert data["character_refs"] == ["tralalero-tralala"]
+    (prompt, images), = calls
+    assert prompt.startswith("The first image is the picture to edit;")
+    assert prompt.endswith("add a hat")
+    assert images == [
+        (f"{source['id']}.png", FAKE_PNG, "image/png"),
+        ("tralalero-tralala.png", FAKE_PNG, "image/png"),
+    ]
+
+
+def test_openai_edit_sends_image_array_for_multiple(monkeypatch):
+    from agent import tools
+
+    calls = []
+
+    class FakeResponse:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"data": [{"b64_json": base64.b64encode(FAKE_PNG).decode()}]}
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def post(self, url, headers=None, json=None, data=None, files=None):
+            calls.append({"url": url, "files": files})
+            return FakeResponse()
+
+    monkeypatch.setattr("httpx.Client", FakeClient)
+
+    tools._openai_edit_image(
+        "draw them together",
+        [
+            ("a.png", FAKE_PNG, "image/png"),
+            ("b.png", FAKE_PNG, "image/png"),
+        ],
+        "1024x1024",
+    )
+
+    assert calls[0]["files"] == [
+        ("image[]", ("a.png", FAKE_PNG, "image/png")),
+        ("image[]", ("b.png", FAKE_PNG, "image/png")),
+    ]
