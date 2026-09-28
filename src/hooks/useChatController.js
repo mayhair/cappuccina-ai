@@ -12,6 +12,7 @@ import tts from '../lib/tts'
 
 const EFFORT_KEY = 'cappuccina-effort'
 const DEFAULT_TITLE = 'New chat'
+const STREAM_FAILED_MESSAGE = 'Oh no, my espresso machine hiccuped. Try again in a moment! 💕'
 export const MAX_ATTACHMENTS = 5
 
 export const EFFORTS = [
@@ -19,6 +20,11 @@ export const EFFORTS = [
   { label: 'High', value: 'high' },
   { label: 'Max', value: 'max' },
 ]
+
+// Wire value for the API (`reasoning` field) from the stored display label.
+function effortValue(effort) {
+  return EFFORTS.find((e) => e.label === effort)?.value ?? 'high'
+}
 
 function loadEffort() {
   try {
@@ -201,20 +207,21 @@ export function useChatController(enabled) {
 
   const clearTypingTitle = useCallback(() => setTypingTitleId(null), [])
 
-  // Stamp a draft as sent in local history so re-renders (e.g. switching chats)
-  // keep showing "Sent"; the server records the same on send for reloads.
-  const markDraftSent = useCallback((chatId, draftId) => {
+  // Stamp a tool result as done in local history so re-renders (e.g. switching
+  // chats) keep showing the completed state; the server records the same on the
+  // confirming action for reloads.
+  const markToolFlagged = useCallback((chatId, toolName, idKey, idValue, flag) => {
     const stamp = (list) =>
       (list ?? []).map((tool) => {
-        if (!tool || tool.name !== 'draft_email' || typeof tool.result !== 'string') {
+        if (!tool || tool.name !== toolName || typeof tool.result !== 'string') {
           return tool
         }
         try {
-          if (JSON.parse(tool.result)?.draft_id !== draftId) return tool
+          if (JSON.parse(tool.result)?.[idKey] !== idValue) return tool
         } catch {
           return tool
         }
-        return { ...tool, sent: true }
+        return { ...tool, [flag]: true }
       })
     setChats((all) =>
       all.map((c) =>
@@ -232,41 +239,16 @@ export function useChatController(enabled) {
     )
   }, [])
 
-  // Stamp a proposed calendar deletion as done in local history so re-renders
-  // (e.g. switching chats) keep showing "Deleted"; the server records the same
-  // on confirm for reloads.
-  const markEventDeleted = useCallback((chatId, eventId) => {
-    const stamp = (list) =>
-      (list ?? []).map((tool) => {
-        if (
-          !tool ||
-          tool.name !== 'propose_event_deletion' ||
-          typeof tool.result !== 'string'
-        ) {
-          return tool
-        }
-        try {
-          if (JSON.parse(tool.result)?.event_id !== eventId) return tool
-        } catch {
-          return tool
-        }
-        return { ...tool, deleted: true }
-      })
-    setChats((all) =>
-      all.map((c) =>
-        c.id !== chatId
-          ? c
-          : {
-              ...c,
-              messages: c.messages.map((m) =>
-                m.role !== 'assistant'
-                  ? m
-                  : { ...m, parts: stamp(m.parts), tools: stamp(m.tools) },
-              ),
-            },
-      ),
-    )
-  }, [])
+  const markDraftSent = useCallback(
+    (chatId, draftId) => markToolFlagged(chatId, 'draft_email', 'draft_id', draftId, 'sent'),
+    [markToolFlagged],
+  )
+
+  const markEventDeleted = useCallback(
+    (chatId, eventId) =>
+      markToolFlagged(chatId, 'propose_event_deletion', 'event_id', eventId, 'deleted'),
+    [markToolFlagged],
+  )
 
   const streamReply = useCallback((chatId, history, reasoning, mode, subject) => {
     setStatus('streaming')
@@ -412,7 +394,7 @@ export function useChatController(enabled) {
       patchMessages(chatId, (messages) =>
         messages.map((m, i) =>
           i === messages.length - 1 && m.role === 'assistant' && !m.content
-            ? { ...m, content: 'Oh no, my espresso machine hiccuped. Try again in a moment! 💕', failed: true }
+            ? { ...m, content: STREAM_FAILED_MESSAGE, failed: true }
             : m,
         ),
       )
@@ -436,6 +418,29 @@ export function useChatController(enabled) {
     )
   }, [])
 
+  // Persist the chat if needed, then stream the model's reply into `history`.
+  // Any failure lands as an assistant error bubble and resets the status.
+  const startStream = useCallback(
+    (chat, history) => {
+      const reasoning = effortValue(effort)
+      tts.stop()
+      patchMessages(chat.id, () => history)
+      ;(async () => {
+        try {
+          const chatId = await persistChat(chat)
+          streamReply(chatId, history, reasoning, chat.mode ?? 'chat', chat.subject ?? null)
+        } catch {
+          patchMessages(chat.id, (messages) => [
+            ...messages,
+            { role: 'assistant', content: STREAM_FAILED_MESSAGE, failed: true },
+          ])
+          setStatus('idle')
+        }
+      })()
+    },
+    [effort, patchMessages, streamReply, persistChat],
+  )
+
   const sendMessage = useCallback(() => {
     const text = draft.trim()
     const pending = attachments
@@ -453,27 +458,12 @@ export function useChatController(enabled) {
         size: a.size,
       }))
     }
-    const reasoning = EFFORTS.find((e) => e.label === effort)?.value ?? 'high'
     const history = [...chat.messages, userMessage]
 
-    tts.stop()
-    patchMessages(chat.id, () => history)
     setDraft('')
-    setAttachments([])
-    setAttachError('')
-    ;(async () => {
-      try {
-        const chatId = await persistChat(chat)
-        streamReply(chatId, history, reasoning, chat.mode ?? 'chat', chat.subject ?? null)
-      } catch {
-        patchMessages(chat.id, (messages) => [
-          ...messages,
-          { role: 'assistant', content: 'Oh no, my espresso machine hiccuped. Try again in a moment! 💕', failed: true },
-        ])
-        setStatus('idle')
-      }
-    })()
-  }, [draft, attachments, uploading, status, activeChat, effort, patchMessages, streamReply, persistChat])
+    clearAttachments()
+    startStream(chat, history)
+  }, [draft, attachments, uploading, status, activeChat, clearAttachments, startStream])
 
   const retryMessage = useCallback(() => {
     if (status !== 'idle') return
@@ -487,23 +477,8 @@ export function useChatController(enabled) {
       }
     }
     if (lastUser === -1) return
-    const history = messages.slice(0, lastUser + 1)
-    const reasoning = EFFORTS.find((e) => e.label === effort)?.value ?? 'high'
-    tts.stop()
-    patchMessages(chat.id, () => history)
-    ;(async () => {
-      try {
-        const chatId = await persistChat(chat)
-        streamReply(chatId, history, reasoning, chat.mode ?? 'chat', chat.subject ?? null)
-      } catch {
-        patchMessages(chat.id, (msgs) => [
-          ...msgs,
-          { role: 'assistant', content: 'Oh no, my espresso machine hiccuped. Try again in a moment! 💕', failed: true },
-        ])
-        setStatus('idle')
-      }
-    })()
-  }, [status, activeChat, effort, patchMessages, streamReply, persistChat])
+    startStream(chat, messages.slice(0, lastUser + 1))
+  }, [status, activeChat, startStream])
 
   const newChat = useCallback(() => {
     const chat = makeChat()
@@ -513,20 +488,20 @@ export function useChatController(enabled) {
     tts.stop()
     setDraft('')
     setStatus('idle')
-    setAttachments([])
-    setAttachError('')
+    clearAttachments()
     inputRef.current?.focus()
   }, [])
 
   const deleteChat = useCallback((id) => {
-    setChats((all) => {
-      const target = all.find((c) => c.id === id)
-      const remaining = all.filter((c) => c.id !== id)
-      if (remaining.length === 0) return all
-      setActiveChatId((current) => (current === id ? remaining[0].id : current))
-      if (!target?.pending) deleteChatOnServer(id).catch(() => {})
-      return remaining
-    })
+    const all = chatsRef.current
+    const target = all.find((c) => c.id === id)
+    const remaining = all.filter((c) => c.id !== id)
+    if (remaining.length === 0) return
+    // React can run state updaters twice (StrictMode), so the server DELETE and
+    // the active-chat switch live here rather than inside the setChats updater.
+    setActiveChatId((current) => (current === id ? remaining[0].id : current))
+    if (!target?.pending) deleteChatOnServer(id).catch(() => {})
+    setChats(remaining)
   }, [])
 
   const renameChat = useCallback((id, title) => {
@@ -542,8 +517,7 @@ export function useChatController(enabled) {
   const selectChat = useCallback((id) => {
     setActiveChatId(id)
     tts.stop()
-    setAttachments([])
-    setAttachError('')
+    clearAttachments()
   }, [])
 
   const q = query.trim().toLowerCase()
@@ -581,6 +555,5 @@ export function useChatController(enabled) {
     attachError,
     addAttachments,
     removeAttachment,
-    clearAttachments,
   }
 }

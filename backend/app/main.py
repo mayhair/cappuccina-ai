@@ -11,6 +11,7 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
 from sse_starlette.sse import EventSourceResponse
 
+from agent.content import flatten_content
 from agent.fmhy import load_fmhy_tools
 from agent.graph import build_graph
 from agent.title import generate_title
@@ -72,14 +73,6 @@ app.add_middleware(
 )
 
 
-def _text(content) -> str:
-    if isinstance(content, str):
-        return content
-    return "".join(
-        part.get("text", "") for part in content if isinstance(part, dict)
-    )
-
-
 def _reasoning_text(content) -> str:
     """Reasoning trace from Responses-API-style content blocks.
 
@@ -112,21 +105,13 @@ def _tool_label(name: str, args: dict) -> str:
 
 
 def _tool_result_text(output) -> str:
-    content = getattr(output, "content", output)
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        return "".join(
-            part.get("text", "") if isinstance(part, dict) else str(part)
-            for part in content
-        )
-    return str(content)
+    return flatten_content(getattr(output, "content", output))
 
 
 def _image_part_from_result(name: str, output_text: str) -> dict | None:
     """An {"type": "image"} part for a successful generate_image/image_edit result.
 
-    The part only references the saved image by id — the bytes live in
+    The part only references the saved image by id â€” the bytes live in
     backend/data/images and are served by GET /api/v1/images/{id}, so they
     never flow through the full-history sync payloads. Returns None for any
     other tool or a failed/malformed result.
@@ -175,7 +160,7 @@ def _final_extras(messages) -> tuple[str, list[ToolCall], list[dict]]:
         # results are not model text, so they never become text parts; system
         # messages (including the injected FMHY safety note) never surface.
         if msg.__class__.__name__ not in ("ToolMessage", "SystemMessage"):
-            step_text = _text(content)
+            step_text = flatten_content(content)
             if step_text:
                 parts.append({"type": "text", "text": step_text})
         for call in getattr(msg, "tool_calls", None) or []:
@@ -265,7 +250,7 @@ def _attachment_blocks(parts, user_id: str) -> list[dict]:
     """LLM content blocks for a user turn's attachment parts.
 
     Images become vision (`image_url`) blocks read from disk. Documents become
-    a text pointer naming the file and its id — the model calls read_attachment
+    a text pointer naming the file and its id â€” the model calls read_attachment
     to pull the extracted text on demand, so document bodies never sit in the
     prompt or in the stored history.
     """
@@ -534,7 +519,7 @@ async def gmail_update_draft(
     except gmail.DraftGone:
         raise HTTPException(
             status_code=409,
-            detail="That draft no longer exists — it may already have been sent",
+            detail="That draft no longer exists â€” it may already have been sent",
         )
     except gmail.GmailApiError as exc:
         raise HTTPException(status_code=502, detail=f"Gmail: {exc}")
@@ -543,7 +528,7 @@ async def gmail_update_draft(
 
 @app.post("/api/v1/gmail/drafts/{draft_id}/send")
 async def gmail_send_draft(draft_id: str, user=Depends(current_user)) -> dict:
-    """The only path that actually sends mail — driven by the user's button."""
+    """The only path that actually sends mail â€” driven by the user's button."""
     try:
         sent = gmail.send_draft(user["id"], draft_id)
     except ServiceNotConnected as exc:
@@ -551,7 +536,7 @@ async def gmail_send_draft(draft_id: str, user=Depends(current_user)) -> dict:
     except gmail.DraftGone:
         raise HTTPException(
             status_code=409,
-            detail="That draft no longer exists — it may already have been sent",
+            detail="That draft no longer exists â€” it may already have been sent",
         )
     except gmail.GmailApiError as exc:
         raise HTTPException(status_code=502, detail=f"Gmail: {exc}")
@@ -612,7 +597,7 @@ async def calendar_disconnect(user=Depends(current_user)) -> dict:
 
 @app.post("/api/v1/calendar/events/{event_id}/delete")
 async def calendar_delete_event(event_id: str, user=Depends(current_user)) -> dict:
-    """The only path that deletes an event — driven by the user's button.
+    """The only path that deletes an event â€” driven by the user's button.
 
     The assistant proposes the deletion in chat; nothing is removed until the
     user confirms here.
@@ -624,7 +609,7 @@ async def calendar_delete_event(event_id: str, user=Depends(current_user)) -> di
     except calendar.EventGone:
         raise HTTPException(
             status_code=409,
-            detail="That event is already gone — it may have been deleted already",
+            detail="That event is already gone â€” it may have been deleted already",
         )
     except calendar.CalendarApiError as exc:
         raise HTTPException(status_code=502, detail=f"Calendar: {exc}")
@@ -825,7 +810,7 @@ async def chat(req: ChatRequest, user=Depends(current_user)) -> ChatResponse:
     db.append_chat_message(
         req.chat_id,
         role="assistant",
-        content=_text(messages[-1].content),
+        content=flatten_content(messages[-1].content),
         reasoning=reasoning,
         tools=_serialize_tool_calls(tool_calls),
         parts=parts,
@@ -833,203 +818,211 @@ async def chat(req: ChatRequest, user=Depends(current_user)) -> ChatResponse:
         thought_seconds=thought_seconds,
     )
     return ChatResponse(
-        content=_text(messages[-1].content),
+        content=flatten_content(messages[-1].content),
         reasoning=reasoning,
         tool_calls=tool_calls,
     )
 
 
+class _ThinkingBlockTimer:
+    """Stamps each run of consecutive reasoning/tool parts with its duration.
+
+    A "block" opens when the first reasoning or tool part of a run arrives and
+    closes when text follows (or the stream ends), at which point every part in
+    the run is stamped with that run's duration. This keeps the counter running
+    while the model reasons after a tool call instead of stopping at the first
+    bit of text.
+    """
+
+    def __init__(self, parts: list[dict]):
+        self._parts = parts
+        self._start: float | None = None
+        self._first_index: int | None = None
+
+    def open(self) -> None:
+        if self._start is None:
+            self._start = time.monotonic()
+            self._first_index = len(self._parts)
+
+    def close(self) -> None:
+        if self._start is None or self._first_index is None:
+            return
+        seconds = round(time.monotonic() - self._start, 1)
+        for part in self._parts[self._first_index :]:
+            if part.get("type") in ("reasoning", "tool"):
+                part["seconds"] = seconds
+        self._start = None
+        self._first_index = None
+
+
+async def _stream_chat_events(req: ChatRequest, user: dict):
+    """SSE events for one chat completion; stores the reply when the run ends."""
+    _sync_history(req.chat_id, req)
+    yield {"event": "start", "data": "{}"}
+    think_start = time.monotonic()
+    final_text = ""
+    reasoning_text = ""
+    tools_by_id: dict[str, dict] = {}
+    parts: list[dict] = []
+    parts_by_tool_id: dict[str, dict] = {}
+    # Every tool run we have seen, so a tool that calls another tool (an
+    # internal, nested run) is not mistaken for a second model tool call.
+    tool_run_ids: set[str] = set()
+    blocks = _ThinkingBlockTimer(parts)
+
+    async for event in GRAPH.astream_events(
+        _state(req, user),
+        config=_graph_config(user, req),
+        version="v2",
+    ):
+        kind = event["event"]
+        if kind == "on_chat_model_start":
+            final_text = ""
+        elif kind == "on_chat_model_stream":
+            chunk = event["data"]["chunk"]
+            content = getattr(chunk, "content", "")
+            text = flatten_content(content)
+            if text:
+                final_text += text
+                # Text ends the current thinking block: stamp its duration.
+                blocks.close()
+                # A text part is appended (or extended) so the stored parts
+                # preserve the model's text/reasoning/tool interleaving.
+                if parts and parts[-1].get("type") == "text":
+                    parts[-1]["text"] += text
+                else:
+                    parts.append({"type": "text", "text": text})
+                yield {"event": "token", "data": json.dumps({"content": text})}
+            reasoning = _message_reasoning(chunk, content)
+            if reasoning:
+                reasoning_text += reasoning
+                blocks.open()
+                if parts and parts[-1].get("type") == "reasoning":
+                    parts[-1]["text"] += reasoning
+                else:
+                    parts.append({"type": "reasoning", "text": reasoning})
+                yield {
+                    "event": "reasoning",
+                    "data": json.dumps({"content": reasoning}),
+                }
+        elif kind == "on_tool_start":
+            call_id = event.get("run_id", "")
+            # A run whose parent is another tool run is the tool calling
+            # itself internally â€” surface it once, as the outer call.
+            nested = bool(set(event.get("parent_ids") or ()) & tool_run_ids)
+            tool_run_ids.add(call_id)
+            if nested:
+                continue
+            args = event["data"].get("input", {}) or {}
+            if not isinstance(args, dict):
+                args = {"input": args}
+            name = event.get("name", "")
+            blocks.open()
+            tools_by_id[call_id] = {
+                "id": call_id,
+                "name": name,
+                "display": TOOL_DISPLAY_NAMES.get(name, name),
+                "args": args,
+                "result": "",
+                "ok": True,
+            }
+            part = {
+                "type": "tool",
+                "id": str(call_id),
+                "name": name,
+                "display": TOOL_DISPLAY_NAMES.get(name, name),
+                "args": args,
+                "result": None,
+                "ok": None,
+            }
+            parts.append(part)
+            parts_by_tool_id[str(call_id)] = part
+            yield {
+                "event": "tool_call",
+                "data": json.dumps(
+                    {
+                        "id": str(call_id),
+                        "name": name,
+                        "display": TOOL_DISPLAY_NAMES.get(name, name),
+                        "args": args,
+                        "label": _tool_label(name, args),
+                    }
+                ),
+            }
+        elif kind == "on_tool_end":
+            call_id = event.get("run_id", "")
+            if call_id not in tools_by_id:
+                # A nested internal run we deliberately did not surface.
+                continue
+            output_text = _tool_result_text(event["data"].get("output", ""))
+            tools_by_id[call_id]["result"] = output_text
+            tool_part = parts_by_tool_id.get(str(call_id))
+            if tool_part is not None:
+                tool_part["result"] = output_text
+                tool_part["ok"] = True
+            yield {
+                "event": "tool_result",
+                "data": json.dumps(
+                    {
+                        "id": str(call_id),
+                        "name": event.get("name", ""),
+                        "content": output_text,
+                        "ok": True,
+                    }
+                ),
+            }
+            image_part = _image_part_from_result(
+                event.get("name", ""), output_text
+            )
+            if image_part is not None:
+                parts.append(image_part)
+                yield {"event": "image", "data": json.dumps(image_part)}
+        elif kind == "on_tool_error":
+            call_id = event.get("run_id", "")
+            if call_id not in tools_by_id:
+                continue
+            error_text = str(event["data"].get("error", ""))
+            tools_by_id[call_id]["result"] = error_text
+            tools_by_id[call_id]["ok"] = False
+            tool_part = parts_by_tool_id.get(str(call_id))
+            if tool_part is not None:
+                tool_part["result"] = error_text
+                tool_part["ok"] = False
+            yield {
+                "event": "tool_result",
+                "data": json.dumps(
+                    {
+                        "id": str(call_id),
+                        "name": event.get("name", ""),
+                        "content": error_text,
+                        "ok": False,
+                    }
+                ),
+            }
+    yield {"event": "done", "data": "{}"}
+    blocks.close()
+    if req.generate_title and req.messages:
+        title = await generate_title(req.messages[0].content, final_text)
+        if title:
+            db.set_chat_title_if_default(req.chat_id, title)
+            yield {"event": "title", "data": json.dumps({"title": title})}
+    if final_text or reasoning_text or tools_by_id:
+        db.append_chat_message(
+            req.chat_id,
+            role="assistant",
+            content=final_text,
+            reasoning=reasoning_text,
+            tools=list(tools_by_id.values()),
+            parts=[json.loads(json.dumps(p)) for p in parts],
+            thinking_done=True,
+            thought_seconds=time.monotonic() - think_start,
+        )
+
+
 @app.post("/api/v1/chat/stream")
 async def chat_stream(req: ChatRequest, user=Depends(current_user)):
     _owned_chat_or_404(user, req)
-
-    async def events():
-        _sync_history(req.chat_id, req)
-        yield {"event": "start", "data": "{}"}
-        think_start = time.monotonic()
-        final_text = ""
-        reasoning_text = ""
-        tools_by_id: dict[str, dict] = {}
-        parts: list[dict] = []
-        parts_by_tool_id: dict[str, dict] = {}
-        # Every tool run we have seen, so a tool that calls another tool (an
-        # internal, nested run) is not mistaken for a second model tool call.
-        tool_run_ids: set[str] = set()
-        # Per-thinking-block timing: a "block" is a run of consecutive
-        # reasoning/tool parts. It opens when the first of the run arrives and
-        # closes when text follows (or the stream ends), at which point every
-        # part in the run is stamped with that run's duration. This keeps the
-        # counter running while the model reasons after a tool call instead of
-        # stopping at the first bit of text.
-        block_start: float | None = None
-        block_first_index: int | None = None
-
-        def close_block() -> None:
-            nonlocal block_start, block_first_index
-            if block_start is None or block_first_index is None:
-                return
-            seconds = round(time.monotonic() - block_start, 1)
-            for part in parts[block_first_index:]:
-                if part.get("type") in ("reasoning", "tool"):
-                    part["seconds"] = seconds
-            block_start = None
-            block_first_index = None
-
-        def open_block() -> None:
-            nonlocal block_start, block_first_index
-            if block_start is None:
-                block_start = time.monotonic()
-                block_first_index = len(parts)
-
-        async for event in GRAPH.astream_events(
-            _state(req, user),
-            config=_graph_config(user, req),
-            version="v2",
-        ):
-            kind = event["event"]
-            if kind == "on_chat_model_start":
-                final_text = ""
-            elif kind == "on_chat_model_stream":
-                chunk = event["data"]["chunk"]
-                content = getattr(chunk, "content", "")
-                text = _text(content)
-                if text:
-                    final_text += text
-                    # Text ends the current thinking block: stamp its duration.
-                    close_block()
-                    # A text part is appended (or extended) so the stored parts
-                    # preserve the model's text/reasoning/tool interleaving.
-                    if parts and parts[-1].get("type") == "text":
-                        parts[-1]["text"] += text
-                    else:
-                        parts.append({"type": "text", "text": text})
-                    yield {"event": "token", "data": json.dumps({"content": text})}
-                reasoning = _message_reasoning(chunk, content)
-                if reasoning:
-                    reasoning_text += reasoning
-                    open_block()
-                    if parts and parts[-1].get("type") == "reasoning":
-                        parts[-1]["text"] += reasoning
-                    else:
-                        parts.append({"type": "reasoning", "text": reasoning})
-                    yield {
-                        "event": "reasoning",
-                        "data": json.dumps({"content": reasoning}),
-                    }
-            elif kind == "on_tool_start":
-                call_id = event.get("run_id", "")
-                # A run whose parent is another tool run is the tool calling
-                # itself internally — surface it once, as the outer call.
-                nested = bool(set(event.get("parent_ids") or ()) & tool_run_ids)
-                tool_run_ids.add(call_id)
-                if nested:
-                    continue
-                args = event["data"].get("input", {}) or {}
-                if not isinstance(args, dict):
-                    args = {"input": args}
-                name = event.get("name", "")
-                open_block()
-                tools_by_id[call_id] = {
-                    "id": call_id,
-                    "name": name,
-                    "display": TOOL_DISPLAY_NAMES.get(name, name),
-                    "args": args,
-                    "result": "",
-                    "ok": True,
-                }
-                part = {
-                    "type": "tool",
-                    "id": str(call_id),
-                    "name": name,
-                    "display": TOOL_DISPLAY_NAMES.get(name, name),
-                    "args": args,
-                    "result": None,
-                    "ok": None,
-                }
-                parts.append(part)
-                parts_by_tool_id[str(call_id)] = part
-                yield {
-                    "event": "tool_call",
-                    "data": json.dumps(
-                        {
-                            "id": str(call_id),
-                            "name": name,
-                            "display": TOOL_DISPLAY_NAMES.get(name, name),
-                            "args": args,
-                            "label": _tool_label(name, args),
-                        }
-                    ),
-                }
-            elif kind == "on_tool_end":
-                call_id = event.get("run_id", "")
-                if call_id not in tools_by_id:
-                    # A nested internal run we deliberately did not surface.
-                    continue
-                output_text = _tool_result_text(event["data"].get("output", ""))
-                tools_by_id[call_id]["result"] = output_text
-                tool_part = parts_by_tool_id.get(str(call_id))
-                if tool_part is not None:
-                    tool_part["result"] = output_text
-                    tool_part["ok"] = True
-                yield {
-                    "event": "tool_result",
-                    "data": json.dumps(
-                        {
-                            "id": str(call_id),
-                            "name": event.get("name", ""),
-                            "content": output_text,
-                            "ok": True,
-                        }
-                    ),
-                }
-                image_part = _image_part_from_result(
-                    event.get("name", ""), output_text
-                )
-                if image_part is not None:
-                    parts.append(image_part)
-                    yield {"event": "image", "data": json.dumps(image_part)}
-            elif kind == "on_tool_error":
-                call_id = event.get("run_id", "")
-                if call_id not in tools_by_id:
-                    continue
-                error_text = str(event["data"].get("error", ""))
-                tools_by_id[call_id]["result"] = error_text
-                tools_by_id[call_id]["ok"] = False
-                tool_part = parts_by_tool_id.get(str(call_id))
-                if tool_part is not None:
-                    tool_part["result"] = error_text
-                    tool_part["ok"] = False
-                yield {
-                    "event": "tool_result",
-                    "data": json.dumps(
-                        {
-                            "id": str(call_id),
-                            "name": event.get("name", ""),
-                            "content": error_text,
-                            "ok": False,
-                        }
-                    ),
-                }
-        yield {"event": "done", "data": "{}"}
-        close_block()
-        if req.generate_title and req.messages:
-            title = await generate_title(req.messages[0].content, final_text)
-            if title:
-                db.set_chat_title_if_default(req.chat_id, title)
-                yield {"event": "title", "data": json.dumps({"title": title})}
-        if final_text or reasoning_text or tools_by_id:
-            db.append_chat_message(
-                req.chat_id,
-                role="assistant",
-                content=final_text,
-                reasoning=reasoning_text,
-                tools=list(tools_by_id.values()),
-                parts=[json.loads(json.dumps(p)) for p in parts],
-                thinking_done=True,
-                thought_seconds=time.monotonic() - think_start,
-            )
-
-    return EventSourceResponse(events(), ping=15)
+    return EventSourceResponse(_stream_chat_events(req, user), ping=15)
 
 
 # ---------- text-to-speech (read replies aloud) ----------

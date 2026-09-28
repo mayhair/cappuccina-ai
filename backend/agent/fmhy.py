@@ -24,6 +24,7 @@ from typing import Literal
 
 from langchain_core.tools import tool
 
+from agent.content import flatten_content
 from app.config import FMHY_MCP_URL
 
 logger = logging.getLogger(__name__)
@@ -205,18 +206,6 @@ def strip_nsfw(text: str) -> str:
     return "\n".join(out)
 
 
-def _result_text(result) -> str:
-    """Flatten a LangChain tool result (content blocks or a string) to text."""
-    if isinstance(result, str):
-        return result
-    if isinstance(result, list):
-        return "".join(
-            part.get("text", "") if isinstance(part, dict) else str(part)
-            for part in result
-        )
-    return str(result)
-
-
 async def _invoke_untraced(tool, args: dict):
     """Call the upstream MCP tool without spawning a nested tool run.
 
@@ -245,7 +234,7 @@ async def _call(name: str, args: dict) -> str:
     except Exception as exc:  # noqa: BLE001 - surfaced to the model, not raised
         logger.warning("FMHY tool %s failed: %s", name, exc)
         return f"Couldn't reach the free-media guide ({exc})."
-    return strip_nsfw(_result_text(result))
+    return strip_nsfw(flatten_content(result))
 
 
 # --- section assembly -------------------------------------------------------

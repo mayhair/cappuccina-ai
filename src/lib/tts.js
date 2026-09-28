@@ -147,7 +147,7 @@ function playThrough(player) {
 
 // Queues one finished bubble to be read aloud. Its lines are separated by
 // PARAGRAPH_PAUSE_MS; consecutive bubbles play back to back.
-export function enqueue(message) {
+function enqueue(message) {
   if (!enabled) return
   const paragraphs = speechParagraphs(message)
   if (!paragraphs.length) return

@@ -13,12 +13,10 @@ import re
 from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
-import httpx
-
-from app.google_oauth import get_access_token
+from app import google_http
+from app.google_http import GoogleApiError
 
 API_ROOT = "https://www.googleapis.com/calendar/v3/calendars/primary"
-TIMEOUT = httpx.Timeout(20.0)
 MAX_RESULTS_CAP = 20
 DEFAULT_LOOKAHEAD_DAYS = 7
 
@@ -30,40 +28,26 @@ _TZ_CACHE_TTL = timedelta(minutes=1)
 _DATE_ONLY = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
-class CalendarApiError(RuntimeError):
-    def __init__(self, status: int, message: str):
-        super().__init__(message)
-        self.status = status
+class CalendarApiError(GoogleApiError):
+    """Non-2xx Google Calendar response."""
 
 
 class EventGone(RuntimeError):
     """Event no longer exists — usually already deleted, here or in Google."""
 
 
-def _headers(user_id: str) -> dict:
-    return {"Authorization": f"Bearer {get_access_token(user_id, 'calendar')}"}
-
-
 def _request(user_id: str, method: str, path: str, **kwargs) -> dict:
-    resp = httpx.request(
+    return google_http.request(
+        user_id,
         method,
-        f"{API_ROOT}{path}",
-        headers=_headers(user_id),
-        timeout=TIMEOUT,
+        path,
+        service="calendar",
+        api_root=API_ROOT,
+        not_found="Not found in this Google Calendar",
+        error_label="Calendar",
+        error_cls=CalendarApiError,
         **kwargs,
     )
-    if resp.status_code == 404:
-        raise CalendarApiError(404, "Not found in this Google Calendar")
-    if resp.status_code >= 400:
-        detail = ""
-        try:
-            detail = resp.json().get("error", {}).get("message", "")
-        except ValueError:
-            detail = resp.text[:200]
-        raise CalendarApiError(
-            resp.status_code, detail or f"Calendar error {resp.status_code}"
-        )
-    return resp.json() if resp.content else {}
 
 
 # ---------- time helpers ----------
@@ -171,12 +155,6 @@ def _summary_time(event: dict) -> str:
     return f"{start_txt} → {end_txt}"
 
 
-def _truncate(text: str, limit: int) -> str:
-    if len(text) <= limit:
-        return text
-    return text[:limit].rstrip() + "\n… [truncated]"
-
-
 # ---------- public API ----------
 
 
@@ -243,7 +221,9 @@ def get_event(user_id: str, event_id: str, description_limit: int = 4000) -> dic
         "when": _summary_time(item),
         "all_day": _is_all_day(item),
         "location": item.get("location", ""),
-        "description": _truncate(item.get("description", "") or "", description_limit),
+        "description": google_http.truncate(
+            item.get("description", "") or "", description_limit
+        ),
         "recurring": bool(item.get("recurringEventId")),
         "status": item.get("status", ""),
     }
@@ -330,12 +310,9 @@ def update_event(
         patch["location"] = location
     if not patch:
         raise ValueError("nothing to change")
-    try:
-        item = _request(user_id, "PATCH", f"/events/{event_id}", json=patch)
-    except CalendarApiError as exc:
-        if exc.status == 404:
-            raise EventGone(str(exc)) from exc
-        raise
+    item = _request(
+        user_id, "PATCH", f"/events/{event_id}", json=patch, gone_cls=EventGone
+    )
     return {
         "id": item.get("id", event_id),
         "title": item.get("summary", "(no title)"),
@@ -346,10 +323,5 @@ def update_event(
 
 def delete_event(user_id: str, event_id: str) -> dict:
     """Permanently delete one event (Google's own UI offers a 30-day trash)."""
-    try:
-        _request(user_id, "DELETE", f"/events/{event_id}")
-    except CalendarApiError as exc:
-        if exc.status == 404:
-            raise EventGone(str(exc)) from exc
-        raise
+    _request(user_id, "DELETE", f"/events/{event_id}", gone_cls=EventGone)
     return {"id": event_id}

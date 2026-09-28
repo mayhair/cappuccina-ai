@@ -10,52 +10,36 @@ import re
 from email.message import EmailMessage
 from html import unescape
 
-import httpx
-
-from app.google_oauth import get_access_token
+from app import google_http
+from app.google_http import GoogleApiError
 
 API_ROOT = "https://gmail.googleapis.com/gmail/v1/users/me"
-TIMEOUT = httpx.Timeout(20.0)
 MAX_RESULTS_CAP = 10
 
 # Gmail search accepts an empty query as "everything"; keep it explicit.
 DEFAULT_QUERY = "in:inbox"
 
 
-class GmailApiError(RuntimeError):
-    def __init__(self, status: int, message: str):
-        super().__init__(message)
-        self.status = status
+class GmailApiError(GoogleApiError):
+    """Non-2xx Gmail response."""
 
 
 class DraftGone(RuntimeError):
     """Draft no longer exists — almost always because it was already sent."""
 
 
-def _headers(user_id: str) -> dict:
-    return {"Authorization": f"Bearer {get_access_token(user_id, 'gmail')}"}
-
-
 def _request(user_id: str, method: str, path: str, **kwargs) -> dict:
-    resp = httpx.request(
+    return google_http.request(
+        user_id,
         method,
-        f"{API_ROOT}{path}",
-        headers=_headers(user_id),
-        timeout=TIMEOUT,
+        path,
+        service="gmail",
+        api_root=API_ROOT,
+        not_found="Not found in this Gmail account",
+        error_label="Gmail",
+        error_cls=GmailApiError,
         **kwargs,
     )
-    if resp.status_code == 404:
-        raise GmailApiError(404, "Not found in this Gmail account")
-    if resp.status_code >= 400:
-        detail = ""
-        try:
-            detail = resp.json().get("error", {}).get("message", "")
-        except ValueError:
-            detail = resp.text[:200]
-        raise GmailApiError(
-            resp.status_code, detail or f"Gmail error {resp.status_code}"
-        )
-    return resp.json() if resp.content else {}
 
 
 # ---------- MIME helpers ----------
@@ -86,8 +70,8 @@ def _strip_html(html: str) -> str:
     return unescape(text)
 
 
-def _extract_body(payload: dict) -> tuple[str, bool]:
-    """Return (text, is_html) preferring text/plain anywhere in the tree."""
+def _extract_body(payload: dict) -> str:
+    """Return the message text, preferring text/plain anywhere in the tree."""
     plain: list[str] = []
     html: list[str] = []
 
@@ -103,16 +87,10 @@ def _extract_body(payload: dict) -> tuple[str, bool]:
 
     walk(payload)
     if plain:
-        return "\n".join(p for p in plain if p.strip()), False
+        return "\n".join(p for p in plain if p.strip())
     if html:
-        return _strip_html("\n".join(html)).strip(), True
-    return "", False
-
-
-def _truncate(text: str, limit: int) -> str:
-    if len(text) <= limit:
-        return text
-    return text[:limit].rstrip() + "\n… [truncated]"
+        return _strip_html("\n".join(html)).strip()
+    return ""
 
 
 # ---------- public API ----------
@@ -159,14 +137,14 @@ def get_message(user_id: str, message_id: str, body_limit: int = 4000) -> dict:
     )
     payload = detail.get("payload", {}) or {}
     headers = _headers_map(payload)
-    body, _ = _extract_body(payload)
+    body = _extract_body(payload)
     return {
         "id": detail.get("id", message_id),
         "from": headers.get("from", ""),
         "to": headers.get("to", ""),
         "subject": headers.get("subject", "(no subject)"),
         "date": headers.get("date", ""),
-        "body": _truncate(body, body_limit) or "(no readable text body)",
+        "body": google_http.truncate(body, body_limit) or "(no readable text body)",
     }
 
 
@@ -188,14 +166,13 @@ def create_draft(user_id: str, to: str, subject: str, body: str) -> dict:
 
 def update_draft(user_id: str, draft_id: str, to: str, subject: str, body: str) -> dict:
     """Replace a draft's contents, preserving its thread if it has one."""
-    try:
-        existing = _request(
-            user_id, "GET", f"/drafts/{draft_id}", params={"format": "metadata"}
-        )
-    except GmailApiError as exc:
-        if exc.status == 404:
-            raise DraftGone(str(exc)) from exc
-        raise
+    existing = _request(
+        user_id,
+        "GET",
+        f"/drafts/{draft_id}",
+        params={"format": "metadata"},
+        gone_cls=DraftGone,
+    )
 
     message = EmailMessage()
     message["To"] = to
@@ -213,10 +190,7 @@ def update_draft(user_id: str, draft_id: str, to: str, subject: str, body: str) 
 def send_draft(user_id: str, draft_id: str) -> dict:
     # users.drafts.send is POST /drafts/send with the id in the body -- there is
     # no /drafts/{id}/send route (Gmail 404s on that, which looks like "gone").
-    try:
-        result = _request(user_id, "POST", "/drafts/send", json={"id": draft_id})
-    except GmailApiError as exc:
-        if exc.status == 404:
-            raise DraftGone(str(exc)) from exc
-        raise
+    result = _request(
+        user_id, "POST", "/drafts/send", json={"id": draft_id}, gone_cls=DraftGone
+    )
     return {"message_id": result.get("id", ""), "thread_id": result.get("threadId", "")}

@@ -744,8 +744,119 @@ function RetryMessageButton({ onRetry }) {
   )
 }
 
-export function ChatWindow({ chat, user, isStreaming, draft, onDraft, onSend, onRetry, onDraftSent, onEventDeleted, inputRef, effort, onEffort, mode, subject, onMode, attachments = [], uploading = false, attachError = '', onAttach, onRemoveAttachment }) {
-  const listRef = useRef(null)
+function MessageRow({ message, prev, isActiveStream, user, onRetry, onDraftSent, onEventDeleted }) {
+  const m = message
+  const startsRun = !prev || prev.role !== m.role
+  const awaitingReply = isActiveStream && !m.content
+  const toolParts =
+    m.role === 'assistant'
+      ? (Array.isArray(m.parts) && m.parts.length ? m.parts : m.tools ?? [])
+      : []
+  const drafts = toolParts.map(draftFromTool).filter(Boolean)
+  const proposals = toolParts.map(deleteFromTool).filter(Boolean)
+  const images = toolParts.map(imageFromPart).filter(Boolean)
+  const userAttachments =
+    m.role === 'user'
+      ? (m.parts ?? []).map(attachmentFromPart).filter(Boolean)
+      : []
+  const segments = m.role === 'assistant' ? messageSegments(m) : []
+  // A message-level duration is only unambiguous when the whole reply
+  // is a single thinking block; with several blocks each carries its
+  // own stamp, so don't smear the total across all of them.
+  const thinkingCount = segments.filter((s) => s.type === 'thinking').length
+  return (
+    <div className={`msg-row ${m.role}${startsRun ? ' starts' : ''}`}>
+      {m.role === 'assistant' ? (
+        <div className="msg-avatar">
+          <img src="/plates/msg-avatar.png" alt="" />
+        </div>
+      ) : (
+        <div className="msg-avatar user" aria-hidden="true">
+          {user?.avatarUrl ? (
+            <img src={user.avatarUrl} alt="" referrerPolicy="no-referrer" />
+          ) : (
+            (user?.displayName || '?').slice(0, 1).toUpperCase()
+          )}
+        </div>
+      )}
+      {m.role === 'assistant' ? (
+        <div className="assistant-col">
+          {segments.map((seg, si) =>
+            seg.type === 'thinking' ? (
+              <ThinkingBlock
+                key={`think-${si}`}
+                parts={seg.parts}
+                streaming={isActiveStream}
+                fallbackSeconds={thinkingCount === 1 ? m.thoughtSeconds : null}
+              />
+            ) : (
+              <div key={`text-${si}`} className="bubble">
+                <Markdown text={seg.text} />
+              </div>
+            ),
+          )}
+          {awaitingReply && segments.length === 0 && (
+            <div className="bubble bubble-waiting">
+              <StreamingDots />
+            </div>
+          )}
+          {m.content && !isActiveStream && (m.failed
+            ? <RetryMessageButton onRetry={onRetry} />
+            : <CopyMessageButton text={m.content} />)}
+          {images.map((img) => (
+            <ImageCard key={img.imageId} image={img} />
+          ))}
+          {!isActiveStream && drafts.map((d, di) => (
+            <DraftCard
+              key={d.draft_id ?? di}
+              draft={d}
+              onSent={onDraftSent}
+            />
+          ))}
+          {!isActiveStream && proposals.map((p, pi) => (
+            <EventDeleteCard
+              key={p.event_id ?? pi}
+              proposal={p}
+              onDeleted={onEventDeleted}
+            />
+          ))}
+        </div>
+      ) : (
+        <div className="bubble">
+          {userAttachments.length > 0 && (
+            <div className="msg-attachments">
+              {userAttachments.map((a, ai) => (
+                <AttachmentPreview key={a.id ?? ai} attachment={a} />
+              ))}
+            </div>
+          )}
+          {(m.content || userAttachments.length === 0) && (
+            <p>
+              <EmojiText text={m.content || '…'} />
+            </p>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function Composer({
+  draft,
+  onDraft,
+  onSend,
+  isStreaming,
+  uploading,
+  attachments,
+  attachError,
+  onAttach,
+  onRemoveAttachment,
+  mode,
+  onMode,
+  effort,
+  onEffort,
+  inputRef,
+}) {
   const composerRef = useRef(null)
   const fileRef = useRef(null)
   const setComposer = useCallback((el) => {
@@ -758,8 +869,6 @@ export function ChatWindow({ chat, user, isStreaming, draft, onDraft, onSend, on
     if (files?.length) onAttach?.(files)
     e.target.value = ''
   }
-
-  const canAttach = !isStreaming && !uploading
 
   // Voice input: finals are appended to the draft so the kid reviews (and can
   // fix misheard words) before sending; interim text only shows live.
@@ -775,74 +884,6 @@ export function ChatWindow({ chat, user, isStreaming, draft, onDraft, onSend, on
     [onDraft],
   )
   const voice = useVoiceInput({ onTranscript: appendTranscript, disabled: isStreaming || uploading })
-
-  // Window-level drag & drop. dragenter/dragleave fire for every child element
-  // crossed, so a depth counter keeps the overlay visible until we really leave.
-  const dragDepth = useRef(0)
-  const [dragActive, setDragActive] = useState(false)
-
-  useEffect(() => {
-    const hasFiles = (e) => Array.from(e.dataTransfer?.types || []).includes('Files')
-    const onDragEnter = (e) => {
-      if (!hasFiles(e)) return
-      e.preventDefault()
-      if (!canAttach) return
-      dragDepth.current += 1
-      setDragActive(true)
-    }
-    const onDragOver = (e) => {
-      // Always prevent default for files, or the browser would open the file
-      // instead of letting us handle the drop.
-      if (!hasFiles(e)) return
-      e.preventDefault()
-      e.dataTransfer.dropEffect = canAttach ? 'copy' : 'none'
-    }
-    const onDragLeave = () => {
-      dragDepth.current = Math.max(0, dragDepth.current - 1)
-      if (dragDepth.current === 0) setDragActive(false)
-    }
-    const onDrop = (e) => {
-      if (!hasFiles(e)) return
-      e.preventDefault()
-      dragDepth.current = 0
-      setDragActive(false)
-      if (!canAttach) return
-      const files = e.dataTransfer?.files
-      if (files?.length) onAttach?.(files)
-    }
-    window.addEventListener('dragenter', onDragEnter)
-    window.addEventListener('dragover', onDragOver)
-    window.addEventListener('dragleave', onDragLeave)
-    window.addEventListener('drop', onDrop)
-    return () => {
-      window.removeEventListener('dragenter', onDragEnter)
-      window.removeEventListener('dragover', onDragOver)
-      window.removeEventListener('dragleave', onDragLeave)
-      window.removeEventListener('drop', onDrop)
-    }
-  }, [canAttach, onAttach])
-
-  // Paste files from the clipboard (e.g. a copied screenshot). Text pastes fall
-  // through to the browser so the composer behaves normally.
-  useEffect(() => {
-    const onPaste = (e) => {
-      const files = e.clipboardData?.files
-      if (!files?.length || !canAttach) return
-      e.preventDefault()
-      onAttach?.(files)
-    }
-    window.addEventListener('paste', onPaste)
-    return () => window.removeEventListener('paste', onPaste)
-  }, [canAttach, onAttach])
-
-  const scrollSig = chat.messages.map((m) => {
-    const images = (m.parts ?? []).filter((p) => p.type === 'image').map((p) => p.imageId).join(',')
-    return `${m.role}${m.content?.length ?? 0}${images}`
-  }).join('|')
-
-  useEffect(() => {
-    listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: 'smooth' })
-  }, [isStreaming, scrollSig])
 
   useEffect(() => {
     const el = composerRef.current
@@ -886,118 +927,6 @@ export function ChatWindow({ chat, user, isStreaming, draft, onDraft, onSend, on
   }
 
   return (
-    <>
-      <div className="message-list" ref={listRef} aria-label={`Conversation: ${chat.title}`}>
-        {chat.messages.length === 0 && !isStreaming && (
-          <div className="welcome" role="status">
-            <img className="welcome-hero" src="/plates/welcome-hero.png" alt="Ballerina Cappuccina waving hello" />
-            <h1 className="welcome-title">Hi! I'm Ballerina Cappuccina</h1>
-            {mode === 'tutor' ? (
-              <p className="welcome-sub">Pointe shoes on — tell me what you'd like to learn</p>
-            ) : (
-              <p className="welcome-sub">Your AI chat friend — ask me anything, or let's learn together</p>
-            )}
-          </div>
-        )}
-        {chat.messages.map((m, i) => {
-          const prev = chat.messages[i - 1]
-          const startsRun = !prev || prev.role !== m.role
-          const awaitingReply = isStreaming && i === chat.messages.length - 1 && !m.content
-          const isActiveStream = isStreaming && i === chat.messages.length - 1
-          const toolParts =
-            m.role === 'assistant'
-              ? (Array.isArray(m.parts) && m.parts.length ? m.parts : m.tools ?? [])
-              : []
-          const drafts = toolParts.map(draftFromTool).filter(Boolean)
-          const proposals = toolParts.map(deleteFromTool).filter(Boolean)
-          const images = toolParts.map(imageFromPart).filter(Boolean)
-          const userAttachments =
-            m.role === 'user'
-              ? (m.parts ?? []).map(attachmentFromPart).filter(Boolean)
-              : []
-          const segments = m.role === 'assistant' ? messageSegments(m) : []
-          // A message-level duration is only unambiguous when the whole reply
-          // is a single thinking block; with several blocks each carries its
-          // own stamp, so don't smear the total across all of them.
-          const thinkingCount = segments.filter((s) => s.type === 'thinking').length
-          return (
-            <div key={i} className={`msg-row ${m.role}${startsRun ? ' starts' : ''}`}>
-              {m.role === 'assistant' ? (
-                <div className="msg-avatar">
-                  <img src="/plates/msg-avatar.png" alt="" />
-                </div>
-              ) : (
-                <div className="msg-avatar user" aria-hidden="true">
-                  {user?.avatarUrl ? (
-                    <img src={user.avatarUrl} alt="" referrerPolicy="no-referrer" />
-                  ) : (
-                    (user?.displayName || '?').slice(0, 1).toUpperCase()
-                  )}
-                </div>
-              )}
-              {m.role === 'assistant' ? (
-                <div className="assistant-col">
-                  {segments.map((seg, si) =>
-                    seg.type === 'thinking' ? (
-                      <ThinkingBlock
-                        key={`think-${si}`}
-                        parts={seg.parts}
-                        streaming={isActiveStream}
-                        fallbackSeconds={thinkingCount === 1 ? m.thoughtSeconds : null}
-                      />
-                    ) : (
-                      <div key={`text-${si}`} className="bubble">
-                        <Markdown text={seg.text} />
-                      </div>
-                    ),
-                  )}
-                  {awaitingReply && segments.length === 0 && (
-                    <div className="bubble bubble-waiting">
-                      <StreamingDots />
-                    </div>
-                  )}
-                  {m.content && !isActiveStream && (m.failed
-                    ? <RetryMessageButton onRetry={onRetry} />
-                    : <CopyMessageButton text={m.content} />)}
-                  {images.map((img) => (
-                    <ImageCard key={img.imageId} image={img} />
-                  ))}
-                  {!isActiveStream && drafts.map((d, di) => (
-                    <DraftCard
-                      key={d.draft_id ?? di}
-                      draft={d}
-                      onSent={onDraftSent}
-                    />
-                  ))}
-                  {!isActiveStream && proposals.map((p, pi) => (
-                    <EventDeleteCard
-                      key={p.event_id ?? pi}
-                      proposal={p}
-                      onDeleted={onEventDeleted}
-                    />
-                  ))}
-                </div>
-              ) : (
-                <div className="bubble">
-                  {userAttachments.length > 0 && (
-                    <div className="msg-attachments">
-                      {userAttachments.map((a, ai) => (
-                        <AttachmentPreview key={a.id ?? ai} attachment={a} />
-                      ))}
-                    </div>
-                  )}
-                  {(m.content || userAttachments.length === 0) && (
-                    <p>
-                      <EmojiText text={m.content || '…'} />
-                    </p>
-                  )}
-                </div>
-              )}
-            </div>
-          )
-        })}
-      </div>
-
       <form
         className="composer"
         onSubmit={(e) => {
@@ -1073,6 +1002,128 @@ export function ChatWindow({ chat, user, isStreaming, draft, onDraft, onSend, on
           <EffortSelector effort={effort} onChange={onEffort} disabled={isStreaming} />
         </div>
       </form>
+  )
+}
+
+export function ChatWindow({ chat, user, isStreaming, draft, onDraft, onSend, onRetry, onDraftSent, onEventDeleted, inputRef, effort, onEffort, mode, onMode, attachments = [], uploading = false, attachError = '', onAttach, onRemoveAttachment }) {
+  const listRef = useRef(null)
+
+  const canAttach = !isStreaming && !uploading
+
+  // Window-level drag & drop. dragenter/dragleave fire for every child element
+  // crossed, so a depth counter keeps the overlay visible until we really leave.
+  const dragDepth = useRef(0)
+  const [dragActive, setDragActive] = useState(false)
+
+  useEffect(() => {
+    const hasFiles = (e) => Array.from(e.dataTransfer?.types || []).includes('Files')
+    const onDragEnter = (e) => {
+      if (!hasFiles(e)) return
+      e.preventDefault()
+      if (!canAttach) return
+      dragDepth.current += 1
+      setDragActive(true)
+    }
+    const onDragOver = (e) => {
+      // Always prevent default for files, or the browser would open the file
+      // instead of letting us handle the drop.
+      if (!hasFiles(e)) return
+      e.preventDefault()
+      e.dataTransfer.dropEffect = canAttach ? 'copy' : 'none'
+    }
+    const onDragLeave = () => {
+      dragDepth.current = Math.max(0, dragDepth.current - 1)
+      if (dragDepth.current === 0) setDragActive(false)
+    }
+    const onDrop = (e) => {
+      if (!hasFiles(e)) return
+      e.preventDefault()
+      dragDepth.current = 0
+      setDragActive(false)
+      if (!canAttach) return
+      const files = e.dataTransfer?.files
+      if (files?.length) onAttach?.(files)
+    }
+    window.addEventListener('dragenter', onDragEnter)
+    window.addEventListener('dragover', onDragOver)
+    window.addEventListener('dragleave', onDragLeave)
+    window.addEventListener('drop', onDrop)
+    return () => {
+      window.removeEventListener('dragenter', onDragEnter)
+      window.removeEventListener('dragover', onDragOver)
+      window.removeEventListener('dragleave', onDragLeave)
+      window.removeEventListener('drop', onDrop)
+    }
+  }, [canAttach, onAttach])
+
+  // Paste files from the clipboard (e.g. a copied screenshot). Text pastes fall
+  // through to the browser so the composer behaves normally.
+  useEffect(() => {
+    const onPaste = (e) => {
+      const files = e.clipboardData?.files
+      if (!files?.length || !canAttach) return
+      e.preventDefault()
+      onAttach?.(files)
+    }
+    window.addEventListener('paste', onPaste)
+    return () => window.removeEventListener('paste', onPaste)
+  }, [canAttach, onAttach])
+
+  const scrollSig = chat.messages.map((m) => {
+    const images = (m.parts ?? []).filter((p) => p.type === 'image').map((p) => p.imageId).join(',')
+    return `${m.role}${m.content?.length ?? 0}${images}`
+  }).join('|')
+
+  useEffect(() => {
+    listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: 'smooth' })
+  }, [isStreaming, scrollSig])
+
+
+
+  return (
+    <>
+      <div className="message-list" ref={listRef} aria-label={`Conversation: ${chat.title}`}>
+        {chat.messages.length === 0 && !isStreaming && (
+          <div className="welcome" role="status">
+            <img className="welcome-hero" src="/plates/welcome-hero.png" alt="Ballerina Cappuccina waving hello" />
+            <h1 className="welcome-title">Hi! I'm Ballerina Cappuccina</h1>
+            {mode === 'tutor' ? (
+              <p className="welcome-sub">Pointe shoes on — tell me what you'd like to learn</p>
+            ) : (
+              <p className="welcome-sub">Your AI chat friend — ask me anything, or let's learn together</p>
+            )}
+          </div>
+        )}
+        {chat.messages.map((m, i) => (
+          <MessageRow
+            key={i}
+            message={m}
+            prev={chat.messages[i - 1]}
+            isActiveStream={isStreaming && i === chat.messages.length - 1}
+            user={user}
+            onRetry={onRetry}
+            onDraftSent={onDraftSent}
+            onEventDeleted={onEventDeleted}
+          />
+        ))}
+      </div>
+
+      <Composer
+        draft={draft}
+        onDraft={onDraft}
+        onSend={onSend}
+        isStreaming={isStreaming}
+        uploading={uploading}
+        attachments={attachments}
+        attachError={attachError}
+        onAttach={onAttach}
+        onRemoveAttachment={onRemoveAttachment}
+        mode={mode}
+        onMode={onMode}
+        effort={effort}
+        onEffort={onEffort}
+        inputRef={inputRef}
+      />
 
       {dragActive && (
         <div className="drop-overlay" aria-hidden="true">

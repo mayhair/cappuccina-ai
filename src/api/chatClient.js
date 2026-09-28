@@ -1,5 +1,4 @@
 // Conversation boundary — talks to the FastAPI backend (see backend/app/main.py).
-// POST /api/v1/chat            -> { role, content, reasoning, tool_calls }
 // POST /api/v1/chat/stream SSE -> event: start | token {content} | reasoning {content}
 //                                 | tool_call {id,name,display,args,label}
 //                                 | tool_result {id,name,content,ok}
@@ -18,17 +17,6 @@ function buildRequest({ chatId, messages, reasoning, mode, subject, generateTitl
   }
 }
 
-export async function send({ chatId, messages, reasoning, mode, subject }) {
-  const res = await fetch('/api/v1/chat', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    credentials: 'include',
-    body: JSON.stringify(buildRequest({ chatId, messages, reasoning, mode, subject })),
-  })
-  if (!res.ok) throw new Error(`chat failed: ${res.status}`)
-  return res.json()
-}
-
 // handlers: { onToken, onReasoning, onToolCall, onToolResult, onImage, onTitle, onDone }
 export async function sendStreaming({ chatId, messages, reasoning, mode, subject, generateTitle }, handlers = {}) {
   const { onToken, onReasoning, onToolCall, onToolResult, onImage, onTitle, onDone } = handlers
@@ -43,8 +31,6 @@ export async function sendStreaming({ chatId, messages, reasoning, mode, subject
   const reader = res.body.getReader()
   const decoder = new TextDecoder()
   let buffer = ''
-  let full = ''
-  let thinking = ''
   for (;;) {
     const { done, value } = await reader.read()
     if (done) break
@@ -62,13 +48,9 @@ export async function sendStreaming({ chatId, messages, reasoning, mode, subject
       if (!data || data === '{}') continue
       const payload = JSON.parse(data)
       if (event === 'token') {
-        const word = payload.content ?? ''
-        full += word
-        onToken?.(word)
+        onToken?.(payload.content ?? '')
       } else if (event === 'reasoning') {
-        const piece = payload.content ?? ''
-        thinking += piece
-        onReasoning?.(piece)
+        onReasoning?.(payload.content ?? '')
       } else if (event === 'tool_call') {
         onToolCall?.(payload)
       } else if (event === 'tool_result') {
@@ -80,7 +62,6 @@ export async function sendStreaming({ chatId, messages, reasoning, mode, subject
       }
     }
   }
-  return { role: 'assistant', content: full, reasoning: thinking }
 }
 
 // ---------- chat CRUD (server-side storage) ----------

@@ -109,13 +109,10 @@ def _image_size(requested: str = "") -> str:
     return size if size in IMAGE_SIZES else DEFAULT_IMAGE_SIZE
 
 
-def _image_dimensions(size: str = "") -> tuple[int | None, int | None]:
+def _image_dimensions(size: str = "") -> tuple[int, int]:
     """Pixel width/height for a resolution, for metadata."""
-    try:
-        width, height = _image_size(size).split("x", 1)
-        return int(width), int(height)
-    except (ValueError, AttributeError):
-        return None, None
+    width, height = _image_size(size).split("x", 1)
+    return int(width), int(height)
 
 
 def _image_bytes_from_response(data: dict) -> tuple[bytes, str]:
@@ -207,6 +204,43 @@ def _load_edit_source(
     return None
 
 
+def _save_image_result(
+    user_id: str,
+    chat_id: str,
+    raw: bytes,
+    *,
+    mime: str,
+    prompt: str,
+    size: str,
+    transparent_background: bool,
+    status: str,
+    save_error: str,
+    extra: dict | None = None,
+) -> str:
+    """Persist one generated/edited picture and return the model-facing JSON."""
+    width, height = _image_dimensions(size)
+    try:
+        image = db.create_image(
+            user_id, chat_id, raw,
+            mime=mime, width=width, height=height, prompt=prompt,
+        )
+    except OSError as exc:
+        return f"Couldn't save {save_error} ({exc})."
+    result: dict = {"status": status, "image_id": image["id"]}
+    if extra:
+        result.update(extra)
+    result.update(
+        {
+            "prompt": prompt,
+            "size": size,
+            "background": "transparent" if transparent_background else "auto",
+            "width": image["width"],
+            "height": image["height"],
+        }
+    )
+    return json.dumps(result)
+
+
 @tool
 def generate_image(
     prompt: str,
@@ -226,24 +260,16 @@ def generate_image(
         raw, mime = _openai_generate_image(prompt, chosen_size, transparent_background)
     except (httpx.HTTPError, ValueError) as exc:
         return f"Couldn't draw that right now ({exc})."
-    width, height = _image_dimensions(chosen_size)
-    try:
-        image = db.create_image(
-            user_id, chat_id, raw,
-            mime=mime, width=width, height=height, prompt=prompt,
-        )
-    except OSError as exc:
-        return f"Couldn't save the drawing ({exc})."
-    return json.dumps(
-        {
-            "status": "image_generated",
-            "image_id": image["id"],
-            "prompt": prompt,
-            "size": chosen_size,
-            "background": "transparent" if transparent_background else "auto",
-            "width": image["width"],
-            "height": image["height"],
-        }
+    return _save_image_result(
+        user_id,
+        chat_id,
+        raw,
+        mime=mime,
+        prompt=prompt,
+        size=chosen_size,
+        transparent_background=transparent_background,
+        status="image_generated",
+        save_error="the drawing",
     )
 
 
@@ -276,25 +302,17 @@ def image_edit(
         )
     except (httpx.HTTPError, ValueError) as exc:
         return f"Couldn't edit that picture right now ({exc})."
-    width, height = _image_dimensions(chosen_size)
-    try:
-        image = db.create_image(
-            user_id, chat_id, raw,
-            mime=edited_mime, width=width, height=height, prompt=prompt,
-        )
-    except OSError as exc:
-        return f"Couldn't save the edited picture ({exc})."
-    return json.dumps(
-        {
-            "status": "image_edited",
-            "image_id": image["id"],
-            "source_image_id": image_id or None,
-            "prompt": prompt,
-            "size": chosen_size,
-            "background": "transparent" if transparent_background else "auto",
-            "width": image["width"],
-            "height": image["height"],
-        }
+    return _save_image_result(
+        user_id,
+        chat_id,
+        raw,
+        mime=edited_mime,
+        prompt=prompt,
+        size=chosen_size,
+        transparent_background=transparent_background,
+        status="image_edited",
+        save_error="the edited picture",
+        extra={"source_image_id": image_id or None},
     )
 
 

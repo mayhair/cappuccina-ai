@@ -216,8 +216,6 @@ def extract_text(filename: str, data: bytes) -> str:
             text = _xlsx_text(data)
         else:
             text = _plain_text(data)
-    except UnsupportedDocument:
-        raise
     except Exception as exc:  # malformed/encrypted file, parser-specific errors
         raise UnsupportedDocument(f"Couldn't read that {ext} file ({exc}).") from exc
     return _truncate(text.strip())

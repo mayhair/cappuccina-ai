@@ -95,7 +95,7 @@ export default function App() {
     }
   }, [])
 
-  const chat = useChatController(Boolean(user), user?.id)
+  const chat = useChatController(Boolean(user))
 
   const handleLogout = async () => {
     tts.stop()
@@ -227,7 +227,6 @@ export default function App() {
           effort={effort}
           onEffort={setEffort}
           mode={activeChat.mode ?? 'chat'}
-          subject={activeChat.subject}
           onMode={(mode, subject) => setMode(activeChatId, mode, subject)}
           attachments={attachments}
           uploading={uploading}

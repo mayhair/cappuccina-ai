@@ -1,5 +1,6 @@
 from langchain_core.messages import HumanMessage, SystemMessage
 
+from agent.content import flatten_content
 from app.config import TITLE_MODEL_ID
 
 from agent.model import make_model
@@ -13,12 +14,6 @@ TITLE_SYSTEM_PROMPT = (
 
 MAX_WORDS = 8
 MAX_CHARS = 64
-
-
-def _content_text(content) -> str:
-    if isinstance(content, str):
-        return content
-    return "".join(part.get("text", "") for part in content if isinstance(part, dict))
 
 
 def _clean(raw: str) -> str:
@@ -54,7 +49,7 @@ async def generate_title(user_message: str, assistant_reply: str) -> str:
         try:
             model = make_model(reasoning=reasoning, model_id=TITLE_MODEL_ID)
             result = await model.ainvoke(messages)
-            return _clean(_content_text(getattr(result, "content", "")))
+            return _clean(flatten_content(getattr(result, "content", "")))
         except Exception:
             if reasoning == "none":
                 _none_rejected = True

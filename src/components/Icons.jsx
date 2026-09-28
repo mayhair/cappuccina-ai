@@ -189,14 +189,6 @@ export function BulbIcon(props) {
   )
 }
 
-export function QuoteIcon(props) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>
-      <path d="M21 12a8 8 0 0 1-11.6 7.2L4 20l1.2-4.2A8 8 0 1 1 21 12Z" />
-    </svg>
-  )
-}
-
 export function GoogleIcon(props) {
   // Official Google "G" mark, fixed brand colors (not currentColor).
   return (
