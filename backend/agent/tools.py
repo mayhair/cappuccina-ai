@@ -232,17 +232,18 @@ def _character_refs(
     lore book's forgiving matching. Characters without a reference file are
     skipped, duplicates are collapsed by id, and the list is capped at
     ``MAX_CHARACTER_REFS``. Unreadable files are skipped rather than failing the
-    whole call.
+    whole call. The assistant counts too, so naming her attaches her own look.
     """
     if not CHARACTER_REF_IMAGES:
         return []
+    candidates = lorebook.reference_characters()
     refs: list[tuple[lorebook.Character, tuple[str, bytes, str]]] = []
     seen: set[str] = set()
     for raw_name in names.replace(";", ",").split(","):
         name = raw_name.strip()
         if not name:
             continue
-        for character in lorebook.find(name):
+        for character in lorebook.find(name, candidates):
             if character.id in seen or character.ref_path is None:
                 continue
             mime = _REF_MIME_BY_SUFFIX.get(character.ref_path.suffix.lower())
@@ -321,7 +322,7 @@ def generate_image(
     transparent_background: bool = False,
     characters: str = "",
 ) -> str:
-    """Draw an original picture from a text description and show it in the chat. Use this whenever the user asks you to draw, paint, sketch, or make a picture or image of something. Describe the scene vividly in `prompt`: subject, style, colors, mood. Optionally pick a `size`: "1024x1024" (square, default), "1536x1024" (wide), or "1024x1536" (tall) — match the subject's shape. When the picture shows one or more characters from your lore book, pass their names in `characters`, comma-separated (for example "Tralalero Tralala, Bombardiro Crocodilo"), so each keeps its official look; leave it empty for anything else. Set `transparent_background` to true when the user wants a cut-out subject with no background (for example a sticker, logo, or icon) — an OpenAI-only option that returns a PNG with transparency. The picture is saved automatically and appears in the chat — tell the user it's ready. Never invent an image_id yourself; the returned JSON describes the saved picture."""
+    """Draw an original picture from a text description and show it in the chat. Use this whenever the user asks you to draw, paint, sketch, or make a picture or image of something. Describe the scene vividly in `prompt`: subject, style, colors, mood. Optionally pick a `size`: "1024x1024" (square, default), "1536x1024" (wide), or "1024x1536" (tall) — match the subject's shape. When the picture shows one or more characters from your lore book, pass their names in `characters`, comma-separated (for example "Tralalero Tralala, Bombardiro Crocodilo"), so each keeps its official look; pass "Ballerina Cappuccina" for a picture of you, and leave it empty for anything else. Set `transparent_background` to true when the user wants a cut-out subject with no background (for example a sticker, logo, or icon) — an OpenAI-only option that returns a PNG with transparency. The picture is saved automatically and appears in the chat — tell the user it's ready. Never invent an image_id yourself; the returned JSON describes the saved picture."""
     user_id = _user_id(config)
     chat_id = _chat_id(config)
     if not user_id or not chat_id:
@@ -368,7 +369,7 @@ def image_edit(
     transparent_background: bool = False,
     characters: str = "",
 ) -> str:
-    """Edit or modify a picture that already exists and show the result in the chat. Use this when the user asks to change, restyle, add to, remove from, or otherwise alter an image. Pass exactly one source: `image_id` for a picture made earlier in this chat (the id from a generate_image or image_edit result), or `attachment_id` for an image the user attached. Describe the change in `prompt`. When the picture shows one or more characters from your lore book, pass their names in `characters`, comma-separated, so each keeps its official look; leave it empty for anything else. Optionally set `size` to "1024x1024" (square, default), "1536x1024" (wide), or "1024x1536" (tall); omit it to keep the configured default. Set `transparent_background` to true when the user wants the result on a transparent background (for example removing a background to make a cut-out) — an OpenAI-only option that returns a PNG with transparency. Never invent ids yourself. The edited picture is saved as a new image and appears in the chat — tell the user it's ready. The returned JSON describes the saved picture."""
+    """Edit or modify a picture that already exists and show the result in the chat. Use this when the user asks to change, restyle, add to, remove from, or otherwise alter an image. Pass exactly one source: `image_id` for a picture made earlier in this chat (the id from a generate_image or image_edit result), or `attachment_id` for an image the user attached. Describe the change in `prompt`. When the picture shows one or more characters from your lore book, pass their names in `characters`, comma-separated, so each keeps its official look; pass "Ballerina Cappuccina" for a picture of you, and leave it empty for anything else. Optionally set `size` to "1024x1024" (square, default), "1536x1024" (wide), or "1024x1536" (tall); omit it to keep the configured default. Set `transparent_background` to true when the user wants the result on a transparent background (for example removing a background to make a cut-out) — an OpenAI-only option that returns a PNG with transparency. Never invent ids yourself. The edited picture is saved as a new image and appears in the chat — tell the user it's ready. The returned JSON describes the saved picture."""
     user_id = _user_id(config)
     chat_id = _chat_id(config)
     if not user_id or not chat_id:

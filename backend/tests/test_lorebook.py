@@ -117,6 +117,38 @@ def test_catalog_marks_characters_with_a_reference(tmp_path):
     )
 
 
+# ---------- the assistant's own look ----------
+
+
+def test_assistant_reference_uses_refs_folder(tmp_path):
+    _corpus(tmp_path)
+    ref = _with_ref(tmp_path, lorebook.ASSISTANT_ID, ".png")
+    assistant = lorebook.assistant_reference(tmp_path)
+    assert assistant is not None
+    assert assistant.name == "Ballerina Cappuccina"
+    assert assistant.ref_path == ref
+
+
+def test_assistant_reference_is_none_without_a_file(tmp_path):
+    _corpus(tmp_path)
+    assert lorebook.assistant_reference(tmp_path) is None
+
+
+def test_reference_characters_include_the_assistant(tmp_path):
+    _corpus(tmp_path)
+    _with_ref(tmp_path, lorebook.ASSISTANT_ID, ".png")
+    ids = {c.id for c in lorebook.reference_characters(tmp_path)}
+    assert lorebook.ASSISTANT_ID in ids
+    assert "test-character" in ids
+
+
+def test_reference_characters_skip_the_assistant_without_a_look(tmp_path):
+    characters = _corpus(tmp_path)
+    ids = {c.id for c in lorebook.reference_characters(tmp_path)}
+    assert lorebook.ASSISTANT_ID not in ids
+    assert {c.id for c in characters} == {"test-character", "second"}
+
+
 # ---------- find ----------
 
 

@@ -994,3 +994,62 @@ def test_openai_edit_sends_image_array_for_multiple(monkeypatch):
         ("image[]", ("a.png", FAKE_PNG, "image/png")),
         ("image[]", ("b.png", FAKE_PNG, "image/png")),
     ]
+
+
+def _assistant_with_ref(tmp_path):
+    from agent import lorebook
+
+    ref = tmp_path / "ballerina-cappuccina.png"
+    ref.write_bytes(FAKE_PNG)
+    return lorebook.Character(
+        id=lorebook.ASSISTANT_ID,
+        name="Ballerina Cappuccina",
+        aliases=("Cappuccina", "yourself"),
+        blurb="Cappuccina herself.",
+        body="",
+        ref_path=ref,
+    )
+
+
+def test_generate_image_attaches_assistant_reference(
+    isolated_db, monkeypatch, tmp_path
+):
+    from agent import lorebook, tools
+
+    user, chat = _user_and_chat()
+    monkeypatch.setattr(
+        lorebook, "reference_characters", lambda folder=None: [_assistant_with_ref(tmp_path)]
+    )
+    monkeypatch.setattr(tools, "CHARACTER_REF_IMAGES", True)
+    calls = []
+    monkeypatch.setattr(
+        tools,
+        "_openai_edit_image",
+        lambda prompt, images, size, transparent_background=False: (
+            calls.append(images) or (b"drawn", "image/png")
+        ),
+    )
+    monkeypatch.setattr(
+        tools,
+        "_openai_generate_image",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("should use edit")),
+    )
+
+    out = tools.generate_image.invoke(
+        {"prompt": "a self portrait", "characters": "Ballerina Cappuccina"},
+        config={"configurable": {"user_id": user["id"], "chat_id": chat["id"]}},
+    )
+    assert json.loads(out)["character_refs"] == [lorebook.ASSISTANT_ID]
+    assert calls == [[("ballerina-cappuccina.png", FAKE_PNG, "image/png")]]
+
+
+def test_character_references_match_the_assistant_alias(monkeypatch, tmp_path):
+    from agent import lorebook, tools
+
+    monkeypatch.setattr(
+        lorebook, "reference_characters", lambda folder=None: [_assistant_with_ref(tmp_path)]
+    )
+    monkeypatch.setattr(tools, "CHARACTER_REF_IMAGES", True)
+
+    refs = tools._character_refs("yourself")
+    assert [c.id for c, _ in refs] == [lorebook.ASSISTANT_ID]

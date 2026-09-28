@@ -21,7 +21,9 @@ Rules:
 An optional official look lives in ``lore/characters/refs/``: one image named
 after the markdown file stem (``refs/espressona-signora.png``). The image tools
 attach it when the model names the character, so drawings stay consistent.
-Extensions are tried in ``_REF_EXTENSIONS`` order.
+Extensions are tried in ``_REF_EXTENSIONS`` order. The assistant has no markdown
+file of her own; her look is ``refs/ballerina-cappuccina.*`` and is attached
+when the model draws her.
 
 The book is loaded once at import; edit the files and restart to change it.
 """
@@ -38,6 +40,12 @@ LORE_DIR = Path(__file__).resolve().parent / "lore"
 CHARACTERS_DIR = LORE_DIR / "characters"
 REFS_DIRNAME = "refs"
 _REF_EXTENSIONS = (".png", ".jpg", ".jpeg", ".webp")
+
+# The assistant herself is not in the character corpus — persona.md owns her —
+# so she gets a stub character for reference matching. Her look lives in
+# refs/ballerina-cappuccina.* like everyone else's.
+ASSISTANT_ID = "ballerina-cappuccina"
+ASSISTANT_NAMES = ("Ballerina Cappuccina", "Cappuccina", "yourself")
 
 _HEADER_RE = re.compile(r"^(aliases|blurb)\s*:\s*(.*)$", re.IGNORECASE)
 _ALIAS_SPLIT_RE = re.compile(r"[,;]")
@@ -162,6 +170,35 @@ def load_characters(directory: Path | None = None) -> list[Character]:
     return characters
 
 
+def assistant_reference(folder: Path | None = None) -> Character | None:
+    """The assistant's own reference look, or None when no image is on file."""
+    directory = CHARACTERS_DIR if folder is None else Path(folder)
+    ref = _ref_path(directory, ASSISTANT_ID)
+    if ref is None:
+        return None
+    return Character(
+        id=ASSISTANT_ID,
+        name=ASSISTANT_NAMES[0],
+        aliases=ASSISTANT_NAMES[1:],
+        blurb="Cappuccina herself.",
+        body="",
+        ref_path=ref,
+    )
+
+
+def reference_characters(folder: Path | None = None) -> list[Character]:
+    """The corpus plus the assistant, for reference-image matching.
+
+    Unlike ``find`` on the corpus alone, this is only for the image tools: the
+    assistant is not a lore-book entry, so ``lore_lookup`` never sees this stub.
+    """
+    characters = list(CHARACTERS) if folder is None else load_characters(folder)
+    assistant = assistant_reference(folder)
+    if assistant is not None:
+        characters.append(assistant)
+    return characters
+
+
 CHARACTERS = load_characters()
 
 
@@ -185,7 +222,8 @@ _PROMPT_INTRO = (
     "get the full story first, then tell it in your own voice, like a story about old "
     "neighbours — never read the entry out like a file.\n\n"
     "When you draw one of them, pass their name in the `characters` argument of "
-    "generate_image or image_edit so they keep their official look.\n\n"
+    "generate_image or image_edit so they keep their official look; when you draw "
+    "yourself, pass \"Ballerina Cappuccina\".\n\n"
     "Questions about anyone else — cartoon characters from other shows, real people, "
     "historical figures, or anything from the wider world — are ordinary questions. "
     "Answer them from what you know, or use web_search when you need current facts. "
