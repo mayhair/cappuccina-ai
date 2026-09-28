@@ -5,6 +5,8 @@ from langchain_core.runnables import RunnableConfig
 
 r = solve_equation.invoke({"expression": "2*x + 3 = 11"})
 assert "4" in r, r
+r3 = solve_equation.invoke({"expression": "7x - 5 = 44"})
+assert "7" in r3, r3
 r2 = solve_equation.invoke({"expression": "1/4 + 1/8"})
 assert str(sympify("3/8")) in r2, r2
-print("tools OK:", r, "|", r2)
+print("tools OK:", r, "|", r3, "|", r2)

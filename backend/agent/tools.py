@@ -7,7 +7,13 @@ import httpx
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import tool
 from parallel import Parallel
-from sympy import Eq, solve, sympify
+from sympy import Eq, solve
+from sympy.parsing.sympy_parser import (
+    convert_xor,
+    implicit_multiplication_application,
+    parse_expr,
+    standard_transformations,
+)
 
 from agent import lorebook
 from app import calendar, db, gmail
@@ -20,15 +26,40 @@ from app.config import (
 from app.google_oauth import ServiceNotConnected
 
 
-# ponytail: sympify is eval-adjacent; output is text-only so risk is low. Add a symbols whitelist if tool input ever becomes structured/persistent.
+# ponytail: parse_expr is eval-adjacent; output is text-only so risk is low. Add a symbols whitelist if tool input ever becomes structured/persistent.
+# The implicit-multiplication transform is what lets "7x" and "2(x+3)" parse.
+_SYMTRANSFORMS = standard_transformations + (
+    implicit_multiplication_application,
+    convert_xor,
+)
+
+
+def _parse_math(text: str):
+    return parse_expr(text, transformations=_SYMTRANSFORMS)
+
+
 @tool
 def solve_equation(expression: str) -> str:
-    """Solve a math expression or equation. Use for any math the user asks to compute or solve."""
-    if "=" in expression:
-        left, right = expression.split("=", 1)
-        solutions = solve(Eq(sympify(left), sympify(right)))
-        return f"x = {solutions}" if solutions else "No solution found."
-    return str(sympify(expression))
+    """Solve a math expression or equation. Accepts natural algebra such as "7x - 5 = 44", "2(x+3) = 14" or "1/4 + 1/8". Use for any math the user asks to compute or solve."""
+    text = (expression or "").strip()
+    if not text:
+        return "I need a math expression or equation to work with."
+    try:
+        if "=" in text:
+            left, right = text.split("=", 1)
+            equation = Eq(_parse_math(left), _parse_math(right))
+            symbols = sorted(equation.free_symbols, key=lambda s: s.name)
+            if not symbols:
+                return "That equation has no unknown to solve for."
+            solutions = solve(equation, symbols[0])
+            if not solutions:
+                return "No solution found."
+            return f"{symbols[0]} = " + ", ".join(str(s) for s in solutions)
+        return str(_parse_math(text))
+    except (SyntaxError, ValueError, TypeError, IndexError, ZeroDivisionError):
+        return "I couldn't understand that math. Try writing it like '7x - 5 = 44' or '1/4 + 1/8'."
+    except Exception:
+        return "I couldn't solve that one."
 
 
 @tool
