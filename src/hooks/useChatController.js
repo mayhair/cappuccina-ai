@@ -11,6 +11,7 @@ import {
 import tts from '../lib/tts'
 
 const EFFORT_KEY = 'cappuccina-effort'
+const ACTIVE_CHAT_KEY = 'cappuccina-active-chat'
 const DEFAULT_TITLE = 'New chat'
 const STREAM_FAILED_MESSAGE = 'Oh no, my espresso machine hiccuped. Try again in a moment! 💕'
 export const MAX_ATTACHMENTS = 5
@@ -34,6 +35,15 @@ function loadEffort() {
     // storage unavailable
   }
   return 'High'
+}
+
+function loadActiveChatId() {
+  try {
+    return localStorage.getItem(ACTIVE_CHAT_KEY)
+  } catch {
+    // storage unavailable
+  }
+  return null
 }
 
 export function makeChat() {
@@ -112,8 +122,11 @@ export function useChatController(enabled) {
         const stored = await listChats()
         if (cancelled) return
         if (Array.isArray(stored) && stored.length > 0) {
-          setChats(stored.map(normalizeChat))
-          setActiveChatId(stored[0].id)
+          const restored = stored.map(normalizeChat)
+          setChats(restored)
+          const saved = loadActiveChatId()
+          // Fall back to the newest chat when the saved one is gone.
+          setActiveChatId(restored.some((c) => c.id === saved) ? saved : stored[0].id)
         } else {
           // Fresh account: keep the empty placeholder local. It is only
           // persisted once the user sends the first message.
@@ -136,6 +149,19 @@ export function useChatController(enabled) {
       // storage full or unavailable
     }
   }, [effort])
+
+  // Remember the selected chat so a reload lands on the same conversation.
+  // Pending (memory-only) chats have no server id and are skipped.
+  useEffect(() => {
+    if (!activeChatId) return
+    const chat = chatsRef.current.find((c) => c.id === activeChatId)
+    if (!chat || chat.pending) return
+    try {
+      localStorage.setItem(ACTIVE_CHAT_KEY, activeChatId)
+    } catch {
+      // storage full or unavailable
+    }
+  }, [activeChatId])
 
   const activeChat = chats.find((c) => c.id === activeChatId) ?? chats[0]
 
