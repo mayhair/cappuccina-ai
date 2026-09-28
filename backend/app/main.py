@@ -668,7 +668,7 @@ async def get_image(image_id: str, user=Depends(current_user)):
     return FileResponse(
         path,
         media_type=row["mime"],
-        headers={"Cache-Control": "private, max-age=31536000, immutable"},
+        headers={"Cache-Control": "private, max-age=5184000, immutable"},
     )
 
 

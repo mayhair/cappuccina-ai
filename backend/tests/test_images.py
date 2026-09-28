@@ -333,7 +333,7 @@ def test_serve_image_round_trip(signed_in):
     assert res.status_code == 200
     assert res.content == FAKE_PNG
     assert res.headers["content-type"] == "image/png"
-    assert res.headers["cache-control"] == "private, max-age=31536000, immutable"
+    assert res.headers["cache-control"] == "private, max-age=5184000, immutable"
 
     assert signed_in.get("/api/v1/images/does-not-exist").status_code == 404
 
