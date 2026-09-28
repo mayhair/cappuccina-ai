@@ -655,15 +655,21 @@ async def delete_chat(chat_id: str, user=Depends(current_user)) -> dict:
 async def get_image(image_id: str, user=Depends(current_user)):
     """Serve one generated image. Authorized per user (unlike a static mount)
     so private chat images stay private; the session cookie is sent
-    automatically by same-origin <img> tags. FileResponse adds ETag /
-    Last-Modified caching, so revisiting a chat doesn't re-download images."""
+    automatically by same-origin <img> tags. Images are immutable (a new
+    generation gets a new id), so alongside FileResponse's ETag / Last-Modified
+    we send an immutable Cache-Control. ``private`` keeps shared caches (for
+    example Cloudflare) from storing it; it is a browser fallback only."""
     row = db.get_image(user["id"], image_id)
     if row is None:
         raise HTTPException(status_code=404, detail="Image not found")
     path = db.image_file_path(row["id"], row["mime"])
     if not path.is_file():
         raise HTTPException(status_code=404, detail="Image not found")
-    return FileResponse(path, media_type=row["mime"])
+    return FileResponse(
+        path,
+        media_type=row["mime"],
+        headers={"Cache-Control": "private, max-age=31536000, immutable"},
+    )
 
 
 # ---------- attachments (user uploads) ----------
