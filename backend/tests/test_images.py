@@ -1053,3 +1053,86 @@ def test_character_references_match_the_assistant_alias(monkeypatch, tmp_path):
 
     refs = tools._character_refs("yourself")
     assert [c.id for c, _ in refs] == [lorebook.ASSISTANT_ID]
+
+
+# ---------- image_edit resolution ----------
+
+
+def _capture_edit_size(monkeypatch):
+    from agent import tools
+
+    seen = []
+    monkeypatch.setattr(
+        tools,
+        "_openai_edit_image",
+        lambda prompt, images, size, transparent_background=False: (
+            seen.append(size) or (b"edited", "image/png")
+        ),
+    )
+    return seen
+
+
+def test_edit_size_defaults(isolated_db):
+    from agent import tools
+
+    assert tools._edit_size("", None) == "1024x1024"
+    assert tools._edit_size("1536×1024", None) == "1536x1024"
+    assert tools._edit_size("huge", (1536, 1024)) == "1536x1024"
+    assert tools._edit_size("", (900, 900)) == "1024x1024"
+
+
+def test_image_edit_defaults_to_the_source_aspect_ratio(isolated_db, monkeypatch):
+    from agent import tools
+
+    user, chat = _user_and_chat()
+    config = {"configurable": {"user_id": user["id"], "chat_id": chat["id"]}}
+    seen = _capture_edit_size(monkeypatch)
+
+    for width, height in ((1536, 1024), (1024, 1536), (1024, 1024), (800, 600)):
+        source = db.create_image(
+            user["id"], chat["id"], FAKE_PNG, width=width, height=height
+        )
+        tools.image_edit.invoke(
+            {"prompt": "tweak", "image_id": source["id"]}, config=config
+        )
+
+    assert seen == ["1536x1024", "1024x1536", "1024x1024", "1536x1024"]
+
+
+def test_image_edit_reads_attachment_dimensions(isolated_db, monkeypatch):
+    from io import BytesIO
+
+    from PIL import Image
+
+    from agent import tools
+
+    user, chat = _user_and_chat()
+    buffer = BytesIO()
+    Image.new("RGB", (1024, 1536)).save(buffer, format="PNG")
+    attachment = db.create_attachment(
+        user["id"], chat["id"], "tall.png", buffer.getvalue(),
+        kind="image", mime="image/png",
+    )
+    seen = _capture_edit_size(monkeypatch)
+
+    tools.image_edit.invoke(
+        {"prompt": "tweak", "attachment_id": attachment["id"]},
+        config={"configurable": {"user_id": user["id"], "chat_id": chat["id"]}},
+    )
+    assert seen == ["1024x1536"]
+
+
+def test_image_edit_explicit_size_overrides_the_source(isolated_db, monkeypatch):
+    from agent import tools
+
+    user, chat = _user_and_chat()
+    source = db.create_image(
+        user["id"], chat["id"], FAKE_PNG, width=1536, height=1024
+    )
+    seen = _capture_edit_size(monkeypatch)
+
+    tools.image_edit.invoke(
+        {"prompt": "tweak", "image_id": source["id"], "size": "1024x1024"},
+        config={"configurable": {"user_id": user["id"], "chat_id": chat["id"]}},
+    )
+    assert seen == ["1024x1024"]

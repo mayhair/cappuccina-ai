@@ -119,16 +119,59 @@ _REF_MIME_BY_SUFFIX = {
 }
 
 
+def _normalized_size(requested: str = "") -> str:
+    """A caller-supplied resolution, case- and separator-normalized."""
+    return (requested or "").strip().lower().replace("×", "x")
+
+
 def _image_size(requested: str = "") -> str:
-    """Validated resolution for an image API call, defaulting to the square."""
-    size = (requested or "").strip().lower().replace("×", "x")
+    """Validated resolution for a new drawing, defaulting to the square."""
+    size = _normalized_size(requested)
     return size if size in IMAGE_SIZES else DEFAULT_IMAGE_SIZE
+
+
+def _aspect_ratio(size: str) -> float:
+    width, height = (int(part) for part in size.split("x", 1))
+    return width / height
+
+
+def _closest_aspect(width: int, height: int) -> str:
+    """The supported resolution whose aspect ratio is nearest to (width, height)."""
+    target = width / height
+    return min(IMAGE_SIZES, key=lambda size: abs(_aspect_ratio(size) - target))
+
+
+def _edit_size(requested: str, source_size: tuple[int, int] | None) -> str:
+    """The edit resolution: the caller's pick, else the source's aspect ratio.
+
+    Editing keeps the picture roughly as it was instead of snapping every result
+    to a square, unless the model explicitly asks for a different `size`.
+    """
+    size = _normalized_size(requested)
+    if size in IMAGE_SIZES:
+        return size
+    if source_size:
+        return _closest_aspect(*source_size)
+    return DEFAULT_IMAGE_SIZE
 
 
 def _image_dimensions(size: str = "") -> tuple[int, int]:
     """Pixel width/height for a resolution, for metadata."""
     width, height = _image_size(size).split("x", 1)
     return int(width), int(height)
+
+
+def _image_pixels(raw: bytes) -> tuple[int, int] | None:
+    """Pixel width/height of an encoded image, or None if it can't be read."""
+    try:
+        import io
+
+        from PIL import Image
+
+        with Image.open(io.BytesIO(raw)) as image:
+            return image.width, image.height
+    except Exception:
+        return None
 
 
 def _image_bytes_from_response(data: dict) -> tuple[bytes, str]:
@@ -199,11 +242,12 @@ def _openai_edit_image(
 
 def _load_edit_source(
     user_id: str, image_id: str, attachment_id: str
-) -> tuple[bytes, str, str] | None:
-    """Bytes, mime and filename for an image_edit source, or None if missing.
+) -> tuple[bytes, str, str, tuple[int, int] | None] | None:
+    """Bytes, mime, filename and pixel size for an image_edit source, or None.
 
     Prefers a previously generated image (`image_id`); otherwise an uploaded
-    image attachment (`attachment_id`). Both lookups are user-scoped.
+    image attachment (`attachment_id`). Both lookups are user-scoped. Uploaded
+    images carry no recorded size, so their pixels are read from the file.
     """
     try:
         if image_id:
@@ -211,13 +255,20 @@ def _load_edit_source(
             if row is None:
                 return None
             path = db.image_file_path(row["id"], row["mime"])
-            return path.read_bytes(), row["mime"], f"{row['id']}{path.suffix}"
+            raw = path.read_bytes()
+            size = (
+                (row["width"], row["height"])
+                if row["width"] and row["height"]
+                else _image_pixels(raw)
+            )
+            return raw, row["mime"], f"{row['id']}{path.suffix}", size
         if attachment_id:
             row = db.get_attachment(user_id, attachment_id)
             if row is None or row["kind"] != "image":
                 return None
             path = db.attachment_file_path(row["id"], row["filename"])
-            return path.read_bytes(), row["mime"], row["filename"]
+            raw = path.read_bytes()
+            return raw, row["mime"], row["filename"], _image_pixels(raw)
     except OSError:
         return None
     return None
@@ -369,7 +420,7 @@ def image_edit(
     transparent_background: bool = False,
     characters: str = "",
 ) -> str:
-    """Edit or modify a picture that already exists and show the result in the chat. Use this when the user asks to change, restyle, add to, remove from, or otherwise alter an image. Pass exactly one source: `image_id` for a picture made earlier in this chat (the id from a generate_image or image_edit result), or `attachment_id` for an image the user attached. Describe the change in `prompt`. When the picture shows one or more characters from your lore book, pass their names in `characters`, comma-separated, so each keeps its official look; pass "Ballerina Cappuccina" for a picture of you, and leave it empty for anything else. Optionally set `size` to "1024x1024" (square, default), "1536x1024" (wide), or "1024x1536" (tall); omit it to keep the configured default. Set `transparent_background` to true when the user wants the result on a transparent background (for example removing a background to make a cut-out) — an OpenAI-only option that returns a PNG with transparency. Never invent ids yourself. The edited picture is saved as a new image and appears in the chat — tell the user it's ready. The returned JSON describes the saved picture."""
+    """Edit or modify a picture that already exists and show the result in the chat. Use this when the user asks to change, restyle, add to, remove from, or otherwise alter an image. Pass exactly one source: `image_id` for a picture made earlier in this chat (the id from a generate_image or image_edit result), or `attachment_id` for an image the user attached. Describe the change in `prompt`. Only pass `characters` when the edit ADDS a new character from your lore book (or yourself, as "Ballerina Cappuccina") to the picture, comma-separated; if the characters already appear in the picture, or you are only restyling or changing something, leave it empty so the edit doesn't redraw them. Optionally set `size` to "1024x1024" (square), "1536x1024" (wide), or "1024x1536" (tall); omit it to keep the picture's own aspect ratio. Set `transparent_background` to true when the user wants the result on a transparent background (for example removing a background to make a cut-out) — an OpenAI-only option that returns a PNG with transparency. Never invent ids yourself. The edited picture is saved as a new image and appears in the chat — tell the user it's ready. The returned JSON describes the saved picture."""
     user_id = _user_id(config)
     chat_id = _chat_id(config)
     if not user_id or not chat_id:
@@ -381,8 +432,8 @@ def image_edit(
     source = _load_edit_source(user_id, image_id, attachment_id)
     if source is None:
         return "I couldn't find that picture to edit."
-    raw_source, mime, filename = source
-    chosen_size = _image_size(size)
+    raw_source, mime, filename, source_size = source
+    chosen_size = _edit_size(size, source_size)
     refs = _character_refs(characters)
     call_prompt = prompt
     if refs:
