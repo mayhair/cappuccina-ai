@@ -7,6 +7,7 @@ only mints/clears the cookie and resolves the current user from a session.
 from fastapi import HTTPException, Request, Response
 
 from app import db
+from app.config import APP_ORIGIN
 
 SESSION_COOKIE = "cappuccina_session"
 
@@ -16,7 +17,9 @@ def _cookie_params() -> dict:
         "key": SESSION_COOKIE,
         "httponly": True,
         "samesite": "lax",
-        "secure": False,  # local dev; flip once served over HTTPS
+        # Secure whenever the user browses over HTTPS (production); off for
+        # local http dev so the cookie is still stored.
+        "secure": APP_ORIGIN.startswith("https://"),
     }
 
 
