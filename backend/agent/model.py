@@ -67,14 +67,23 @@ def make_model(reasoning: str = DEFAULT_REASONING, tools=None, model_id: str = "
     # back to "low" (see agent/title.py).
     if reasoning != "none" and reasoning and reasoning not in REASONING_LEVELS:
         reasoning = DEFAULT_REASONING
+        
+    extra_body = {}
+    
     # The model runs on OpenRouter, which speaks the OpenAI Chat Completions
     # API (not the Responses API). Reasoning is requested through OpenRouter's
     # unified `reasoning` field, passed verbatim via extra_body so the OpenAI
     # SDK doesn't have to know about it.
+    if reasoning:
+        extra_body["reasoning"] = {"effort": reasoning}
+
+    extra_body["preferred_min_throughput"] = {"p75": 35}
+    extra_body["allow_fallbacks"] = True
+
     model = OpenRouterChatModel(
         model=model_id or MODEL_ID,
         api_key=OPENROUTER_API_KEY,
         base_url=OPENROUTER_BASE_URL,
-        extra_body={"reasoning": {"effort": reasoning}} if reasoning else {},
+        extra_body=extra_body,
     )
     return model.bind_tools(tools) if tools else model
