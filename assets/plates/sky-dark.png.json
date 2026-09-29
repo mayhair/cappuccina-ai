@@ -1,9 +1,0 @@
-{
-  "prompt": "Use the provided crop as the approved visual reference for mood only, and generate a clean production DARK-MODE sky background. Output ONLY the empty nighttime sky: deep slate-blue storm clouds softly lit from below with hints of warm light, one narrow band of muted iridescent color (dim mint, rose and violet, like moonlight diffracting on a cloud edge) arcing across the upper area. NO chat bubbles, NO avatars, NO circles, NO rectangles, NO interface chrome, NO text, NO borders. Nothing but night clouds and the thin iridescent light band. Palette anchored on deep navy-slate blues (#101f3b, #222d5d, #33405c) with the muted iridescent band and subtle pink-warm glow near the cloud bases. The sky fills the whole frame edge to edge; no margins, no border. Calm, low-stimulation, soft product-render lighting.",
-  "createdAt": "2026-09-14T11:48:05.189Z",
-  "tool": "impeccable generate-image",
-  "model": "gpt-image-2.5-flare",
-  "refs": [
-    ".impeccable\\build\\crop-sky-dark.png"
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "prompt": "Use the provided crop as the approved visual reference and recreate it as a clean production asset at the target aspect ratio. This is a background sky image region. IMPORTANT: the crop accidentally shows user-interface shapes (chat bubbles, avatars, typing pill) — those are NOT part of the artwork. Output ONLY the empty sky: soft fluffy white clouds fading into pale blue-white luminous ground, one narrow iridescent fringe of mint, rose and violet arcing across the upper right corner area like light diffracting off a cloud edge, corner slightly brighter. NO chat bubbles, NO avatars, NO circular shapes, NO rectangles, NO typing dots, NO interface chrome, NO text, NO borders. Nothing but clouds and the thin rainbow-colored light band. Preserve the palette (#f7f6f8, #f38fc1, #f6c8d4), lighting, and texture exactly. The sky fills the whole frame edge to edge; no margins, no border.",
-  "createdAt": "2026-09-14T11:35:54.709Z",
-  "tool": "impeccable generate-image",
-  "model": "gpt-image-2.5-flare",
-  "refs": [
-    ".impeccable\\build\\crop-sky-band.png"
-  ]
-}
