@@ -16,7 +16,7 @@ def _cookie_params() -> dict:
     return {
         "key": SESSION_COOKIE,
         "httponly": True,
-        "samesite": "lax",
+        "samesite": "strict",
         # Secure whenever the user browses over HTTPS (production); off for
         # local http dev so the cookie is still stored.
         "secure": APP_ORIGIN.startswith("https://"),
