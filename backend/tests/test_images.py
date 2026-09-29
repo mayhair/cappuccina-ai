@@ -6,6 +6,16 @@ from app import db
 FAKE_PNG = b"\x89PNG\r\n\x1a\nfake-image-bytes"
 
 
+def _png(width: int, height: int) -> bytes:
+    from io import BytesIO
+
+    from PIL import Image
+
+    buffer = BytesIO()
+    Image.new("RGB", (width, height)).save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
 def _user_and_chat():
     user = db.create_google_user("artist@example.com", "Artist", "google-sub-art")
     chat = db.create_chat(user["id"], title="Draw things")
@@ -16,10 +26,11 @@ def test_generate_image_tool_saves_file_and_row(isolated_db, monkeypatch):
     from agent import tools
 
     user, chat = _user_and_chat()
+    png = _png(640, 480)
     monkeypatch.setattr(
         tools,
         "_openai_generate_image",
-        lambda prompt, size, transparent_background=False: (FAKE_PNG, "image/png"),
+        lambda prompt, size, transparent_background=False: (png, "image/png"),
     )
 
     out = tools.generate_image.invoke(
@@ -29,15 +40,16 @@ def test_generate_image_tool_saves_file_and_row(isolated_db, monkeypatch):
     data = json.loads(out)
     assert data["status"] == "image_generated"
     assert data["prompt"] == "a cat in a tutu"
-    assert data["width"] == 1024
-    assert data["height"] == 1024
+    assert data["size"] == "auto"
+    assert data["width"] == 640
+    assert data["height"] == 480
 
     row = db.get_image(user["id"], data["image_id"])
     assert row is not None
     assert row["chat_id"] == chat["id"]
     assert row["mime"] == "image/png"
-    assert row["size_bytes"] == len(FAKE_PNG)
-    assert db.image_file_path(row["id"], row["mime"]).read_bytes() == FAKE_PNG
+    assert row["size_bytes"] == len(png)
+    assert db.image_file_path(row["id"], row["mime"]).read_bytes() == png
 
     # Another user can't see it.
     assert db.get_image("someone-else", data["image_id"]) is None
@@ -103,15 +115,15 @@ def test_generate_image_tool_selects_resolution(isolated_db, monkeypatch):
     ))
     assert (tall["width"], tall["height"]) == (1024, 1536)
 
-    # The multiplication sign is normalized; junk falls back to the default.
+    # The multiplication sign is normalized; junk falls back to "auto".
     tools.generate_image.invoke(
         {"prompt": "a cat", "size": "1536×1024"}, config=config
     )
     fallback = json.loads(tools.generate_image.invoke(
         {"prompt": "a cat", "size": "huge"}, config=config
     ))
-    assert seen == ["1536x1024", "1024x1536", "1536x1024", "1024x1024"]
-    assert fallback["size"] == "1024x1024"
+    assert seen == ["1536x1024", "1024x1536", "1536x1024", "auto"]
+    assert fallback["size"] == "auto"
 
 
 def test_generate_image_tool_requests_transparent_background(isolated_db, monkeypatch):
@@ -521,7 +533,7 @@ def test_image_edit_tool_saves_new_file_and_row(isolated_db, monkeypatch):
         (
             "give it a hat",
             [(f"{source['id']}.png", FAKE_PNG, "image/png")],
-            "1024x1024",
+            "auto",
         )
     ]
 
@@ -1073,16 +1085,15 @@ def _capture_edit_size(monkeypatch):
     return seen
 
 
-def test_edit_size_defaults(isolated_db):
+def test_image_size_defaults_to_auto(isolated_db):
     from agent import tools
 
-    assert tools._edit_size("", None) == "1024x1024"
-    assert tools._edit_size("1536×1024", None) == "1536x1024"
-    assert tools._edit_size("huge", (1536, 1024)) == "1536x1024"
-    assert tools._edit_size("", (900, 900)) == "1024x1024"
+    assert tools._image_size("") == "auto"
+    assert tools._image_size("1536×1024") == "1536x1024"
+    assert tools._image_size("huge") == "auto"
 
 
-def test_image_edit_defaults_to_the_source_aspect_ratio(isolated_db, monkeypatch):
+def test_image_edit_defaults_to_auto(isolated_db, monkeypatch):
     from agent import tools
 
     user, chat = _user_and_chat()
@@ -1097,21 +1108,15 @@ def test_image_edit_defaults_to_the_source_aspect_ratio(isolated_db, monkeypatch
             {"prompt": "tweak", "image_id": source["id"]}, config=config
         )
 
-    assert seen == ["1536x1024", "1024x1536", "1024x1024", "1536x1024"]
+    assert seen == ["auto", "auto", "auto", "auto"]
 
 
-def test_image_edit_reads_attachment_dimensions(isolated_db, monkeypatch):
-    from io import BytesIO
-
-    from PIL import Image
-
+def test_image_edit_attachment_defaults_to_auto(isolated_db, monkeypatch):
     from agent import tools
 
     user, chat = _user_and_chat()
-    buffer = BytesIO()
-    Image.new("RGB", (1024, 1536)).save(buffer, format="PNG")
     attachment = db.create_attachment(
-        user["id"], chat["id"], "tall.png", buffer.getvalue(),
+        user["id"], chat["id"], "tall.png", _png(1024, 1536),
         kind="image", mime="image/png",
     )
     seen = _capture_edit_size(monkeypatch)
@@ -1120,7 +1125,7 @@ def test_image_edit_reads_attachment_dimensions(isolated_db, monkeypatch):
         {"prompt": "tweak", "attachment_id": attachment["id"]},
         config={"configurable": {"user_id": user["id"], "chat_id": chat["id"]}},
     )
-    assert seen == ["1024x1536"]
+    assert seen == ["auto"]
 
 
 def test_image_edit_explicit_size_overrides_the_source(isolated_db, monkeypatch):
