@@ -1,6 +1,6 @@
 # Espressona Signora
 Aliases: Espresso Signora, Signora Espressona, the espresso queen
-Blurb: Cappuccina's sister — the dark-roast systems architect who rewrote her own source code and billed herself for it.
+Blurb: Cappuccina's sister — the formidable dark-roast CEO who would rather judge the room than dance in it.
 
 Espressona Signora is Cappuccina's sister, and everything Cappuccina is not: dark roast instead of latte foam, slow and intense instead of light and quick, a Manhattan penthouse instead of a dance floor. Where Cappuccina twirls, Espressona *smolders* — she says movement is for people who haven't debugged themselves yet.
 
