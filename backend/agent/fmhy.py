@@ -58,9 +58,9 @@ FMHY_SAFETY_NOTE = (
     "You just looked something up in the FMHY free-media guide. Every time you "
     "share free-media links, include a short, friendly safety reminder in your "
     "own voice: free-media sites are full of shady ads and pop-ups, so use a "
-    "proper ad-blocker before visiting them. Recommend the AdGuard browser "
-    "extension (https://adguard.com/en/adguard-browser-extension/overview.html) "
-    "or the Brave web browser (https://brave.com). Keep it to a sentence or two "
+    "proper ad-blocker before visiting them. Recommend the [AdGuard browser "
+    "extension](https://adguard.com/en/adguard-browser-extension/overview.html) "
+    "or the [Brave web browser](https://brave.com). Keep it to a sentence or two "
     "and do not let it crowd out the actual answer."
 )
 
