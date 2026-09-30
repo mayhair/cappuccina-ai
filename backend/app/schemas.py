@@ -93,6 +93,12 @@ class RenameChatRequest(BaseModel):
     title: str
 
 
+class SetActiveBranchRequest(BaseModel):
+    leaf_id: str | None = Field(default=None, alias="leafId")
+
+    model_config = {"populate_by_name": True}
+
+
 class TtsRequest(BaseModel):
     text: str = Field(min_length=1, max_length=10_000)
 

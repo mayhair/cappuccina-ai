@@ -5,6 +5,7 @@ import {
   createChatOnServer,
   renameChatOnServer,
   deleteChatOnServer,
+  setActiveBranchOnServer,
   uploadAttachment,
   deleteAttachment,
 } from '../api/chatClient'
@@ -63,10 +64,31 @@ export function makeChat() {
     // Every message node (all branches); activePath is the visible chain.
     messages: [],
     activePath: [],
+    // Tail of the branch being viewed. Persisted server-side (chat
+    // active_leaf_uid) so the same branch restores across reloads/devices.
+    activeLeafId: null,
     // A brand-new chat lives only in memory until the first message is sent,
     // matching other AI chat apps that don't persist an empty conversation.
     pending: true,
   }
+}
+
+// Rebuild the visible chain from the persisted branch tail: walk parent links
+// back to the root, then reserve. Falls back to the newest branch when the
+// saved tail is gone.
+function pathFromActiveLeaf(messages, leafId) {
+  const byId = new Map(messages.map((m) => [m.id, m]))
+  const leaf = leafId ? byId.get(leafId) : null
+  if (!leaf) return defaultPath(messages)
+  const chain = []
+  let cur = leaf
+  const seen = new Set()
+  while (cur && !seen.has(cur.id)) {
+    seen.add(cur.id)
+    chain.push(cur.id)
+    cur = cur.parentId ? byId.get(cur.parentId) : null
+  }
+  return chain.reverse()
 }
 
 function normalizeChat(c) {
@@ -76,12 +98,12 @@ function normalizeChat(c) {
     parentId: m.parentId ?? null,
     branchIndex: m.branchIndex ?? 0,
   }))
+  const activeLeafId = c.activeLeafId ?? c.active_leaf_uid ?? null
   return {
     ...c,
     messages,
-    activePath: Array.isArray(c.activePath) && c.activePath.length
-      ? c.activePath
-      : defaultPath(messages),
+    activeLeafId,
+    activePath: pathFromActiveLeaf(messages, activeLeafId),
     mode: c.mode === 'tutor' ? 'tutor' : 'chat',
     subject: c.subject ?? null,
     tag: c.tag ?? (c.mode === 'tutor' ? 'TUTOR' : null),
@@ -245,6 +267,16 @@ export function useChatController(enabled) {
     setChats((all) => all.map((c) => (c.id === chatId ? fn(c) : c)))
   }, [])
 
+  // Remember the viewed branch tail both locally and on the server so it
+  // survives reloads and follows the user to other devices.
+  const setActiveLeaf = useCallback((chatId, leafId) => {
+    patchChatState(chatId, (c) => ({ ...c, activeLeafId: leafId }))
+    const chat = chatsRef.current.find((c) => c.id === chatId)
+    if (chat && !chat.pending) {
+      setActiveBranchOnServer(chatId, leafId).catch(() => {})
+    }
+  }, [patchChatState])
+
   const applyTitle = useCallback((chatId, title) => {
     const next = (title ?? '').trim()
     const target = chatsRef.current.find((c) => c.id === chatId)
@@ -358,6 +390,7 @@ export function useChatController(enabled) {
         ...c,
         messages: [...c.messages.filter((m) => !m.failed), ...fresh, placeholder],
         activePath: [...pathMessages.map((m) => m.id), replyId],
+        activeLeafId: replyId,
       }))
       // Per-thinking-block timing, mirroring the backend: a run of consecutive
       // reasoning/tool parts is one block; it is stamped with its duration
@@ -611,7 +644,9 @@ export function useChatController(enabled) {
     const next = navigateBranchPath(chat.messages, chat.activePath ?? [], messageId, delta)
     tts.stop()
     patchChatState(chat.id, (c) => ({ ...c, activePath: next }))
-  }, [status, activeChat, patchChatState])
+    // Persist the new tail (last node on the visible chain).
+    setActiveLeaf(chat.id, next[next.length - 1] ?? null)
+  }, [status, activeChat, patchChatState, setActiveLeaf])
 
   const newChat = useCallback(() => {
     const chat = makeChat()

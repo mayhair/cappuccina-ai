@@ -251,3 +251,64 @@ def test_regenerate_creates_a_sibling_version(signed_in, monkeypatch):
     by_id = _stored(chat["id"])
     assert (by_id["a1"]["parentId"], by_id["a1"]["branchIndex"]) == ("u1", 0)
     assert (by_id["a2"]["parentId"], by_id["a2"]["branchIndex"]) == ("u1", 1)
+
+
+def test_active_branch_round_trips_through_api(signed_in):
+    chat = signed_in.post("/api/v1/chats", json={"mode": "chat"}).json()
+
+    res = signed_in.patch(
+        f"/api/v1/chats/{chat['id']}/active-branch", json={"leafId": "a2"}
+    )
+    assert res.status_code == 200
+    stored = signed_in.get("/api/v1/chats").json()
+    assert stored[0]["activeLeafId"] == "a2"
+
+    # Clearing is allowed too.
+    signed_in.patch(
+        f"/api/v1/chats/{chat['id']}/active-branch", json={"leafId": None}
+    )
+    assert signed_in.get("/api/v1/chats").json()[0]["activeLeafId"] is None
+
+
+def test_active_branch_is_user_scoped(signed_in):
+    stranger = db.create_google_user("stranger2@example.com", "Stranger", "sub-y")
+    chat = db.create_chat(stranger["id"], title="Theirs")
+
+    res = signed_in.patch(
+        f"/api/v1/chats/{chat['id']}/active-branch", json={"leafId": "x"}
+    )
+    assert res.status_code == 404
+    assert db.get_chat(stranger["id"], chat["id"])["active_leaf_uid"] is None
+
+
+def test_stream_records_reply_as_active_leaf(signed_in, monkeypatch):
+    import app.main as main
+
+    chat = signed_in.post("/api/v1/chats", json={"mode": "chat"}).json()
+
+    class FakeGraph:
+        async def astream_events(self, state, config=None, version=None):
+            yield {"event": "on_chat_model_start", "data": {}}
+            yield {
+                "event": "on_chat_model_stream",
+                "data": {"chunk": SimpleNamespace(content="hi there")},
+            }
+
+    monkeypatch.setattr(main, "GRAPH", FakeGraph())
+    res = signed_in.post(
+        "/api/v1/chat/stream",
+        json={
+            "chatId": chat["id"],
+            "messages": [
+                {"id": "u1", "parentId": None, "branchIndex": 0, "role": "user", "content": "q1"},
+            ],
+            "tree": [
+                {"id": "u1", "parentId": None, "branchIndex": 0, "role": "user", "content": "q1"},
+            ],
+            "replyId": "a1",
+            "generateTitle": False,
+        },
+    )
+    assert res.status_code == 200
+    stored = signed_in.get("/api/v1/chats").json()
+    assert stored[0]["activeLeafId"] == "a1"

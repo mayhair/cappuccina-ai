@@ -88,6 +88,7 @@ def _init_schema(conn: sqlite3.Connection) -> None:
             title TEXT NOT NULL,
             mode TEXT NOT NULL DEFAULT 'chat',
             subject TEXT,
+            active_leaf_uid TEXT,
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL
         );
@@ -192,6 +193,9 @@ def _init_schema(conn: sqlite3.Connection) -> None:
     conn.execute(
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_chat_uid ON messages(chat_id, uid)"
     )
+    chat_cols = {row["name"] for row in conn.execute("PRAGMA table_info(chats)").fetchall()}
+    if "active_leaf_uid" not in chat_cols:
+        conn.execute("ALTER TABLE chats ADD COLUMN active_leaf_uid TEXT")
     _migrate_messages_for_branching(conn)
     _migrate_users_for_oauth(conn)
     _migrate_grants_for_services(conn)
@@ -592,8 +596,9 @@ def list_chats(user_id: str) -> list[dict]:
     chats = [
         dict(r)
         for r in conn.execute(
-            "SELECT id, title, mode, subject FROM chats WHERE user_id = :user_id"
-            " ORDER BY created_at DESC",
+            "SELECT id, title, mode, subject,"
+            " active_leaf_uid AS activeLeafId FROM chats"
+            " WHERE user_id = :user_id ORDER BY created_at DESC",
             {"user_id": user_id},
         ).fetchall()
     ]
@@ -643,6 +648,19 @@ def rename_chat(user_id: str, chat_id: str, title: str) -> bool:
         "UPDATE chats SET title = :title, updated_at = :now"
         " WHERE id = :id AND user_id = :user_id",
         {"title": title, "now": _now(), "id": chat_id, "user_id": user_id},
+    )
+    conn.commit()
+    return cur.rowcount > 0
+
+
+def set_chat_active_leaf(user_id: str, chat_id: str, leaf_uid: str | None) -> bool:
+    """Remember which branch tail the user is viewing, so it survives reloads
+    and follows them across devices."""
+    conn = get_conn()
+    cur = conn.execute(
+        "UPDATE chats SET active_leaf_uid = :leaf, updated_at = :now"
+        " WHERE id = :id AND user_id = :user_id",
+        {"leaf": leaf_uid, "now": _now(), "id": chat_id, "user_id": user_id},
     )
     conn.commit()
     return cur.rowcount > 0

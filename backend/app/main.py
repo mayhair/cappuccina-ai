@@ -38,6 +38,7 @@ from app.schemas import (
     CreateChatRequest,
     GmailStatusResponse,
     RenameChatRequest,
+    SetActiveBranchRequest,
     TtsJobResponse,
     TtsRequest,
     ToolCall,
@@ -651,6 +652,17 @@ async def delete_chat(chat_id: str, user=Depends(current_user)) -> dict:
     return {"ok": True}
 
 
+@app.patch("/api/v1/chats/{chat_id}/active-branch")
+async def set_active_branch(
+    chat_id: str, req: SetActiveBranchRequest, user=Depends(current_user)
+) -> dict:
+    """Remember the branch tail the user is viewing (synced across devices)."""
+    leaf = (req.leaf_id or "").strip() or None
+    if not db.set_chat_active_leaf(user["id"], chat_id, leaf):
+        raise HTTPException(status_code=404, detail="Chat not found")
+    return {"ok": True}
+
+
 @app.get("/api/v1/images/{image_id}")
 async def get_image(image_id: str, user=Depends(current_user)):
     """Serve one generated image. Authorized per user (unlike a static mount)
@@ -1051,6 +1063,12 @@ async def _stream_chat_events(req: ChatRequest, user: dict):
             uid=req.reply_id,
             parent_uid=reply_parent_uid,
         )
+        # The new reply is now the tail the user is viewing; remember it so the
+        # same branch restores on reload and on other devices.
+        if req.reply_id:
+            db.set_chat_active_leaf(
+                user["id"], req.chat_id, req.reply_id
+            )
 
 
 @app.post("/api/v1/chat/stream")

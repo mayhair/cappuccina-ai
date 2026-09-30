@@ -93,6 +93,14 @@ export const renameChatOnServer = (chatId, title) =>
 export const deleteChatOnServer = (chatId) =>
   jsonFetch(`/api/v1/chats/${chatId}`, { method: 'DELETE' })
 
+// Remember which branch tail the user is viewing (follows them across devices).
+export const setActiveBranchOnServer = (chatId, leafId) =>
+  jsonFetch(`/api/v1/chats/${chatId}/active-branch`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ leafId: leafId ?? null }),
+  })
+
 // ---------- attachments (user uploads) ----------
 
 export async function uploadAttachment(chatId, file) {
