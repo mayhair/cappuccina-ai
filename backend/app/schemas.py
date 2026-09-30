@@ -4,6 +4,11 @@ from pydantic import BaseModel, Field
 class Message(BaseModel):
     role: str
     content: str
+    # Tree identity: stable uid, parent link and sibling order. Optional so a
+    # bare {role, content} history still syncs as a single linear branch.
+    id: str | None = None
+    parent_id: str | None = Field(default=None, alias="parentId")
+    branch_index: int = Field(default=0, alias="branchIndex")
     # Optional thinking trace sent back by the client so stored history keeps
     # the assistant's reasoning/tools/ordered parts across turns.
     reasoning: str = ""
@@ -17,7 +22,12 @@ class Message(BaseModel):
 
 class ChatRequest(BaseModel):
     chat_id: str = Field(alias="chatId")
+    # The visible path (root -> latest) the model should see.
     messages: list[Message]
+    # Every node in the chat, including other branches, for persistence.
+    tree: list[Message] = []
+    # uid the streamed assistant reply is stored under.
+    reply_id: str | None = Field(default=None, alias="replyId")
     reasoning: str = "high"
     mode: str = "chat"
     subject: str | None = None

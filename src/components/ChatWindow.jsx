@@ -5,6 +5,7 @@ import { EffortSelector } from './EffortSelector'
 import { ModeSwitch } from './ModeSwitch'
 import { Markdown } from '../lib/markdown'
 import { EmojiText } from '../lib/emoji'
+import { branchPosition } from '../lib/branching'
 import { useVoiceInput } from '../hooks/useVoiceInput'
 import { sendDraft, updateDraft } from '../api/gmailClient'
 import { deleteEvent } from '../api/calendarClient'
@@ -744,8 +745,88 @@ function RetryMessageButton({ onRetry }) {
   )
 }
 
-function MessageRow({ message, prev, isActiveStream, user, onRetry, onDraftSent, onEventDeleted }) {
+function RegenerateMessageButton({ onRegenerate }) {
+  return (
+    <button
+      type="button"
+      className="copy-msg"
+      onClick={onRegenerate}
+      aria-label="Regenerate"
+    >
+      <RetryIcon />
+      <span>Regenerate</span>
+    </button>
+  )
+}
+
+// Arrows + "x/y" version switcher, shown only when a message has branches.
+function BranchNav({ index, total, onPrev, onNext }) {
+  return (
+    <div className="branch-nav" role="group" aria-label={`Version ${index + 1} of ${total}`}>
+      <button
+        type="button"
+        className="branch-arrow prev"
+        onClick={onPrev}
+        disabled={index <= 0}
+        aria-label="Previous version"
+      >
+        <ChevronIcon />
+      </button>
+      <span className="branch-count" aria-live="polite">{index + 1}/{total}</span>
+      <button
+        type="button"
+        className="branch-arrow next"
+        onClick={onNext}
+        disabled={index >= total - 1}
+        aria-label="Next version"
+      >
+        <ChevronIcon />
+      </button>
+    </div>
+  )
+}
+
+function EditMessageForm({ value, onChange, onSend, onCancel }) {
+  const ref = useRef(null)
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    el.focus()
+    el.setSelectionRange(el.value.length, el.value.length)
+  }, [])
+  return (
+    <div className="edit-msg">
+      <textarea
+        ref={ref}
+        className="edit-msg-input"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        rows={Math.min(8, Math.max(2, value.split('\n').length))}
+      />
+      <div className="edit-msg-actions">
+        <button type="button" className="edit-msg-cancel" onClick={onCancel}>
+          Cancel
+        </button>
+        <button
+          type="button"
+          className="edit-msg-send"
+          onClick={onSend}
+          disabled={!value.trim()}
+        >
+          Send
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function MessageRow({ message, prev, isActiveStream, user, onRetry, onDraftSent, onEventDeleted, branch, onEdit, onRegenerate, onNavigateBranch }) {
   const m = message
+  const [editing, setEditing] = useState(false)
+  const [editText, setEditText] = useState('')
+  // Leaving this version (branch switch) closes the editor.
+  useEffect(() => { setEditing(false) }, [m.id])
+  const canBranch = (branch?.total ?? 0) > 1
   const startsRun = !prev || prev.role !== m.role
   const awaitingReply = isActiveStream && !m.content
   const toolParts =
@@ -800,9 +881,22 @@ function MessageRow({ message, prev, isActiveStream, user, onRetry, onDraftSent,
               <StreamingDots />
             </div>
           )}
-          {m.content && !isActiveStream && (m.failed
-            ? <RetryMessageButton onRetry={onRetry} />
-            : <CopyMessageButton text={m.content} />)}
+          {m.content && !isActiveStream && (
+            <div className="msg-actions">
+              {m.failed
+                ? <RetryMessageButton onRetry={onRetry} />
+                : <CopyMessageButton text={m.content} />}
+              {!m.failed && <RegenerateMessageButton onRegenerate={() => onRegenerate?.(m.id)} />}
+              {canBranch && (
+                <BranchNav
+                  index={branch.index}
+                  total={branch.total}
+                  onPrev={() => onNavigateBranch?.(m.id, -1)}
+                  onNext={() => onNavigateBranch?.(m.id, 1)}
+                />
+              )}
+            </div>
+          )}
           {images.map((img) => (
             <ImageCard key={img.imageId} image={img} />
           ))}
@@ -822,18 +916,58 @@ function MessageRow({ message, prev, isActiveStream, user, onRetry, onDraftSent,
           ))}
         </div>
       ) : (
-        <div className="bubble">
-          {userAttachments.length > 0 && (
-            <div className="msg-attachments">
-              {userAttachments.map((a, ai) => (
-                <AttachmentPreview key={a.id ?? ai} attachment={a} />
-              ))}
+        <div className="user-col">
+          {editing ? (
+            <EditMessageForm
+              value={editText}
+              onChange={setEditText}
+              onCancel={() => setEditing(false)}
+              onSend={() => {
+                const next = editText.trim()
+                if (!next) return
+                onEdit?.(m.id, next)
+                setEditing(false)
+              }}
+            />
+          ) : (
+            <div className="bubble">
+              {userAttachments.length > 0 && (
+                <div className="msg-attachments">
+                  {userAttachments.map((a, ai) => (
+                    <AttachmentPreview key={a.id ?? ai} attachment={a} />
+                  ))}
+                </div>
+              )}
+              {(m.content || userAttachments.length === 0) && (
+                <p>
+                  <EmojiText text={m.content || '…'} />
+                </p>
+              )}
             </div>
           )}
-          {(m.content || userAttachments.length === 0) && (
-            <p>
-              <EmojiText text={m.content || '…'} />
-            </p>
+          {!isActiveStream && !editing && (
+            <div className="msg-actions">
+              <button
+                type="button"
+                className="copy-msg"
+                onClick={() => {
+                  setEditText(m.content ?? '')
+                  setEditing(true)
+                }}
+                aria-label="Edit message"
+              >
+                <PencilIcon />
+                <span>Edit</span>
+              </button>
+              {canBranch && (
+                <BranchNav
+                  index={branch.index}
+                  total={branch.total}
+                  onPrev={() => onNavigateBranch?.(m.id, -1)}
+                  onNext={() => onNavigateBranch?.(m.id, 1)}
+                />
+              )}
+            </div>
           )}
         </div>
       )}
@@ -1005,7 +1139,7 @@ function Composer({
   )
 }
 
-export function ChatWindow({ chat, user, isStreaming, draft, onDraft, onSend, onRetry, onDraftSent, onEventDeleted, inputRef, effort, onEffort, mode, onMode, attachments = [], uploading = false, attachError = '', onAttach, onRemoveAttachment }) {
+export function ChatWindow({ chat, user, isStreaming, draft, onDraft, onSend, onRetry, onEdit, onRegenerate, onNavigateBranch, onDraftSent, onEventDeleted, inputRef, effort, onEffort, mode, onMode, attachments = [], uploading = false, attachError = '', onAttach, onRemoveAttachment }) {
   const listRef = useRef(null)
 
   const canAttach = !isStreaming && !uploading
@@ -1129,12 +1263,16 @@ export function ChatWindow({ chat, user, isStreaming, draft, onDraft, onSend, on
         )}
         {chat.messages.map((m, i) => (
           <MessageRow
-            key={i}
+            key={m.id ?? i}
             message={m}
             prev={chat.messages[i - 1]}
             isActiveStream={isStreaming && i === chat.messages.length - 1}
             user={user}
+            branch={branchPosition(chat.allMessages ?? chat.messages, m)}
             onRetry={onRetry}
+            onEdit={onEdit}
+            onRegenerate={onRegenerate}
+            onNavigateBranch={onNavigateBranch}
             onDraftSent={onDraftSent}
             onEventDeleted={onEventDeleted}
           />

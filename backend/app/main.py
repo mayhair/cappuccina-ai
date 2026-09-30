@@ -778,24 +778,35 @@ def _graph_config(user, req: ChatRequest) -> RunnableConfig:
     return {"configurable": {"user_id": user["id"], "chat_id": req.chat_id}}
 
 
-def _sync_history(chat_id: str, req: ChatRequest) -> None:
-    """Full-history sync: stored messages mirror what the client sent.
+def _sync_history(chat_id: str, req: ChatRequest) -> str | None:
+    """Full-tree sync: stored messages mirror the client's message tree.
 
-    Idempotent across retries since the client sends the entire history
-    of the chat each time (truncated back to the last user message on retry).
+    The client sends every node (``req.tree``) with its uid, parent link and
+    sibling order; older clients that only send the visible path fall back to a
+    single linear branch. Returns the uid of the last node on the visible path
+    so a streamed reply can be parented to it. Idempotent across retries since
+    the client resends the whole tree each turn.
     """
-    history = [
-        {
-            "role": m.role,
-            "content": m.content,
-            "reasoning": m.reasoning or "",
-            "tools": m.tools or [],
-            "parts": m.parts or [],
-            "thinking_done": m.thinking_done,
-            "thought_seconds": m.thought_seconds,
-        }
-        for m in req.messages
-    ]
+    tree = req.tree or req.messages
+    history: list[dict] = []
+    prev_uid: str | None = None
+    for i, m in enumerate(tree):
+        uid = m.id or f"legacy-{i}"
+        history.append(
+            {
+                "uid": uid,
+                "parent_uid": m.parent_id if m.id else prev_uid,
+                "branch_index": m.branch_index or 0,
+                "role": m.role,
+                "content": m.content,
+                "reasoning": m.reasoning or "",
+                "tools": m.tools or [],
+                "parts": m.parts or [],
+                "thinking_done": m.thinking_done,
+                "thought_seconds": m.thought_seconds,
+            }
+        )
+        prev_uid = uid
     db.replace_chat_messages(chat_id, history)
     db.update_chat_meta(
         chat_id,
@@ -803,6 +814,17 @@ def _sync_history(chat_id: str, req: ChatRequest) -> None:
         subject=req.subject,
         clear_subject=req.subject is None,
     )
+    if not req.messages:
+        return None
+    if not req.tree:
+        # Legacy payload: the visible path is the whole linear history.
+        return history[-1]["uid"] if history else None
+    wanted = req.messages[-1].id
+    if wanted:
+        for node in history:
+            if node["uid"] == wanted:
+                return wanted
+    return None
 
 
 def _serialize_tool_calls(tool_calls: list[ToolCall]) -> list[dict]:
@@ -867,7 +889,7 @@ class _ThinkingBlockTimer:
 
 async def _stream_chat_events(req: ChatRequest, user: dict):
     """SSE events for one chat completion; stores the reply when the run ends."""
-    _sync_history(req.chat_id, req)
+    reply_parent_uid = _sync_history(req.chat_id, req)
     yield {"event": "start", "data": "{}"}
     think_start = time.monotonic()
     final_text = ""
@@ -1026,6 +1048,8 @@ async def _stream_chat_events(req: ChatRequest, user: dict):
             parts=[json.loads(json.dumps(p)) for p in parts],
             thinking_done=True,
             thought_seconds=time.monotonic() - think_start,
+            uid=req.reply_id,
+            parent_uid=reply_parent_uid,
         )
 
 

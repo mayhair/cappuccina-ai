@@ -95,6 +95,9 @@ def _init_schema(conn: sqlite3.Connection) -> None:
         CREATE TABLE IF NOT EXISTS messages (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+            uid TEXT,
+            parent_uid TEXT,
+            branch_index INTEGER NOT NULL DEFAULT 0,
             role TEXT NOT NULL,
             content TEXT NOT NULL,
             reasoning TEXT NOT NULL DEFAULT '',
@@ -180,9 +183,46 @@ def _init_schema(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE messages ADD COLUMN thinking_done INTEGER NOT NULL DEFAULT 0")
     if "thought_seconds" not in cols:
         conn.execute("ALTER TABLE messages ADD COLUMN thought_seconds REAL")
+    if "uid" not in cols:
+        conn.execute("ALTER TABLE messages ADD COLUMN uid TEXT")
+    if "parent_uid" not in cols:
+        conn.execute("ALTER TABLE messages ADD COLUMN parent_uid TEXT")
+    if "branch_index" not in cols:
+        conn.execute("ALTER TABLE messages ADD COLUMN branch_index INTEGER NOT NULL DEFAULT 0")
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_chat_uid ON messages(chat_id, uid)"
+    )
+    _migrate_messages_for_branching(conn)
     _migrate_users_for_oauth(conn)
     _migrate_grants_for_services(conn)
     conn.commit()
+
+
+def _migrate_messages_for_branching(conn: sqlite3.Connection) -> None:
+    """Backfill message uids and parent links for pre-branching databases.
+
+    Legacy messages form a single linear branch per chat: each row is linked to
+    the previous row and given a stable uid derived from its rowid, so existing
+    conversations survive the tree migration unchanged.
+    """
+    rows = conn.execute(
+        "SELECT id, chat_id FROM messages WHERE uid IS NULL ORDER BY chat_id, id"
+    ).fetchall()
+    if not rows:
+        return
+    prev_chat = None
+    prev_uid = None
+    for row in rows:
+        if row["chat_id"] != prev_chat:
+            prev_chat = row["chat_id"]
+            prev_uid = None
+        uid = f"m{row['id']}"
+        conn.execute(
+            "UPDATE messages SET uid = :uid, parent_uid = :parent_uid,"
+            " branch_index = 0 WHERE id = :id",
+            {"uid": uid, "parent_uid": prev_uid, "id": row["id"]},
+        )
+        prev_uid = uid
 
 
 def _migrate_users_for_oauth(conn: sqlite3.Connection) -> None:
@@ -569,8 +609,8 @@ def list_messages_by_chat(chat_ids: list[str]) -> dict[str, list[dict]]:
     conn = get_conn()
     placeholders = ",".join("?" for _ in chat_ids)
     rows = conn.execute(
-        "SELECT chat_id, role, content, reasoning, tools, parts,"
-        " thinking_done, thought_seconds FROM messages"
+        "SELECT chat_id, uid, parent_uid, branch_index, role, content, reasoning, tools,"
+        " parts, thinking_done, thought_seconds FROM messages"
         f" WHERE chat_id IN ({placeholders}) ORDER BY id",
         chat_ids,
     ).fetchall()
@@ -582,6 +622,9 @@ def list_messages_by_chat(chat_ids: list[str]) -> dict[str, list[dict]]:
             parts = []
         grouped[r["chat_id"]].append(
             {
+                "id": r["uid"],
+                "parentId": r["parent_uid"],
+                "branchIndex": r["branch_index"] or 0,
                 "role": r["role"],
                 "content": r["content"],
                 "reasoning": r["reasoning"],
@@ -638,21 +681,25 @@ def delete_chat(user_id: str, chat_id: str) -> bool:
 
 
 def replace_chat_messages(chat_id: str, messages: list[dict]) -> None:
-    """Full-history sync: replaces stored messages with the given history.
+    """Full-tree sync: replaces stored messages with the given tree.
 
-    The client is treated as authoritative for message order during this
-    transition; the assistant reply is appended by append_message().
+    The client is treated as authoritative for message structure during this
+    transition; each node carries its uid, parent link and sibling order. The
+    assistant reply is appended by append_chat_message().
     """
     conn = get_conn()
     conn.execute("DELETE FROM messages WHERE chat_id = :chat_id", {"chat_id": chat_id})
     conn.executemany(
-        "INSERT INTO messages (chat_id, role, content, reasoning, tools, parts,"
-        " thinking_done, thought_seconds, created_at)"
-        " VALUES (:chat_id, :role, :content, :reasoning, :tools, :parts,"
-        " :thinking_done, :thought_seconds, :created_at)",
+        "INSERT INTO messages (chat_id, uid, parent_uid, branch_index, role, content,"
+        " reasoning, tools, parts, thinking_done, thought_seconds, created_at)"
+        " VALUES (:chat_id, :uid, :parent_uid, :branch_index, :role, :content,"
+        " :reasoning, :tools, :parts, :thinking_done, :thought_seconds, :created_at)",
         [
             {
                 "chat_id": chat_id,
+                "uid": m.get("uid"),
+                "parent_uid": m.get("parent_uid"),
+                "branch_index": m.get("branch_index", 0) or 0,
                 "role": m["role"],
                 "content": m["content"],
                 "reasoning": m.get("reasoning", ""),
@@ -695,15 +742,34 @@ def append_chat_message(chat_id: str, role: str, content: str,
                         reasoning: str = "", tools: list | None = None,
                         parts: list | None = None,
                         thinking_done: bool = False,
-                        thought_seconds: float | None = None) -> None:
+                        thought_seconds: float | None = None,
+                        uid: str | None = None,
+                        parent_uid: str | None = None) -> None:
+    """Append a message to the tree, deriving its sibling order when parented.
+
+    ``branch_index`` follows the same max+1 rule the client uses, so the two
+    stay in lockstep without the client having to precompute it.
+    """
     conn = get_conn()
+    if parent_uid is None:
+        branch_index = 0
+    else:
+        row = conn.execute(
+            "SELECT MAX(branch_index) AS mx FROM messages"
+            " WHERE chat_id = :chat_id AND parent_uid = :parent_uid",
+            {"chat_id": chat_id, "parent_uid": parent_uid},
+        ).fetchone()
+        branch_index = (row["mx"] + 1) if row and row["mx"] is not None else 0
     conn.execute(
-        "INSERT INTO messages (chat_id, role, content, reasoning, tools, parts,"
-        " thinking_done, thought_seconds, created_at)"
-        " VALUES (:chat_id, :role, :content, :reasoning, :tools, :parts,"
-        " :thinking_done, :thought_seconds, :created_at)",
+        "INSERT INTO messages (chat_id, uid, parent_uid, branch_index, role, content,"
+        " reasoning, tools, parts, thinking_done, thought_seconds, created_at)"
+        " VALUES (:chat_id, :uid, :parent_uid, :branch_index, :role, :content,"
+        " :reasoning, :tools, :parts, :thinking_done, :thought_seconds, :created_at)",
         {
             "chat_id": chat_id,
+            "uid": uid,
+            "parent_uid": parent_uid,
+            "branch_index": branch_index,
             "role": role,
             "content": content,
             "reasoning": reasoning,

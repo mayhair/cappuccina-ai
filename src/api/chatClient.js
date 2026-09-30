@@ -5,10 +5,12 @@
 //                                 | image {type,imageId,prompt,width,height}
 //                                 | done | title {title} (first message only, after done)
 
-function buildRequest({ chatId, messages, reasoning, mode, subject, generateTitle }) {
+function buildRequest({ chatId, messages, tree, replyId, reasoning, mode, subject, generateTitle }) {
   return {
     chatId,
     messages,
+    tree: tree ?? [],
+    replyId: replyId ?? null,
     reasoning: reasoning ?? 'high',
     mode: mode ?? 'chat',
     subject: subject ?? null,
@@ -18,13 +20,13 @@ function buildRequest({ chatId, messages, reasoning, mode, subject, generateTitl
 }
 
 // handlers: { onToken, onReasoning, onToolCall, onToolResult, onImage, onTitle, onDone }
-export async function sendStreaming({ chatId, messages, reasoning, mode, subject, generateTitle }, handlers = {}) {
+export async function sendStreaming({ chatId, messages, tree, replyId, reasoning, mode, subject, generateTitle }, handlers = {}) {
   const { onToken, onReasoning, onToolCall, onToolResult, onImage, onTitle, onDone } = handlers
   const res = await fetch('/api/v1/chat/stream', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     credentials: 'include',
-    body: JSON.stringify(buildRequest({ chatId, messages, reasoning, mode, subject, generateTitle })),
+    body: JSON.stringify(buildRequest({ chatId, messages, tree, replyId, reasoning, mode, subject, generateTitle })),
   })
   if (!res.ok || !res.body) throw new Error(`chat stream failed: ${res.status}`)
 

@@ -950,6 +950,98 @@ img.user-avatar {
 .copy-msg svg { width: 0.95rem; height: 0.95rem; flex: none; }
 .copy-msg.copied { color: var(--pink-ink); }
 
+/* ---------- message actions & branch navigation ---------- */
+.msg-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.15rem;
+  flex-wrap: wrap;
+}
+.user-col {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.35rem;
+  min-width: 0;
+  max-width: min(70%, 56ch);
+}
+.user-col .bubble { max-width: 100%; }
+.user-col .edit-msg { width: min(80vw, 46ch); }
+
+.branch-nav {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.1rem;
+  margin-left: 0.15rem;
+  padding: 0.05rem 0.15rem;
+  border-radius: 999px;
+}
+.branch-count {
+  min-width: 2.1em;
+  text-align: center;
+  font-size: 12px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-faint);
+}
+.branch-arrow {
+  display: inline-grid;
+  place-items: center;
+  width: 1.35rem;
+  height: 1.35rem;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--ink-faint);
+  cursor: pointer;
+  transition: background 150ms ease, color 150ms ease;
+}
+.branch-arrow:hover:not(:disabled) { color: var(--ink-soft); background: var(--hover-tint); }
+.branch-arrow:disabled { opacity: 0.35; cursor: default; }
+.branch-arrow svg { width: 0.8rem; height: 0.8rem; }
+.branch-arrow.prev svg { transform: rotate(180deg); }
+
+/* ---------- edit message ---------- */
+.edit-msg {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  align-items: flex-end;
+}
+.edit-msg-input {
+  width: 100%;
+  min-width: min(60vw, 30ch);
+  resize: none;
+  padding: 0.6em 0.85em;
+  border: 1px solid var(--pink-strong);
+  border-radius: 16px;
+  border-top-right-radius: 6px;
+  background: var(--glass-strong);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: 15px;
+  line-height: 1.45;
+  caret-color: var(--pink-strong);
+}
+.edit-msg-input:focus { outline: 2px solid var(--pink-strong); outline-offset: 1px; }
+.edit-msg-actions { display: flex; gap: 0.4rem; }
+.edit-msg-cancel,
+.edit-msg-send {
+  border: none;
+  border-radius: 999px;
+  padding: 0.3rem 0.85rem;
+  font-family: var(--font-body);
+  font-size: 12.5px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.edit-msg-cancel { background: var(--hover-tint); color: var(--ink-soft); }
+.edit-msg-cancel:hover { background: var(--pink-soak); }
+.edit-msg-send { background: var(--pink-strong); color: #fff; }
+.edit-msg-send:hover { background: var(--pink); }
+.edit-msg-send:disabled { opacity: 0.5; cursor: default; }
+
 .assistant-col {
   display: flex;
   flex-direction: column;

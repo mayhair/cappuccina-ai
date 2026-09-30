@@ -137,6 +137,9 @@ export default function App() {
     typingTitleId,
     sendMessage,
     retryMessage,
+    editMessage,
+    regenerateMessage,
+    navigateBranch,
     newChat,
     deleteChat,
     renameChat,
@@ -221,6 +224,9 @@ export default function App() {
           onDraft={setDraft}
           onSend={sendMessage}
           onRetry={retryMessage}
+          onEdit={editMessage}
+          onRegenerate={regenerateMessage}
+          onNavigateBranch={navigateBranch}
           onDraftSent={(draftId) => markDraftSent(activeChatId, draftId)}
           onEventDeleted={(eventId) => markEventDeleted(activeChatId, eventId)}
           inputRef={inputRef}

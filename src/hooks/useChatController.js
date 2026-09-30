@@ -9,6 +9,13 @@ import {
   deleteAttachment,
 } from '../api/chatClient'
 import tts from '../lib/tts'
+import {
+  makeMessageId,
+  nextBranchIndex,
+  visibleMessages,
+  navigate as navigateBranchPath,
+  defaultPath,
+} from '../lib/branching'
 
 const EFFORT_KEY = 'cappuccina-effort'
 const ACTIVE_CHAT_KEY = 'cappuccina-active-chat'
@@ -53,7 +60,9 @@ export function makeChat() {
     tag: null,
     mode: 'chat',
     subject: null,
+    // Every message node (all branches); activePath is the visible chain.
     messages: [],
+    activePath: [],
     // A brand-new chat lives only in memory until the first message is sent,
     // matching other AI chat apps that don't persist an empty conversation.
     pending: true,
@@ -61,8 +70,18 @@ export function makeChat() {
 }
 
 function normalizeChat(c) {
+  const messages = (c.messages ?? []).map((m) => ({
+    ...m,
+    id: m.id ?? makeMessageId(),
+    parentId: m.parentId ?? null,
+    branchIndex: m.branchIndex ?? 0,
+  }))
   return {
     ...c,
+    messages,
+    activePath: Array.isArray(c.activePath) && c.activePath.length
+      ? c.activePath
+      : defaultPath(messages),
     mode: c.mode === 'tutor' ? 'tutor' : 'chat',
     subject: c.subject ?? null,
     tag: c.tag ?? (c.mode === 'tutor' ? 'TUTOR' : null),
@@ -215,13 +234,16 @@ export function useChatController(enabled) {
     setChats((all) => all.map((c) => (c.id === chatId ? { ...c, messages: fn(c.messages) } : c)))
   }, [])
 
-  const patchAssistant = useCallback((chatId, fn) => {
+  // Patch a single message node by id (used while streaming the reply).
+  const patchNode = useCallback((chatId, nodeId, fn) => {
     patchMessages(chatId, (messages) =>
-      messages.map((m, i) =>
-        i === messages.length - 1 && m.role === 'assistant' ? { ...m, ...fn(m) } : m,
-      ),
+      messages.map((m) => (m.id === nodeId ? { ...m, ...fn(m) } : m)),
     )
   }, [patchMessages])
+
+  const patchChatState = useCallback((chatId, fn) => {
+    setChats((all) => all.map((c) => (c.id === chatId ? fn(c) : c)))
+  }, [])
 
   const applyTitle = useCallback((chatId, title) => {
     const next = (title ?? '').trim()
@@ -276,14 +298,67 @@ export function useChatController(enabled) {
     [markToolFlagged],
   )
 
-  const streamReply = useCallback((chatId, history, reasoning, mode, subject) => {
+  // Persist the chat if needed, then stream the model's reply. `pathMessages`
+  // is the visible chain the model should see (ending at the message being
+  // replied to); the streamed reply node is parented to its last entry.
+  const runStream = useCallback((chat, pathMessages) => {
+    const reasoning = effortValue(effort)
+    tts.stop()
+    // Live nodes already known to the tree plus any fresh nodes (a new edit or
+    // regenerate) not stored yet, so branch order matches the server's.
+    const base = chat.messages.filter((m) => !m.failed)
+    const known = new Set(base.map((m) => m.id))
+    const fresh = pathMessages.filter((m) => !known.has(m.id))
+    const treeNodes = [...base, ...fresh]
+    const parent = pathMessages[pathMessages.length - 1] ?? null
+    const parentId = parent?.id ?? null
+    const replyId = makeMessageId()
+    const placeholder = {
+      id: replyId,
+      parentId,
+      branchIndex: nextBranchIndex(treeNodes, parentId),
+      role: 'assistant',
+      content: '',
+      reasoning: '',
+      tools: [],
+      parts: [],
+      thinkingDone: false,
+      thoughtSeconds: null,
+      failed: false,
+    }
     setStatus('streaming')
     const seq = ++streamSeq.current
     ;(async () => {
-      patchMessages(chatId, (messages) => [
-        ...messages,
-        { role: 'assistant', content: '', reasoning: '', tools: [], parts: [], thinkingDone: false, thoughtSeconds: null, failed: false },
-      ])
+      let chatId
+      try {
+        chatId = await persistChat(chat)
+      } catch (err) {
+        console.error('chat error', err)
+        const failedId = makeMessageId()
+        patchChatState(chat.id, (c) => ({
+          ...c,
+          messages: [
+            ...c.messages.filter((m) => !m.failed),
+            ...fresh,
+            {
+              id: failedId,
+              parentId,
+              branchIndex: nextBranchIndex(treeNodes, parentId),
+              role: 'assistant',
+              content: STREAM_FAILED_MESSAGE,
+              failed: true,
+            },
+          ],
+          activePath: [...pathMessages.map((m) => m.id), failedId],
+        }))
+        setStatus('idle')
+        return
+      }
+      patchChatState(chatId, (c) => ({
+        ...c,
+        messages: [...c.messages.filter((m) => !m.failed), ...fresh, placeholder],
+        activePath: [...pathMessages.map((m) => m.id), replyId],
+      }))
       // Per-thinking-block timing, mirroring the backend: a run of consecutive
       // reasoning/tool parts is one block; it is stamped with its duration
       // when text follows or the stream ends.
@@ -318,17 +393,19 @@ export function useChatController(enabled) {
             )
       await sendStreaming({
         chatId,
-        messages: history,
+        messages: pathMessages,
+        tree: treeNodes,
+        replyId,
         reasoning,
-        mode,
-        subject,
-        generateTitle: history.length === 1,
+        mode: chat.mode ?? 'chat',
+        subject: chat.subject ?? null,
+        generateTitle: pathMessages.length === 1,
       }, {
         onToken: (word) => {
           if (!word) return
           spokenText += word
           const seconds = closeBlock()
-          patchAssistant(chatId, (m) => {
+          patchNode(chatId, replyId, (m) => {
             const parts = [...(m.parts ?? [])]
             const last = parts[parts.length - 1]
             // Text becomes a part so it can sit between thinking blocks:
@@ -346,7 +423,7 @@ export function useChatController(enabled) {
         onReasoning: (piece) => {
           flushSpoken()
           openBlock()
-          patchAssistant(chatId, (m) => {
+          patchNode(chatId, replyId, (m) => {
             const parts = [...(m.parts ?? [])]
             const last = parts[parts.length - 1]
             if (last && last.type === 'reasoning') {
@@ -370,13 +447,13 @@ export function useChatController(enabled) {
             result: null,
             ok: null,
           }
-          patchAssistant(chatId, (m) => ({
+          patchNode(chatId, replyId, (m) => ({
             parts: [...(m.parts ?? []), tool],
             tools: [...(m.tools ?? []), { ...tool }],
           }))
         },
         onToolResult: (result) => {
-          patchAssistant(chatId, (m) => ({
+          patchNode(chatId, replyId, (m) => ({
             parts: (m.parts ?? []).map((p) =>
               p.type === 'tool' && p.id === result.id
                 ? { ...p, result: result.content, ok: result.ok }
@@ -399,7 +476,7 @@ export function useChatController(enabled) {
             height: image.height ?? null,
           }
           if (image.transparent === true) part.transparent = true
-          patchAssistant(chatId, (m) => ({ parts: [...(m.parts ?? []), part] }))
+          patchNode(chatId, replyId, (m) => ({ parts: [...(m.parts ?? []), part] }))
         },
         onTitle: (title) => applyTitle(chatId, title),
         onDone: () => {
@@ -411,15 +488,15 @@ export function useChatController(enabled) {
       // Stamp the final thinking block (the stream ended while still thinking).
       const trailingSeconds = closeBlock()
       if (trailingSeconds != null) {
-        patchAssistant(chatId, (m) => ({
+        patchNode(chatId, replyId, (m) => ({
           parts: stampParts([...(m.parts ?? [])], trailingSeconds),
         }))
       }
     })().catch((err) => {
       console.error('chat error', err)
       patchMessages(chatId, (messages) =>
-        messages.map((m, i) =>
-          i === messages.length - 1 && m.role === 'assistant' && !m.content
+        messages.map((m) =>
+          m.id === replyId && !m.content
             ? { ...m, content: STREAM_FAILED_MESSAGE, failed: true }
             : m,
         ),
@@ -427,7 +504,7 @@ export function useChatController(enabled) {
     }).finally(() => {
       if (streamSeq.current === seq) setStatus('idle')
     })
-  }, [patchMessages, patchAssistant, applyTitle])
+  }, [effort, patchMessages, patchNode, patchChatState, persistChat, applyTitle])
 
   const setMode = useCallback((chatId, mode, subject) => {
     setChats((all) =>
@@ -444,35 +521,21 @@ export function useChatController(enabled) {
     )
   }, [])
 
-  // Persist the chat if needed, then stream the model's reply into `history`.
-  // Any failure lands as an assistant error bubble and resets the status.
-  const startStream = useCallback(
-    (chat, history) => {
-      const reasoning = effortValue(effort)
-      tts.stop()
-      patchMessages(chat.id, () => history)
-      ;(async () => {
-        try {
-          const chatId = await persistChat(chat)
-          streamReply(chatId, history, reasoning, chat.mode ?? 'chat', chat.subject ?? null)
-        } catch {
-          patchMessages(chat.id, (messages) => [
-            ...messages,
-            { role: 'assistant', content: STREAM_FAILED_MESSAGE, failed: true },
-          ])
-          setStatus('idle')
-        }
-      })()
-    },
-    [effort, patchMessages, streamReply, persistChat],
-  )
-
   const sendMessage = useCallback(() => {
     const text = draft.trim()
     const pending = attachments
     if ((!text && pending.length === 0) || status !== 'idle' || uploading) return
     const chat = activeChat
-    const userMessage = { role: 'user', content: text }
+    // Failed stream tails are transient: a new turn follows the last real node.
+    const visible = visibleMessages(chat).filter((m) => !m.failed)
+    const parentId = visible.length ? visible[visible.length - 1].id : null
+    const userMessage = {
+      id: makeMessageId(),
+      parentId,
+      branchIndex: nextBranchIndex(chat.messages, parentId),
+      role: 'user',
+      content: text,
+    }
     if (pending.length) {
       // Only ids travel with the message; bytes/text stay server-side.
       userMessage.parts = pending.map((a) => ({
@@ -484,27 +547,71 @@ export function useChatController(enabled) {
         size: a.size,
       }))
     }
-    const history = [...chat.messages, userMessage]
 
     setDraft('')
     clearAttachments()
-    startStream(chat, history)
-  }, [draft, attachments, uploading, status, activeChat, clearAttachments, startStream])
+    runStream(chat, [...visible, userMessage])
+  }, [draft, attachments, uploading, status, activeChat, clearAttachments, runStream])
+
+  // Edit a sent user message: the new text becomes a sibling version and a
+  // fresh reply is streamed under it. The old branch stays navigable.
+  const editMessage = useCallback((messageId, text) => {
+    const next = (text ?? '').trim()
+    if (!next || status !== 'idle') return
+    const chat = activeChat
+    const visible = visibleMessages(chat)
+    const at = visible.findIndex((m) => m.id === messageId)
+    if (at === -1) return
+    const original = visible[at]
+    const parentId = original.parentId ?? null
+    runStream(chat, [
+      ...visible.slice(0, at),
+      {
+        ...original,
+        id: makeMessageId(),
+        content: next,
+        parentId,
+        branchIndex: nextBranchIndex(chat.messages, parentId),
+        failed: false,
+      },
+    ])
+  }, [status, activeChat, runStream])
+
+  // Regenerate an assistant reply: stream a new sibling version from the same
+  // prompt, keeping the previous answer reachable with the arrows.
+  const regenerateMessage = useCallback((messageId) => {
+    if (status !== 'idle') return
+    const chat = activeChat
+    const visible = visibleMessages(chat)
+    const at = visible.findIndex((m) => m.id === messageId)
+    if (at <= 0) return
+    runStream(chat, visible.slice(0, at))
+  }, [status, activeChat, runStream])
 
   const retryMessage = useCallback(() => {
     if (status !== 'idle') return
     const chat = activeChat
-    const messages = chat.messages
+    const visible = visibleMessages(chat)
     let lastUser = -1
-    for (let i = messages.length - 1; i >= 0; i--) {
-      if (messages[i].role === 'user') {
+    for (let i = visible.length - 1; i >= 0; i--) {
+      if (visible[i].role === 'user') {
         lastUser = i
         break
       }
     }
     if (lastUser === -1) return
-    startStream(chat, messages.slice(0, lastUser + 1))
-  }, [status, activeChat, startStream])
+    runStream(chat, visible.slice(0, lastUser + 1))
+  }, [status, activeChat, runStream])
+
+  // Move up/down the sibling versions of a message; the visible tail follows
+  // the chosen version's newest branch.
+  const navigateBranch = useCallback((messageId, delta) => {
+    if (status !== 'idle') return
+    const chat = activeChat
+    const next = navigateBranchPath(chat.messages, chat.activePath ?? [], messageId, delta)
+    tts.stop()
+    patchChatState(chat.id, (c) => ({ ...c, activePath: next }))
+  }, [status, activeChat, patchChatState])
 
   const newChat = useCallback(() => {
     const chat = makeChat()
@@ -553,9 +660,15 @@ export function useChatController(enabled) {
     ? listed.filter((c) => c.title.toLowerCase().includes(q))
     : listed
 
+  // The rendered chat shows only the active branch (visible chain); the full
+  // tree travels as `allMessages` so the UI can count sibling versions.
+  const activeView = activeChat
+    ? { ...activeChat, messages: visibleMessages(activeChat), allMessages: activeChat.messages }
+    : activeChat
+
   return {
     chats: visibleChats,
-    activeChat,
+    activeChat: activeView,
     activeChatId: activeChat?.id ?? null,
     draft,
     setDraft,
@@ -569,6 +682,9 @@ export function useChatController(enabled) {
     typingTitleId,
     sendMessage,
     retryMessage,
+    editMessage,
+    regenerateMessage,
+    navigateBranch,
     newChat,
     deleteChat,
     renameChat,
