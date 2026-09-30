@@ -736,7 +736,10 @@ async def upload_attachment(
 @app.get("/api/v1/attachments/{attachment_id}")
 async def get_attachment_file(attachment_id: str, user=Depends(current_user)):
     """Serve one uploaded file, user-scoped. Images render inline (used as the
-    preview source); documents download under their original name."""
+    preview source); documents download under their original name. Uploads are
+    immutable (a new upload gets a new id), so we send an immutable
+    Cache-Control. ``private`` keeps shared caches (for example Cloudflare)
+    from storing it; it is a browser fallback only."""
     row = db.get_attachment(user["id"], attachment_id)
     if row is None:
         raise HTTPException(status_code=404, detail="Attachment not found")
@@ -749,6 +752,7 @@ async def get_attachment_file(attachment_id: str, user=Depends(current_user)):
         media_type=row["mime"],
         filename=None if inline else row["filename"],
         content_disposition_type="inline" if inline else "attachment",
+        headers={"Cache-Control": "private, max-age=5184000, immutable"},
     )
 
 

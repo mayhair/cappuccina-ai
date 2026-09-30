@@ -271,6 +271,7 @@ def test_serve_attachment_is_user_scoped(signed_in):
     served = signed_in.get(f"/api/v1/attachments/{row['id']}")
     assert served.status_code == 200
     assert served.content == b"secret"
+    assert served.headers["cache-control"] == "private, max-age=5184000, immutable"
 
     stranger = db.create_google_user("stranger@example.com", "Stranger", "sub-at")
     stranger_chat = db.create_chat(stranger["id"], title="Theirs")
