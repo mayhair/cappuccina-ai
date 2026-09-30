@@ -841,6 +841,15 @@ function MessageRow({ message, prev, isActiveStream, user, onRetry, onDraftSent,
       ? (m.parts ?? []).map(attachmentFromPart).filter(Boolean)
       : []
   const segments = m.role === 'assistant' ? messageSegments(m) : []
+  // Attachments stay visible while editing so the user still sees what the
+  // message carried (only the text is being changed).
+  const attachmentsBlock = userAttachments.length > 0 ? (
+    <div className="msg-attachments">
+      {userAttachments.map((a, ai) => (
+        <AttachmentPreview key={a.id ?? ai} attachment={a} />
+      ))}
+    </div>
+  ) : null
   // A message-level duration is only unambiguous when the whole reply
   // is a single thinking block; with several blocks each carries its
   // own stamp, so don't smear the total across all of them.
@@ -918,26 +927,23 @@ function MessageRow({ message, prev, isActiveStream, user, onRetry, onDraftSent,
       ) : (
         <div className="user-col">
           {editing ? (
-            <EditMessageForm
-              value={editText}
-              onChange={setEditText}
-              onCancel={() => setEditing(false)}
-              onSend={() => {
-                const next = editText.trim()
-                if (!next) return
-                onEdit?.(m.id, next)
-                setEditing(false)
-              }}
-            />
+            <>
+              {attachmentsBlock}
+              <EditMessageForm
+                value={editText}
+                onChange={setEditText}
+                onCancel={() => setEditing(false)}
+                onSend={() => {
+                  const next = editText.trim()
+                  if (!next) return
+                  onEdit?.(m.id, next)
+                  setEditing(false)
+                }}
+              />
+            </>
           ) : (
             <div className="bubble">
-              {userAttachments.length > 0 && (
-                <div className="msg-attachments">
-                  {userAttachments.map((a, ai) => (
-                    <AttachmentPreview key={a.id ?? ai} attachment={a} />
-                  ))}
-                </div>
-              )}
+              {attachmentsBlock}
               {(m.content || userAttachments.length === 0) && (
                 <p>
                   <EmojiText text={m.content || '…'} />
