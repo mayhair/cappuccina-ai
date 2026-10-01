@@ -75,16 +75,17 @@ export function LandingPage({ theme, onTheme, error }) {
             </span>
             <span className="folklore-line">
               We're in the public domain, which means nobody owns us!
-              Anyone can draw us, remix us, or use us however they like.{' '}
+              Anyone can draw us, remix us, or use us however they like. {' '}
               <a
                 href="https://medium.com/@fabianmosele/can-tung-tung-tung-sahur-and-ballerina-cappuccina-have-copyright-a2dc01e850e9"
                 target="_blank"
                 rel="noopener noreferrer"
               >
-                read more
+                learn more
               </a>
             </span>
-            <span className="folklore-line">
+            <span className="folklore-line folklore-aside">
+              This is exactly what the creator of this app took advantage of. Fair game.
             </span>
           </p>
         </div>

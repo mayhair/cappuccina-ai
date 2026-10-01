@@ -2191,6 +2191,14 @@ img.user-avatar {
 }
 .folklore-line { display: block; }
 .folklore-line + .folklore-line { margin-top: 0.3em; }
+.folklore-card .folklore-aside {
+  margin-top: 0.45em;
+  color: var(--ink-soft);
+  font-size: 11.5px;
+  font-weight: 500;
+  font-style: italic;
+  opacity: 0.85;
+}
 .folklore-card a {
   color: var(--pink-ink);
   font-weight: 700;
