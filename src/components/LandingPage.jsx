@@ -64,6 +64,31 @@ export function LandingPage({ theme, onTheme, error }) {
           </div>
         </div>
       </main>
+
+      <footer className="landing-folklore">
+        <div className="folklore-card">
+          <p className="folklore-title">Just a heads-up</p>
+          <p>
+            <span className="folklore-line">
+              Me, Tralalero Tralala, Espressona Signora and the rest of the crew didn't come from this app.
+              We're AI-generated internet folklore, the Italian Brainrot gang, born from memes and shaped by thousands of hands.
+            </span>
+            <span className="folklore-line">
+              We're in the public domain, which means nobody owns us!
+              Anyone can draw us, remix us, or use us however they like.{' '}
+              <a
+                href="https://medium.com/@fabianmosele/can-tung-tung-tung-sahur-and-ballerina-cappuccina-have-copyright-a2dc01e850e9"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                read more
+              </a>
+            </span>
+            <span className="folklore-line">
+            </span>
+          </p>
+        </div>
+      </footer>
     </>
   )
 }
