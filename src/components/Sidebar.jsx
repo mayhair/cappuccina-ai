@@ -96,7 +96,7 @@ export function Sidebar({ chats, activeChatId, onSelect, onNewChat, onDelete, on
     >
       <div className="side-head">
         <div className="side-avatar">
-          <img src="/plates/msg-avatar.png" alt="Ballerina Cappuccina, an AI character whose head is a coffee cup" />
+          <img src="/plates/msg-avatar.webp" alt="Ballerina Cappuccina, an AI character whose head is a coffee cup" />
         </div>
         <div className="side-name">Cappuccina</div>
       </div>
@@ -303,7 +303,7 @@ export function Sidebar({ chats, activeChatId, onSelect, onNewChat, onDelete, on
               ✕
             </button>
             <div className="modal-avatar">
-              <img src="/plates/msg-avatar.png" alt="" />
+              <img src="/plates/msg-avatar.webp" alt="" />
             </div>
             <h2 id="delete-title">
               <EmojiText text="Sip — one moment! ☕" />

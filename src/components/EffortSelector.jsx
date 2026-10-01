@@ -98,7 +98,7 @@ export function EffortSelector({ effort, onChange, disabled }) {
               ✕
             </button>
             <div className="modal-avatar">
-              <img src="/plates/msg-avatar.png" alt="" />
+              <img src="/plates/msg-avatar.webp" alt="" />
             </div>
             <h2 id="effort-help-title">Let me think about that ☕</h2>
             <p>

@@ -858,7 +858,7 @@ function MessageRow({ message, prev, isActiveStream, user, onRetry, onDraftSent,
     <div className={`msg-row ${m.role}${startsRun ? ' starts' : ''}`}>
       {m.role === 'assistant' ? (
         <div className="msg-avatar">
-          <img src="/plates/msg-avatar.png" alt="" />
+          <img src="/plates/msg-avatar.webp" alt="" />
         </div>
       ) : (
         <div className="msg-avatar user" aria-hidden="true">
@@ -1258,7 +1258,7 @@ export function ChatWindow({ chat, user, isStreaming, draft, onDraft, onSend, on
       <div className="message-list" ref={listRef} aria-label={`Conversation: ${chat.title}`}>
         {chat.messages.length === 0 && !isStreaming && (
           <div className="welcome" role="status">
-            <img className="welcome-hero" src="/plates/welcome-hero.png" alt="Ballerina Cappuccina waving hello" />
+            <img className="welcome-hero" src="/plates/welcome-hero.webp" alt="Ballerina Cappuccina waving hello" />
             <h1 className="welcome-title">Hi! I'm Ballerina Cappuccina</h1>
             {mode === 'tutor' ? (
               <p className="welcome-sub">Pointe shoes on — tell me what you'd like to learn</p>

@@ -15,8 +15,8 @@ const AUTH_ERROR_MESSAGES = {
 export function Sky({ theme }) {
   return (
     <div className="sky" aria-hidden="true">
-      <img src="/plates/sky-band.png" alt="" style={{ opacity: theme === 'light' ? 1 : 0 }} />
-      <img src="/plates/sky-dark.png" alt="" className="dark" style={{ opacity: theme === 'dark' ? 1 : 0 }} />
+      <img src="/plates/sky-band.webp" alt="" style={{ opacity: theme === 'light' ? 1 : 0 }} />
+      <img src="/plates/sky-dark.webp" alt="" className="dark" style={{ opacity: theme === 'dark' ? 1 : 0 }} />
     </div>
   )
 }
@@ -31,7 +31,7 @@ export function LandingPage({ theme, onTheme, error }) {
       <main className="landing-grid">
         <div className="landing-hero">
           <img
-            src="/plates/ballerina-hero.png"
+            src="/plates/ballerina-hero.webp"
             alt="Ballerina Cappuccina, a cartoon ballerina with a cappuccino cup for a head, waving hello"
           />
         </div>
