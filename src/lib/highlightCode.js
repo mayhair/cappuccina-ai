@@ -1,30 +1,26 @@
 // Syntax highlighting for the webpage canvas Code pane, chat tool-args, and
-// fenced markdown blocks. Uses highlight.js with only the core plus the handful
-// of languages this app renders, so the bundle stays small. Each entry point
-// returns an HTML string of escaped text and `hljs-*` token spans; callers render
-// it with dangerouslySetInnerHTML. highlight.js escapes the source, so this never
-// injects page-authored markup.
-import hljs from 'highlight.js/lib/core'
-import xml from 'highlight.js/lib/languages/xml'
-import css from 'highlight.js/lib/languages/css'
-import javascript from 'highlight.js/lib/languages/javascript'
-import json from 'highlight.js/lib/languages/json'
-import plaintext from 'highlight.js/lib/languages/plaintext'
-
-// xml also covers HTML; keep the list explicit so unrelated grammars stay out.
-hljs.registerLanguage('xml', xml)
-hljs.registerLanguage('css', css)
-hljs.registerLanguage('javascript', javascript)
-hljs.registerLanguage('json', json)
-hljs.registerLanguage('plaintext', plaintext)
+// fenced markdown blocks. Prism with only the core plus the handful of grammars
+// this app renders, so the bundle stays small. Each entry point returns an HTML
+// string of escaped text and `token` spans; callers render it with
+// dangerouslySetInnerHTML. Prism escapes the source, so this never injects
+// page-authored markup.
+import './prismSetup.js'
+import Prism from 'prismjs/components/prism-core.js'
+// Import order is load-bearing: css and javascript hook into the markup grammar,
+// and javascript extends clike.
+import 'prismjs/components/prism-markup.js' // also aliases html/xml/svg/mathml
+import 'prismjs/components/prism-css.js'
+import 'prismjs/components/prism-clike.js'
+import 'prismjs/components/prism-javascript.js'
+import 'prismjs/components/prism-json.js'
 
 // Webpage files: map by extension. Anything unknown is highlighted as JS, which
 // matches the canvas's previous default.
 const LANGUAGE_BY_EXT = {
-  html: 'xml',
-  htm: 'xml',
-  xhtml: 'xml',
-  svg: 'xml',
+  html: 'markup',
+  htm: 'markup',
+  xhtml: 'markup',
+  svg: 'markup',
   css: 'css',
   json: 'json',
   js: 'javascript',
@@ -37,10 +33,10 @@ const LANGUAGE_BY_EXT = {
 // Markdown fences: accept common aliases, fall back to plainly escaped text for
 // languages we do not bundle.
 const LANGUAGE_BY_FENCE = {
-  html: 'xml',
-  htm: 'xml',
-  xml: 'xml',
-  svg: 'xml',
+  html: 'markup',
+  htm: 'markup',
+  xml: 'markup',
+  svg: 'markup',
   css: 'css',
   scss: 'css',
   less: 'css',
@@ -60,12 +56,13 @@ function extension(fileName) {
   return dot < 0 ? '' : name.slice(dot + 1).toLowerCase()
 }
 
-// Prefer the caller's language, but never let a missing grammar throw on a
-// partially streamed or malformed file (ignoreIllegals).
+// Prism throws ("The language ... has no grammar") when the grammar is missing,
+// so an unknown language falls back to the core's empty plaintext grammar, which
+// returns escaped text with no tokens. Prism never throws on malformed source.
 function highlight(code, language) {
   const source = code ?? ''
-  const lang = hljs.getLanguage(language) ? language : 'plaintext'
-  return hljs.highlight(source, { language: lang, ignoreIllegals: true }).value
+  const grammar = language ? Prism.languages[language] : null
+  return Prism.highlight(source, grammar ?? Prism.languages.plaintext, language ?? 'plaintext')
 }
 
 export function highlightCode(code, fileName) {

@@ -35,7 +35,7 @@
   --title-chip-border: rgba(234, 114, 178, 0.34);
   --title-chip-sheen: rgba(255, 255, 255, 0.45);
 
-  /* Syntax highlighting: highlight.js tokens, themed for the app's light mode */
+  /* Syntax highlighting: Prism tokens, themed for the app's light mode */
   --code-comment: #8a90ad;
   --code-string: #2f7d5b;
   --code-keyword: #b02e74;
@@ -107,7 +107,7 @@
   --code-tag: var(--pink-ink);
   --code-attr: #cbb2f5;
   --code-number: #f0b982;
-  --code-punct: #b9bfd4;
+  --code-punct: #8b93ad;
   --code-function: #7cb7ff;
   --code-literal: #cbb2f5;
   --code-param: #f0b982;
@@ -483,7 +483,7 @@ input { caret-color: var(--pink-strong); }
   caret-color: var(--pink-strong);
 }
 .chat-rename-input:focus-visible { outline: none; }
-.tag {
+.chat-tag {
   margin-left: 0.35rem;
   font-size: 0.68em;
   font-weight: 800;
@@ -494,7 +494,7 @@ input { caret-color: var(--pink-strong); }
   background: var(--pink-soak);
   color: var(--pink-ink);
 }
-.tag.tutor {
+.chat-tag.tutor {
   border-radius: 8px;
   background: var(--pink-strong);
   color: #ffffff;
@@ -935,7 +935,7 @@ img.user-avatar {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 0.86em;
 }
-.bubble .md-pre code { white-space: pre; }
+.bubble .md-pre code { white-space: pre; color: var(--code-ident); }
 .bubble .md-code {
   padding: 0.1em 0.35em;
   border-radius: 6px;
@@ -1198,21 +1198,46 @@ img.user-avatar {
   font-size: 0.92em;
   white-space: pre-wrap;
   word-break: break-word;
-  color: var(--ink-soft);
+  color: var(--code-ident);
 }
-/* Syntax highlighting: highlight.js token classes themed with the app palette.
-   The same rules serve the canvas Code pane, tool-arg panels, and markdown. */
-.hljs-comment, .hljs-quote { color: var(--code-comment); font-style: italic; }
-.hljs-keyword, .hljs-selector-tag, .hljs-doctag, .hljs-meta .hljs-keyword { color: var(--code-keyword); font-weight: 600; }
-.hljs-name, .hljs-tag, .hljs-selector-id, .hljs-selector-class, .hljs-selector-attr, .hljs-selector-pseudo { color: var(--code-tag); }
-.hljs-attr, .hljs-attribute, .hljs-property { color: var(--code-attr); }
-.hljs-string, .hljs-regexp, .hljs-template-tag { color: var(--code-string); }
-.hljs-number { color: var(--code-number); }
-.hljs-literal, .hljs-built_in, .hljs-symbol, .hljs-bullet { color: var(--code-literal); }
-.hljs-title, .hljs-title.function_, .hljs-title.class_, .hljs-function, .hljs-function .hljs-title { color: var(--code-function); }
-.hljs-params, .hljs-variable, .hljs-template-variable, .hljs-subst { color: var(--code-param); }
-.hljs-operator, .hljs-punctuation { color: var(--code-punct); }
-.hljs-meta, .hljs-meta .hljs-string { color: var(--code-comment); }
+/* Syntax highlighting: Prism token classes themed with the app palette. The same
+   rules serve the canvas Code pane, tool-arg panels, and markdown. Plain code text
+   (identifiers, variables) keeps the surface's --code-ident colour while operators
+   and punctuation use the dimmer --code-punct, so a variable never blends into the
+   punctuation around it. */
+/* Prism's class names are unprefixed (`token tag`, `token value`, `token string`),
+   so any app rule with the same bare name would leak its padding, background,
+   uppercase, size or weight into code. Tokens are plain text: only the rules below
+   colour them. This sits before them so the equal-specificity colour rules win. */
+.canvas-code-body .token,
+.tool-args .token,
+.bubble .md-pre .token {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+  font: inherit;
+  letter-spacing: normal;
+  text-transform: none;
+}
+.token.comment, .token.prolog, .token.hashbang { color: var(--code-comment); font-style: italic; }
+.token.cdata, .token.doctype { color: var(--code-comment); }
+.token.keyword, .token.doctype-tag, .token.atrule, .token.rule, .token.important, .token.null { color: var(--code-keyword); font-weight: 600; }
+.token.tag, .token.selector, .token.namespace, .token.name, .token.selector-function-argument { color: var(--code-tag); }
+.token.attr-name, .token.property, .token.literal-property, .token.string-property { color: var(--code-attr); }
+.token.attr-value, .token.string, .token.url, .token.regex, .token.regex-source, .token.regex-delimiter,
+.token.regex-flags, .token.language-regex, .token.template-string, .token.template-punctuation { color: var(--code-string); }
+.token.number { color: var(--code-number); }
+.token.boolean, .token.constant, .token.entity, .token.named-entity { color: var(--code-literal); }
+.token.function, .token.function-variable, .token.class-name { color: var(--code-function); }
+.token.parameter, .token.interpolation { color: var(--code-param); }
+.token.operator, .token.punctuation, .token.attr-equals, .token.interpolation-punctuation { color: var(--code-punct); }
+/* Container tokens wrap a whole element or an inlined language; they keep the
+   surrounding colour and let their inner tokens do the colouring. */
+.token.style, .token.script, .token.special-attr, .token.value, .token.css, .token.javascript,
+.token.language-css, .token.language-javascript, .token.included-cdata, .token.internal-subset { color: inherit; }
 .tool-result {
   margin-top: 0.25rem;
   padding: 0.45rem 0.65rem;

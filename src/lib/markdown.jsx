@@ -4,7 +4,7 @@ import { highlightFence } from './highlightCode'
 
 // Minimal markdown -> React elements. Rendering to elements keeps untrusted
 // model output injection-safe; fenced code is escaped and tokenized by
-// highlight.js before it is injected as HTML.
+// Prism before it is injected as HTML.
 // ponytail: handles the common chat cases (bold, italic, code, code blocks,
 // lists, headings, quotes, links). If fuller CommonMark fidelity is ever
 // needed, swap this for react-markdown.
@@ -120,7 +120,6 @@ function renderBlocks(text, prefix) {
       out.push(
         <pre key={key()} className="md-pre">
           <code
-            className="hljs"
             dangerouslySetInnerHTML={{ __html: highlightFence(fence[1], body.join('\n')) }}
           />
         </pre>,
