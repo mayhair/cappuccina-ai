@@ -9,6 +9,7 @@ import {
   uploadAttachment,
   deleteAttachment,
 } from '../api/chatClient'
+import { getWebpageEnv } from '../api/webpageClient'
 import tts from '../lib/tts'
 import {
   makeMessageId,
@@ -124,6 +125,11 @@ export function useChatController(enabled) {
   const [attachments, setAttachments] = useState([])
   const [uploading, setUploading] = useState(false)
   const [attachError, setAttachError] = useState('')
+  // The chat's webpage environment (canvas files), keyed by chat id. Only the
+  // file map lives here; the server is the source of truth and it is refetched
+  // when the user switches chats. `canvasOpen` is the canvas panel's visibility.
+  const [webpages, setWebpages] = useState({})
+  const [canvasOpen, setCanvasOpen] = useState(false)
   const isStreaming = status === 'streaming'
   const inputRef = useRef(null)
   const chatsRef = useRef(chats)
@@ -205,6 +211,39 @@ export function useChatController(enabled) {
   }, [activeChatId])
 
   const activeChat = chats.find((c) => c.id === activeChatId) ?? chats[0]
+
+  // Load the active chat's webpage files from the server (source of truth) so
+  // the canvas is correct after a reload or a switch from another device. Only
+  // chats that actually built a page have files worth fetching.
+  useEffect(() => {
+    if (!enabled || !activeChatId) return
+    const chat = chatsRef.current.find((c) => c.id === activeChatId)
+    if (!chat || chat.pending) return
+    const built = (chat.messages ?? []).some((m) =>
+      (m.parts ?? []).some((p) => p.type === 'webpage'),
+    )
+    if (!built) return
+    let cancelled = false
+    getWebpageEnv(activeChatId)
+      .then((env) => {
+        if (cancelled) return
+        // Don't clobber files a live stream already produced for this chat:
+        // the fetch is a restore for reloads and chat switches, and it can
+        // resolve after the first write of a first turn.
+        setWebpages((prev) => {
+          const existing = prev[activeChatId]
+          if (existing && Object.keys(existing.files ?? {}).length > 0) return prev
+          return {
+            ...prev,
+            [activeChatId]: { webpageId: env.webpageId ?? null, files: env.files ?? {} },
+          }
+        })
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [activeChatId, enabled])
 
   // Upload picked files to the server and stage them for the next message.
   // The chat is persisted first so the files can be tied to a real chat id.
@@ -511,6 +550,37 @@ export function useChatController(enabled) {
           if (image.transparent === true) part.transparent = true
           patchNode(chatId, replyId, (m) => ({ parts: [...(m.parts ?? []), part] }))
         },
+        onWebpage: (webpage) => {
+          flushSpoken()
+          // The write is recorded as a small server-side reference; the file
+          // text arrives here for the live canvas but never travels with the
+          // history, so the next full-history sync stays small. A page is
+          // several writes: fold them into one part listing the files.
+          const part = {
+            type: 'webpage',
+            webpageId: webpage.webpageId,
+            path: webpage.path,
+            files: webpage.files ?? [],
+          }
+          patchNode(chatId, replyId, (m) => {
+            const parts = [...(m.parts ?? [])]
+            const at = parts.findIndex(
+              (p) => p.type === 'webpage' && p.webpageId === part.webpageId,
+            )
+            if (at === -1) parts.push(part)
+            else parts[at] = { ...parts[at], ...part }
+            return { parts }
+          })
+          setWebpages((prev) => ({
+            ...prev,
+            [chatId]: {
+              webpageId: webpage.webpageId,
+              files: { ...(prev[chatId]?.files ?? {}), [webpage.path]: webpage.content ?? '' },
+            },
+          }))
+          // A page is appearing: show the canvas without making the user ask.
+          setCanvasOpen(true)
+        },
         onTitle: (title) => applyTitle(chatId, title),
         onDone: () => {
           if (streamSeq.current === seq) setStatus('idle')
@@ -688,6 +758,28 @@ export function useChatController(enabled) {
     clearAttachments()
   }, [])
 
+  // Close the canvas when the user leaves a chat that had one open.
+  const selectChatAndCanvas = useCallback((id) => {
+    setCanvasOpen(false)
+    selectChat(id)
+  }, [selectChat])
+
+  // Closing hides the panel but keeps the page: the top-bar toggle and the
+  // message card can reopen it at any time (and a later turn edits it).
+  const closeWebpage = useCallback(() => setCanvasOpen(false), [])
+
+  const openCanvas = useCallback(() => setCanvasOpen(true), [])
+  const toggleCanvas = useCallback(() => setCanvasOpen((open) => !open), [])
+
+  const activeWebpage = activeChat
+    ? webpages[activeChat.id] ?? { webpageId: null, files: {} }
+    : { webpageId: null, files: {} }
+  // The toggle matches the message card: a turn that built a page shows both,
+  // even before the file fetch lands (or if it can't).
+  const hasWebpage =
+    Object.keys(activeWebpage.files).length > 0 ||
+    Boolean(activeChat?.messages?.some((m) => (m.parts ?? []).some((p) => p.type === 'webpage')))
+
   const q = query.trim().toLowerCase()
   // Empty not-yet-persisted chats stay out of the sidebar until their first message.
   const listed = chats.filter((c) => !c.pending || c.messages.length > 0)
@@ -726,11 +818,17 @@ export function useChatController(enabled) {
     clearTypingTitle,
     markDraftSent,
     markEventDeleted,
-    selectChat,
+    selectChat: selectChatAndCanvas,
     attachments,
     uploading,
     attachError,
     addAttachments,
     removeAttachment,
+    webpage: activeWebpage,
+    hasWebpage,
+    canvasOpen,
+    openCanvas,
+    closeCanvas: closeWebpage,
+    toggleCanvas,
   }
 }

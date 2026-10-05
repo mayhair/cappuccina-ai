@@ -169,6 +169,14 @@ def _init_schema(conn: sqlite3.Connection) -> None:
             created_at TEXT NOT NULL
         );
 
+        CREATE TABLE IF NOT EXISTS webpage_envs (
+            id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            chat_id TEXT NOT NULL UNIQUE REFERENCES chats(id) ON DELETE CASCADE,
+            files TEXT NOT NULL DEFAULT '{}',
+            updated_at TEXT NOT NULL
+        );
+
         CREATE INDEX IF NOT EXISTS idx_chats_user ON chats(user_id, created_at);
         CREATE INDEX IF NOT EXISTS idx_messages_chat ON messages(chat_id, id);
         CREATE INDEX IF NOT EXISTS idx_images_chat ON images(chat_id);
@@ -935,3 +943,83 @@ def delete_attachment(user_id: str, attachment_id: str) -> bool:
     except OSError:
         pass
     return True
+
+
+# ---------- webpage environments (the canvas) ----------
+
+def _parse_webpage_files(raw: str) -> dict[str, str]:
+    try:
+        data = json.loads(raw) if raw else {}
+    except (ValueError, TypeError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    return {str(k): str(v) for k, v in data.items()}
+
+
+def get_webpage_env(user_id: str, chat_id: str) -> dict | None:
+    """The chat's webpage environment as {id, files, updated_at}, or None.
+
+    User-scoped: another user's chat (or a bogus id) is a miss. The files map
+    is the server's source of truth — messages only carry a small
+    {"type": "webpage", "webpageId", ...} part, so file text never flows
+    through the full-history sync payloads.
+    """
+    row = get_conn().execute(
+        "SELECT * FROM webpage_envs WHERE chat_id = :chat_id AND user_id = :user_id",
+        {"chat_id": chat_id, "user_id": user_id},
+    ).fetchone()
+    if row is None:
+        return None
+    return {
+        "id": row["id"],
+        "user_id": row["user_id"],
+        "chat_id": row["chat_id"],
+        "files": _parse_webpage_files(row["files"]),
+        "updated_at": row["updated_at"],
+    }
+
+
+def put_webpage_file(user_id: str, chat_id: str, path: str, content: str) -> dict:
+    """Create or update one file in the chat's webpage environment.
+
+    The environment is created on the first write and reused after that, so the
+    canvas always reflects the chat's current page. Returns the env as a dict.
+    """
+    conn = get_conn()
+    row = conn.execute(
+        "SELECT * FROM webpage_envs WHERE chat_id = :chat_id AND user_id = :user_id",
+        {"chat_id": chat_id, "user_id": user_id},
+    ).fetchone()
+    now = _now()
+    if row is None:
+        env_id = uuid.uuid4().hex
+        files = {path: content}
+        conn.execute(
+            "INSERT INTO webpage_envs (id, user_id, chat_id, files, updated_at)"
+            " VALUES (:id, :user_id, :chat_id, :files, :updated_at)",
+            {
+                "id": env_id,
+                "user_id": user_id,
+                "chat_id": chat_id,
+                "files": json.dumps(files),
+                "updated_at": now,
+            },
+        )
+    else:
+        env_id = row["id"]
+        files = _parse_webpage_files(row["files"])
+        files[path] = content
+        conn.execute(
+            "UPDATE webpage_envs SET files = :files, updated_at = :updated_at"
+            " WHERE id = :id",
+            {"files": json.dumps(files), "updated_at": now, "id": env_id},
+        )
+    conn.commit()
+    return {
+        "id": env_id,
+        "user_id": user_id,
+        "chat_id": chat_id,
+        "files": files,
+        "updated_at": now,
+    }

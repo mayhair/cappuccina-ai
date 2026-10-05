@@ -261,7 +261,8 @@ Same URL: **http://localhost:5173**. Drop `--reload` for a calmer backend log.
    Other checks follow the same pattern: `scripts/flow-check.mjs`,
    `scripts/tutor-check.mjs`, `scripts/draft-check.mjs` (email draft → Send
    button), `scripts/measure-font.mjs`, `scripts/emoji-check.mjs`,
-   `scripts/capture.mjs`.
+   `scripts/webpage-check.mjs` (webpage canvas: live preview, inlined
+   styles/scripts, Code tab, reload restore), `scripts/capture.mjs`.
 
 4. **CLI smoke test** (optional, needs a running backend + keys in `.env`):
 

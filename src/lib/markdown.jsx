@@ -1,8 +1,10 @@
 import { Fragment } from 'react'
 import { renderEmoji } from './emoji'
+import { highlightFence } from './highlightCode'
 
-// Minimal, dependency-free markdown -> React elements. Rendering to elements
-// (never innerHTML) keeps untrusted model output injection-safe.
+// Minimal markdown -> React elements. Rendering to elements keeps untrusted
+// model output injection-safe; fenced code is escaped and tokenized by
+// highlight.js before it is injected as HTML.
 // ponytail: handles the common chat cases (bold, italic, code, code blocks,
 // lists, headings, quotes, links). If fuller CommonMark fidelity is ever
 // needed, swap this for react-markdown.
@@ -106,7 +108,8 @@ function renderBlocks(text, prefix) {
   while (i < lines.length) {
     const line = lines[i]
 
-    if (/^\s*```(\w*)\s*$/.test(line)) {
+    const fence = line.match(/^\s*```(\w*)\s*$/)
+    if (fence) {
       const body = []
       i++
       while (i < lines.length && !/^\s*```\s*$/.test(lines[i])) {
@@ -116,7 +119,10 @@ function renderBlocks(text, prefix) {
       if (i < lines.length) i++
       out.push(
         <pre key={key()} className="md-pre">
-          <code>{body.join('\n')}</code>
+          <code
+            className="hljs"
+            dangerouslySetInnerHTML={{ __html: highlightFence(fence[1], body.join('\n')) }}
+          />
         </pre>,
       )
       continue

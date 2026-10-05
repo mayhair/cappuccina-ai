@@ -99,6 +99,43 @@ export function ChevronIcon(props) {
   )
 }
 
+export function RefreshIcon(props) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <path d="M20 11a8 8 0 1 0-1.2 4.8" />
+      <path d="M20 4v7h-7" />
+    </svg>
+  )
+}
+
+export function DownloadIcon(props) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <path d="M12 3v12" />
+      <path d="m7 10 5 5 5-5" />
+      <path d="M5 21h14" />
+    </svg>
+  )
+}
+
+export function WindowIcon(props) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <rect x="3" y="4" width="18" height="16" rx="2.4" />
+      <path d="M3 9h18" />
+      <circle cx="6.5" cy="6.5" r="0.6" fill="currentColor" />
+    </svg>
+  )
+}
+
+export function ArrowLeftIcon(props) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <path d="M15 5l-7 7 7 7" />
+    </svg>
+  )
+}
+
 export function WrenchIcon(props) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>

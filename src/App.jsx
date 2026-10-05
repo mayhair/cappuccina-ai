@@ -3,9 +3,10 @@ import { Sidebar } from './components/Sidebar'
 import { SidebarControls } from './components/SidebarControls'
 import { TopBarTitle } from './components/TopBarTitle'
 import { ChatWindow } from './components/ChatWindow'
+import { WebpageCanvas } from './components/WebpageCanvas'
 import { ThemeToggle } from './components/ThemeToggle'
 import { SpeakerToggle } from './components/SpeakerToggle'
-import { SparkleIcon } from './components/Icons'
+import { SparkleIcon, WindowIcon } from './components/Icons'
 import { Sky, LandingPage } from './components/LandingPage'
 import { AlphaGate } from './components/AlphaGate'
 import { SettingsDialog } from './components/SettingsDialog'
@@ -152,10 +153,16 @@ export default function App() {
     attachError,
     addAttachments,
     removeAttachment,
+    webpage,
+    hasWebpage,
+    canvasOpen,
+    openCanvas,
+    closeCanvas,
+    toggleCanvas,
   } = chat
 
   return (
-    <div className={`app${collapsed ? ' is-collapsed' : ''}`}>
+    <div className={`app${collapsed ? ' is-collapsed' : ''}${canvasOpen ? ' canvas-open' : ''}`}>
       <Sky theme={theme} />
 
       <Sidebar
@@ -207,6 +214,18 @@ export default function App() {
             />
           </div>
           <div className="top-bar-right">
+            {hasWebpage && (
+              <button
+                type="button"
+                className={`ctrl-btn has-tip${canvasOpen ? ' is-on' : ''}`}
+                data-tip={canvasOpen ? 'Hide the webpage' : 'Show the webpage'}
+                aria-label={canvasOpen ? 'Hide the webpage' : 'Show the webpage'}
+                aria-pressed={canvasOpen}
+                onClick={toggleCanvas}
+              >
+                <WindowIcon />
+              </button>
+            )}
             <SpeakerToggle enabled={voice} onChange={setVoice} />
             <ThemeToggle theme={theme} onChange={setTheme} />
             <span className="ai-badge">
@@ -229,6 +248,7 @@ export default function App() {
           onNavigateBranch={navigateBranch}
           onDraftSent={(draftId) => markDraftSent(activeChatId, draftId)}
           onEventDeleted={(eventId) => markEventDeleted(activeChatId, eventId)}
+          onOpenWebpage={openCanvas}
           inputRef={inputRef}
           effort={effort}
           onEffort={setEffort}
@@ -241,6 +261,14 @@ export default function App() {
           onRemoveAttachment={removeAttachment}
         />
       </main>
+
+      {canvasOpen && (
+        <WebpageCanvas
+          files={webpage.files}
+          streaming={isStreaming}
+          onClose={closeCanvas}
+        />
+      )}
     </div>
   )
 }

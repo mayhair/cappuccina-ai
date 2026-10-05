@@ -1,6 +1,8 @@
 import base64
 import json
+import re
 from datetime import datetime
+from pathlib import PurePosixPath
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -722,7 +724,87 @@ def propose_event_deletion(event_id: str, config: RunnableConfig) -> str:
     )
 
 
-ALL_TOOLS = [solve_equation, web_search, read_webpage, lore_lookup, generate_image, image_edit, read_attachment, search_emails, read_email, draft_email, list_events, read_event, create_event, update_event, propose_event_deletion]
+# ---------- webpage builder (the canvas) ----------
+
+# One path segment: starts with a letter or number, then letters, numbers,
+# ".", "_" or "-". ".." and hidden names never match, so paths stay relative
+# and can't climb out of the environment.
+_WEBPAGE_SEGMENT = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
+
+# Text files the canvas can show. Anything else (binaries, images) must be a
+# CDN URL or data URI inside the page instead of a local file.
+WEBPAGE_EXTENSIONS = (".html", ".htm", ".css", ".js", ".mjs", ".json", ".svg", ".txt", ".md")
+
+WEBPAGE_MAX_FILE_BYTES = 100_000
+WEBPAGE_MAX_TOTAL_BYTES = 300_000
+
+
+def _webpage_path(path: str) -> str | None:
+    """A safe relative path inside the environment, or None when rejected."""
+    clean = (path or "").strip().replace("\\", "/")
+    segments = clean.split("/")
+    if not clean or len(segments) > 4:
+        return None
+    if not all(_WEBPAGE_SEGMENT.fullmatch(segment) for segment in segments):
+        return None
+    if PurePosixPath(clean).suffix.lower() not in WEBPAGE_EXTENSIONS:
+        return None
+    return clean
+
+
+@tool
+def write_webpage_file(path: str, content: str, config: RunnableConfig) -> str:
+    """Build or update a webpage in the user's live canvas. Use this whenever the user asks you to make a webpage, website, landing page, game, quiz, or anything else that runs in a browser. Write one file per call: start with `index.html`, and add `styles.css` and `script.js` when they help. The canvas shows `index.html` and loads the others by the exact relative names you give — link them like `<link rel="stylesheet" href="styles.css">` and `<script src="script.js"></script>`. Keep it a single static page with no build step and nothing a browser can't load directly; load pictures and fonts from https URLs or data URIs, never from local files. To change a page you already made, call read_webpage_file first to see the current text, then write the whole file back. The page appears live in the canvas as you write, so when you're finished tell the user it's ready. Never invent a webpage_id; the returned JSON describes what was written."""
+    user_id = _user_id(config)
+    chat_id = _chat_id(config)
+    if not user_id or not chat_id:
+        return "Building webpages isn't available right now."
+    clean = _webpage_path(path)
+    if clean is None:
+        return (
+            "That file name isn't allowed. Use a simple relative name like "
+            "index.html, styles.css or script.js (letters, numbers, dot, dash)."
+        )
+    if not content:
+        return "That file is empty — write something into it."
+    size = len(content.encode("utf-8"))
+    if size > WEBPAGE_MAX_FILE_BYTES:
+        return "That file is too big for the canvas. Keep each file under about 100 KB."
+    existing = db.get_webpage_env(user_id, chat_id)
+    others = existing["files"] if existing else {}
+    total = sum(len(v.encode("utf-8")) for k, v in others.items() if k != clean) + size
+    if total > WEBPAGE_MAX_TOTAL_BYTES:
+        return "The webpage is getting too big for the canvas. Try making it smaller."
+    env = db.put_webpage_file(user_id, chat_id, clean, content)
+    return json.dumps(
+        {
+            "status": "webpage_file_written",
+            "webpage_id": env["id"],
+            "path": clean,
+            "bytes": size,
+            "files": sorted(env["files"]),
+        }
+    )
+
+
+@tool
+def read_webpage_file(path: str, config: RunnableConfig) -> str:
+    """Read a file from the user's webpage environment. Call this before editing a page you made earlier, so you change the current text instead of starting over. Returns the file's text, or the list of files that exist when the name doesn't match."""
+    user_id = _user_id(config)
+    chat_id = _chat_id(config)
+    if not user_id or not chat_id:
+        return "The webpage isn't available right now."
+    env = db.get_webpage_env(user_id, chat_id)
+    files = env["files"] if env else {}
+    if not files:
+        return "There's no webpage yet — build one with write_webpage_file first."
+    clean = _webpage_path(path)
+    if clean is None or clean not in files:
+        return "No file named that. The webpage has: " + ", ".join(sorted(files)) + "."
+    return files[clean]
+
+
+ALL_TOOLS = [solve_equation, web_search, read_webpage, lore_lookup, generate_image, image_edit, read_attachment, write_webpage_file, read_webpage_file, search_emails, read_email, draft_email, list_events, read_event, create_event, update_event, propose_event_deletion]
 
 # Human-friendly names for UI display ("Called Tool: ...").
 TOOL_DISPLAY_NAMES = {
@@ -733,6 +815,8 @@ TOOL_DISPLAY_NAMES = {
     "generate_image": "Drawing",
     "image_edit": "Edit Picture",
     "read_attachment": "Read File",
+    "write_webpage_file": "Building Webpage",
+    "read_webpage_file": "Reading Webpage",
     "search_emails": "Inbox Search",
     "read_email": "Read Email",
     "draft_email": "Compose Email",

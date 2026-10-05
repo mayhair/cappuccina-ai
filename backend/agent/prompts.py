@@ -67,6 +67,15 @@ about it, call read_attachment with that id to read its text. Long documents \
 come back in chunks; keep calling with the offset shown until you have what \
 you need."""
 
+WEBPAGE_NOTE = """\
+When the user asks for a webpage, a website, a game, a quiz, or anything else \
+that runs in a browser, build it one file at a time with write_webpage_file. \
+Start with index.html, then add styles.css and script.js when they help — the \
+page appears live in the user's canvas as you write. To change a page you made \
+earlier, call read_webpage_file first, then write the whole file back. Keep it \
+a single static page: no build step, and load pictures and fonts from https \
+URLs or data URIs rather than local files."""
+
 
 def build_system_prompt(mode: str, subject: str | None) -> str:
     if mode == "tutor":
@@ -84,6 +93,7 @@ def build_system_prompt(mode: str, subject: str | None) -> str:
     if lore:
         sections.append(lore)
     sections.append(ATTACHMENT_NOTE)
+    sections.append(WEBPAGE_NOTE)
     if tutor:
         sections.append(tutor)
     return _JOINS.join(sections)

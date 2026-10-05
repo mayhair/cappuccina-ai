@@ -1,0 +1,219 @@
+// Render-level validation for the highlight.js integration. Covers every
+// surface the migration touched: the webpage canvas Code pane (light + dark),
+// the chat tool-args JSON panel, and markdown fenced code blocks. Also proves
+// the canvas escapes hostile source instead of injecting it.
+// Run against `npm run preview` (port 4173): node scripts/highlight-render-check.mjs
+import { chromium } from "playwright";
+
+const BASE = process.env.PREVIEW_URL || "http://localhost:4173";
+
+const browser = await chromium.launch();
+const page = await browser.newPage({ viewport: { width: 1536, height: 1024 } });
+const errors = [];
+page.on("console", (m) => m.type() === "error" && errors.push(m.text()));
+page.on("pageerror", (e) => errors.push(String(e)));
+
+const failures = [];
+const check = (label, condition) => {
+  if (!condition) failures.push(label);
+  console.log(`${condition ? "ok  " : "FAIL"} ${label}`);
+};
+
+// hljs class -> palette variable it must resolve to, mirroring src/styles.css.
+const TOKEN_WIRING = {
+  "hljs-comment": "--code-comment",
+  "hljs-quote": "--code-comment",
+  "hljs-meta": "--code-comment",
+  "hljs-keyword": "--code-keyword",
+  "hljs-selector-tag": "--code-keyword",
+  "hljs-doctag": "--code-keyword",
+  "hljs-name": "--code-tag",
+  "hljs-tag": "--code-tag",
+  "hljs-selector-id": "--code-tag",
+  "hljs-selector-class": "--code-tag",
+  "hljs-selector-attr": "--code-tag",
+  "hljs-selector-pseudo": "--code-tag",
+  "hljs-attr": "--code-attr",
+  "hljs-attribute": "--code-attr",
+  "hljs-property": "--code-attr",
+  "hljs-string": "--code-string",
+  "hljs-regexp": "--code-string",
+  "hljs-number": "--code-number",
+  "hljs-literal": "--code-literal",
+  "hljs-built_in": "--code-literal",
+  "hljs-symbol": "--code-literal",
+  "hljs-title": "--code-function",
+  "hljs-function": "--code-function",
+  "hljs-params": "--code-param",
+  "hljs-variable": "--code-param",
+  "hljs-subst": "--code-param",
+  "hljs-punctuation": "--code-punct",
+};
+
+// Proves the stylesheet rules actually apply: each token class's computed color
+// must equal the computed color of the palette variable it should use.
+async function checkWiring(label) {
+  const result = await page.evaluate((mapping) => {
+    const probe = document.createElement("div");
+    document.body.appendChild(probe);
+    const colorOf = (apply) => {
+      const s = document.createElement("span");
+      apply(s);
+      s.textContent = "x";
+      probe.appendChild(s);
+      const c = getComputedStyle(s).color;
+      s.remove();
+      return c;
+    };
+    const tokens = {};
+    const vars = {};
+    for (const [cls, name] of Object.entries(mapping)) {
+      tokens[cls] = colorOf((s) => (s.className = cls));
+      if (!(name in vars)) vars[name] = colorOf((s) => (s.style.color = `var(${name})`));
+    }
+    probe.remove();
+    return { tokens, vars };
+  }, TOKEN_WIRING);
+  const bad = Object.entries(TOKEN_WIRING).filter(([cls, name]) => result.tokens[cls] !== result.vars[name]);
+  check(`${label}: all ${Object.keys(TOKEN_WIRING).length} token classes resolve to their palette variable`, bad.length === 0);
+  if (bad.length) console.log("  mismatched:", bad.map(([c, n]) => `${c} != ${n}`).join(", "));
+}
+
+const INDEX =
+  '<!doctype html><html><head><link rel="stylesheet" href="styles.css"></head><body><h1>Hello cats</h1><script src="script.js"></script></body></html>';
+const CSS = "body { color: rgb(1, 2, 3); }";
+// Hostile string literal: if the canvas failed to escape, this would become a
+// real <img> in the app DOM and fire onerror.
+const JS = 'const evil = "<img src=x onerror=window.__hljs_xss=1>";\nfunction f(x) { return x; }';
+
+await page.route("**/api/v1/auth/me", (route) =>
+  route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify({ id: "check", email: "check@example.com", displayName: "Check" }),
+  }),
+);
+
+let savedChats = [];
+await page.route("**/api/v1/chats", (route) =>
+  route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body:
+      route.request().method() === "GET"
+        ? JSON.stringify(savedChats)
+        : JSON.stringify({ id: "chat-check", title: "New chat" }),
+  }),
+);
+
+let env = { webpageId: null, files: {}, updatedAt: null };
+await page.route("**/api/v1/webpages/**", (route) =>
+  route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(env) }),
+);
+
+const files = { "index.html": INDEX, "styles.css": CSS, "script.js": JS };
+const sse = [
+  "event: start\ndata: {}\n\n",
+  ...Object.entries(files).flatMap(([path, content], i) => [
+    `event: tool_call\ndata: ${JSON.stringify({ id: `t${i}`, name: "write_webpage_file", display: "Building Webpage", args: { path, bytes: content.length } })}\n\n`,
+    `event: tool_result\ndata: ${JSON.stringify({ id: `t${i}`, name: "write_webpage_file", content: JSON.stringify({ status: "webpage_file_written", path }), ok: true })}\n\n`,
+    `event: webpage\ndata: ${JSON.stringify({ webpageId: "env-check", path, files: Object.keys(files).slice(0, i + 1), content })}\n\n`,
+  ]),
+  'event: token\ndata: {"content":"Done!"}\n\n',
+  "event: done\ndata: {}\n\n",
+].join("");
+
+await page.route("**/api/v1/chat/stream", (route) =>
+  route.fulfill({ status: 200, contentType: "text/event-stream", body: sse }),
+);
+
+await page.goto(`${BASE}/`, { waitUntil: "networkidle" });
+await page.fill('textarea[aria-label="Message Cappuccina"]', "make me a webpage");
+await page.keyboard.press("Enter");
+await page.waitForSelector(".webpage-canvas", { timeout: 5000 });
+await page.waitForSelector(".webpage-card", { timeout: 5000 });
+
+// 1. tool-args JSON panel uses hljs tokens. Tool calls sit in a Thinking block
+//    that auto-collapses when the stream finishes, so open it first.
+await page.locator(".thinking-head").first().click();
+await page.waitForSelector(".tool-call-head", { timeout: 3000 });
+await page.locator(".tool-call-head").first().click();
+await page.waitForSelector(".tool-args", { timeout: 3000 });
+const argKeys = await page.locator(".tool-args .hljs-attr").count();
+const argStrings = await page.locator(".tool-args .hljs-string").count();
+check("tool-args: JSON keys highlighted", argKeys > 0);
+check("tool-args: JSON strings highlighted", argStrings > 0);
+
+// 2. canvas Code pane: JS tokens, escaping, and theme colors.
+await page.click('.canvas-tabs button:has-text("Code")');
+await page.waitForSelector(".canvas-file-row", { timeout: 3000 });
+await page.click('.canvas-file-row:has-text("script.js")');
+await page.waitForSelector(".canvas-code-body .hljs-keyword", { timeout: 3000 });
+
+check("canvas js: keyword token", (await page.locator(".canvas-code-body .hljs-keyword").count()) > 0);
+check("canvas js: function title token", (await page.locator(".canvas-code-body .hljs-title").count()) > 0);
+check("canvas js: parameter token", (await page.locator(".canvas-code-body .hljs-params").count()) > 0);
+check("canvas escaping: no injected <img>", (await page.locator(".canvas-code-body img").count()) === 0);
+const xssFired = await page.evaluate(() => window.__hljs_xss);
+check("canvas escaping: onerror never ran", xssFired === undefined);
+const codeText = await page.locator(".canvas-code-body").textContent();
+check("canvas escaping: hostile source shown as text", codeText.includes("<img src=x onerror="));
+
+await page.evaluate(() => {
+  document.documentElement.dataset.theme = "light";
+});
+await checkWiring("css light theme");
+const lightColor = await page
+  .locator(".canvas-code-body .hljs-keyword")
+  .first()
+  .evaluate((el) => getComputedStyle(el).color);
+await page.evaluate(() => {
+  document.documentElement.dataset.theme = "dark";
+});
+await checkWiring("css dark theme");
+const darkColor = await page
+  .locator(".canvas-code-body .hljs-keyword")
+  .first()
+  .evaluate((el) => getComputedStyle(el).color);
+check("canvas: keyword has a light-theme color", /^rgb/.test(lightColor));
+check("canvas: keyword has a dark-theme color", /^rgb/.test(darkColor));
+check("canvas: light and dark keyword colors differ", lightColor !== darkColor);
+check("canvas: dark theme applied", (await page.evaluate(() => document.documentElement.dataset.theme)) === "dark");
+
+// 3. markdown fenced block uses hljs tokens (restored chat with a fence).
+const fenced = "Here you go:\n\n```js\nconst x = 1;\n```\n";
+env = { webpageId: "env-check", files, updatedAt: "2026-01-01T00:00:00Z" };
+savedChats = [
+  {
+    id: "chat-check",
+    title: "New chat",
+    mode: "chat",
+    subject: null,
+    messages: [
+      { id: "u1", role: "user", content: "make me a webpage" },
+      {
+        id: "a1",
+        parentId: "u1",
+        role: "assistant",
+        content: fenced,
+        parts: [{ type: "text", text: fenced }],
+      },
+    ],
+  },
+];
+await page.reload({ waitUntil: "networkidle" });
+await page.waitForSelector(".md-pre", { timeout: 5000 });
+check("markdown: fenced block rendered", (await page.locator(".md-pre").count()) > 0);
+check("markdown: fenced code shows source", (await page.locator(".md-pre").textContent()).includes("const x = 1"));
+check("markdown: fenced js keyword token", (await page.locator(".md-pre .hljs-keyword").count()) > 0);
+
+check("no console errors", errors.length === 0);
+if (errors.length) console.log("console errors:", errors);
+
+await browser.close();
+
+if (failures.length) {
+  console.error(`\n${failures.length} check(s) failed`);
+  process.exit(1);
+}
+console.log("\nall render checks passed");

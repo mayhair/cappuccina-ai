@@ -143,6 +143,88 @@ def _image_part_from_result(name: str, output_text: str) -> dict | None:
     return part
 
 
+# The tool that writes into a chat's webpage environment (the canvas).
+WEBPAGE_FILE_TOOL = "write_webpage_file"
+
+
+def _webpage_tool_args(name: str, args: dict) -> dict:
+    """Stored/streamed args for a webpage write: the file text stays server-side.
+
+    Message parts ride along with every full-history sync, so file content must
+    not travel in them (mirrors how image bytes only travel as a small
+    {"type": "image", "imageId"} part). Keep the path and size for display.
+    """
+    if name != WEBPAGE_FILE_TOOL or not isinstance(args, dict):
+        return args
+    redacted = {"path": args.get("path", "")}
+    content = args.get("content")
+    if isinstance(content, str):
+        redacted["bytes"] = len(content.encode("utf-8"))
+    return redacted
+
+
+def _webpage_part_from_result(output_text: str) -> dict | None:
+    """A {"type": "webpage"} part for a successful write_webpage_file result.
+
+    The part only references the saved environment by id and names its files, so
+    the page text never flows through the full-history sync payloads. Returns
+    None for any other tool or a failed/malformed result.
+    """
+    if not output_text:
+        return None
+    try:
+        data = json.loads(output_text)
+    except (ValueError, TypeError):
+        return None
+    if not isinstance(data, dict) or data.get("status") != "webpage_file_written":
+        return None
+    if not data.get("webpage_id") or not data.get("path"):
+        return None
+    return {
+        "type": "webpage",
+        "webpageId": data["webpage_id"],
+        "path": data["path"],
+        "files": data.get("files") or [],
+    }
+
+
+def _merge_webpage_part(parts: list[dict], part: dict) -> None:
+    """Fold a webpage write into the turn's existing part so one page is one card.
+
+    A page is usually several writes (index.html, styles.css, script.js); the UI
+    shows a single card listing the environment's files. The part keeps the
+    position of the turn's first write.
+    """
+    for existing in reversed(parts):
+        if (
+            isinstance(existing, dict)
+            and existing.get("type") == "webpage"
+            and existing.get("webpageId") == part["webpageId"]
+        ):
+            existing["files"] = part["files"]
+            existing["path"] = part["path"]
+            return
+    parts.append(part)
+
+
+def _redact_webpage_parts(items: list) -> list:
+    """Strip write_webpage_file content from stored parts/tools (defense in depth).
+
+    The server always builds redacted args, but a client can send its own tree
+    during full-history sync; this keeps file text out of the database either way.
+    """
+    out = []
+    for item in items or []:
+        if (
+            isinstance(item, dict)
+            and item.get("name") == WEBPAGE_FILE_TOOL
+            and isinstance(item.get("args"), dict)
+        ):
+            item = {**item, "args": _webpage_tool_args(WEBPAGE_FILE_TOOL, item["args"])}
+        out.append(item)
+    return out
+
+
 def _final_extras(messages) -> tuple[str, list[ToolCall], list[dict]]:
     """Reasoning, tool calls, and the ordered interleaving of the two."""
     reasoning = ""
@@ -167,7 +249,7 @@ def _final_extras(messages) -> tuple[str, list[ToolCall], list[dict]]:
         for call in getattr(msg, "tool_calls", None) or []:
             call_id = call.get("id") or ""
             name = call.get("name", "")
-            args = call.get("args", {})
+            args = _webpage_tool_args(name, call.get("args", {}) or {})
             pending.append((name, args, call_id))
             part = {
                 "type": "tool",
@@ -190,6 +272,9 @@ def _final_extras(messages) -> tuple[str, list[ToolCall], list[dict]]:
                 image_part = _image_part_from_result(part.get("name", ""), output_text)
                 if image_part is not None:
                     parts.append(image_part)
+                webpage_part = _webpage_part_from_result(output_text)
+                if webpage_part is not None:
+                    _merge_webpage_part(parts, webpage_part)
     tool_calls = [
         ToolCall(
             name=name,
@@ -295,12 +380,13 @@ def _attachment_blocks(parts, user_id: str) -> list[dict]:
 
 
 def _assistant_content(m) -> str:
-    """Assistant text plus pointers to any pictures it produced.
+    """Assistant text plus pointers to any pictures and webpages it produced.
 
-    Prior turns are replayed as plain text, so an image's id would otherwise be
-    invisible to the model and it could not call image_edit on an earlier
-    picture (it would redraw from scratch instead). The pointer names the id;
-    the bytes stay server-side.
+    Prior turns are replayed as plain text, so an image's id (or a webpage's
+    file list) would otherwise be invisible to the model — it could not call
+    image_edit on an earlier picture or read_webpage_file on an earlier page (it
+    would redraw both from scratch instead). The pointers name ids/files; the
+    actual bytes and text stay server-side.
     """
     text = m.content or ""
     pointers = [
@@ -309,6 +395,11 @@ def _assistant_content(m) -> str:
         if isinstance(part, dict)
         and part.get("type") == "image"
         and part.get("imageId")
+    ]
+    pointers += [
+        "[Webpage (files: " + ", ".join(part.get("files") or []) + ")]"
+        for part in m.parts or []
+        if isinstance(part, dict) and part.get("type") == "webpage" and part.get("files")
     ]
     if pointers:
         text = (text + "\n" + "\n".join(pointers)).strip()
@@ -684,6 +775,28 @@ async def get_image(image_id: str, user=Depends(current_user)):
     )
 
 
+# ---------- webpage environments (the canvas) ----------
+
+@app.get("/api/v1/webpages/{chat_id}")
+async def get_webpage(chat_id: str, user=Depends(current_user)) -> dict:
+    """The chat's webpage environment for the canvas.
+
+    Returns {webpageId, files, updatedAt}; a chat without a page yet returns an
+    empty files map so the canvas can show its empty state. User-scoped, and the
+    file text lives only here — never in the full-history sync payloads.
+    """
+    if db.get_chat(user["id"], chat_id) is None:
+        raise HTTPException(status_code=404, detail="Chat not found")
+    env = db.get_webpage_env(user["id"], chat_id)
+    if env is None:
+        return {"webpageId": None, "files": {}, "updatedAt": None}
+    return {
+        "webpageId": env["id"],
+        "files": env["files"],
+        "updatedAt": env["updated_at"],
+    }
+
+
 # ---------- attachments (user uploads) ----------
 
 MAX_IMAGE_BYTES = 20 * 1024 * 1024
@@ -812,8 +925,8 @@ def _sync_history(chat_id: str, req: ChatRequest) -> str | None:
                 "role": m.role,
                 "content": m.content,
                 "reasoning": m.reasoning or "",
-                "tools": m.tools or [],
-                "parts": m.parts or [],
+                "tools": _redact_webpage_parts(m.tools or []),
+                "parts": _redact_webpage_parts(m.parts or []),
                 "thinking_done": m.thinking_done,
                 "thought_seconds": m.thought_seconds,
             }
@@ -957,10 +1070,11 @@ async def _stream_chat_events(req: ChatRequest, user: dict):
             tool_run_ids.add(call_id)
             if nested:
                 continue
-            args = event["data"].get("input", {}) or {}
-            if not isinstance(args, dict):
-                args = {"input": args}
+            raw_args = event["data"].get("input", {}) or {}
+            if not isinstance(raw_args, dict):
+                raw_args = {"input": raw_args}
             name = event.get("name", "")
+            args = _webpage_tool_args(name, raw_args)
             blocks.open()
             tools_by_id[call_id] = {
                 "id": call_id,
@@ -1021,6 +1135,22 @@ async def _stream_chat_events(req: ChatRequest, user: dict):
             if image_part is not None:
                 parts.append(image_part)
                 yield {"event": "image", "data": json.dumps(image_part)}
+            webpage_part = _webpage_part_from_result(output_text)
+            if webpage_part is not None:
+                _merge_webpage_part(parts, webpage_part)
+                env = db.get_webpage_env(user["id"], req.chat_id)
+                content = (env["files"] if env else {}).get(webpage_part["path"], "")
+                yield {
+                    "event": "webpage",
+                    "data": json.dumps(
+                        {
+                            "webpageId": webpage_part["webpageId"],
+                            "path": webpage_part["path"],
+                            "files": webpage_part["files"],
+                            "content": content,
+                        }
+                    ),
+                }
         elif kind == "on_tool_error":
             call_id = event.get("run_id", "")
             if call_id not in tools_by_id:

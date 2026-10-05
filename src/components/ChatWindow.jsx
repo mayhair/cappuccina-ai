@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { SendIcon, ChevronIcon, WrenchIcon, CopyIcon, CheckIcon, RetryIcon, MailIcon, PencilIcon, PaperclipIcon, FileIcon, CalendarIcon, MicIcon } from './Icons'
+import { SendIcon, ChevronIcon, WrenchIcon, CopyIcon, CheckIcon, RetryIcon, MailIcon, PencilIcon, PaperclipIcon, FileIcon, CalendarIcon, MicIcon, WindowIcon } from './Icons'
 import { EffortSelector } from './EffortSelector'
 import { ModeSwitch } from './ModeSwitch'
 import { Markdown } from '../lib/markdown'
+import { highlightJson } from '../lib/highlightCode'
 import { EmojiText } from '../lib/emoji'
 import { branchPosition } from '../lib/branching'
 import { useVoiceInput } from '../hooks/useVoiceInput'
@@ -48,9 +49,14 @@ function thinkingParts(message) {
 // render a new thinking block immediately after a chat message.
 function messageSegments(message) {
   // Drop whitespace-only text parts: the model sometimes streams a lone space
-  // before a tool call, which would otherwise render as an empty bubble.
+  // before a tool call, which would otherwise render as an empty bubble. Images
+  // and webpages render as their own cards below the message, so they never
+  // join a thinking block either.
   const raw = thinkingParts(message).filter(
-    (p) => p.type !== 'text' || (p.text ?? '').trim() !== '',
+    (p) =>
+      p.type !== 'image' &&
+      p.type !== 'webpage' &&
+      (p.type !== 'text' || (p.text ?? '').trim() !== ''),
   )
   const content = message.content ?? ''
   const hasTextPart = raw.some((p) => p.type === 'text')
@@ -87,35 +93,6 @@ function formatArgs(args) {
   } catch {
     return String(args)
   }
-}
-
-// Colours a pretty-printed JSON blob by splitting it into React element spans
-// (never innerHTML) so untrusted model output stays injection-safe. Anything
-// that is not a quoted string, number, or boolean/null literal is left as
-// plain text, so non-JSON args still render legibly.
-const JSON_TOKEN =
-  /("(?:\\.|[^"\\])*"\s*:)|("(?:\\.|[^"\\])*")|(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)|(true|false|null)/g
-
-function highlightJson(text) {
-  const out = []
-  let last = 0
-  let n = 0
-  for (const m of text.matchAll(JSON_TOKEN)) {
-    if (m.index > last) out.push(text.slice(last, m.index))
-    const cls =
-      m[1] !== undefined ? 'json-key'
-        : m[2] !== undefined ? 'json-string'
-          : m[3] !== undefined ? 'json-number'
-            : 'json-literal'
-    out.push(
-      <span key={`j-${n++}`} className={cls}>
-        {m[0]}
-      </span>,
-    )
-    last = m.index + m[0].length
-  }
-  if (last < text.length) out.push(text.slice(last))
-  return out
 }
 
 // A successful draft_email tool result carries JSON the UI turns into a
@@ -174,6 +151,62 @@ function imageResultSummary(tool) {
   } catch {
     return null
   }
+}
+
+// A write_webpage_file result is a machine-readable pointer at the chat's
+// webpage environment (see backend/app/main.py); the page renders in the canvas,
+// so the thinking panel only needs a one-liner.
+const WEBPAGE_FILE_TOOL = 'write_webpage_file'
+
+function webpageResultSummary(tool) {
+  if (tool?.name !== WEBPAGE_FILE_TOOL || typeof tool.result !== 'string') return null
+  try {
+    const data = JSON.parse(tool.result)
+    if (data?.status !== 'webpage_file_written' || !data.path) return null
+    return `Saved ${data.path} — see the canvas ✨`
+  } catch {
+    return null
+  }
+}
+
+// A page the assistant built or changed in this turn, for the card under the
+// message. Several writes in one turn share the environment id, so they show
+// as one card listing the files.
+function webpagesFromParts(parts) {
+  const out = []
+  for (const part of parts ?? []) {
+    if (part?.type !== 'webpage' || !part.webpageId) continue
+    const existing = out.find((w) => w.webpageId === part.webpageId)
+    if (existing) {
+      existing.files = part.files ?? existing.files
+      existing.path = part.path ?? existing.path
+    } else {
+      out.push({ webpageId: part.webpageId, path: part.path, files: [...(part.files ?? [])] })
+    }
+  }
+  return out
+}
+
+function WebpageCard({ webpage, onOpen }) {
+  const files = webpage.files ?? []
+  return (
+    <figure className="webpage-card">
+      <div className="webpage-card-head">
+        <WindowIcon />
+        <span className="webpage-card-title">Webpage ready</span>
+      </div>
+      {files.length > 0 && (
+        <ul className="webpage-card-files">
+          {files.map((name) => (
+            <li key={name}>{name}</li>
+          ))}
+        </ul>
+      )}
+      <button type="button" className="webpage-card-open" onClick={onOpen}>
+        Open canvas
+      </button>
+    </figure>
+  )
 }
 
 // Accepted by the picker; the server rejects anything else with a clear error.
@@ -609,13 +642,18 @@ function ToolCallBlock({ tool, onManualToggle }) {
           {argsText && (
             <div className="tool-section">
               <div className="tool-section-label">Input</div>
-              <pre className="tool-args">{highlightJson(argsText)}</pre>
+              <pre
+                className="tool-args"
+                dangerouslySetInnerHTML={{ __html: highlightJson(argsText) }}
+              />
             </div>
           )}
           <div className="tool-section">
             <div className="tool-section-label">Result</div>
             <div className="tool-result">
-              {imageResultSummary(tool) ?? <EmojiText text={tool.result ?? 'Running…'} />}
+              {imageResultSummary(tool) ??
+                webpageResultSummary(tool) ??
+                <EmojiText text={tool.result ?? 'Running…'} />}
             </div>
           </div>
         </div>
@@ -820,7 +858,7 @@ function EditMessageForm({ value, onChange, onSend, onCancel }) {
   )
 }
 
-function MessageRow({ message, prev, isActiveStream, user, onRetry, onDraftSent, onEventDeleted, branch, onEdit, onRegenerate, onNavigateBranch }) {
+function MessageRow({ message, prev, isActiveStream, user, onRetry, onDraftSent, onEventDeleted, onOpenWebpage, branch, onEdit, onRegenerate, onNavigateBranch }) {
   const m = message
   const [editing, setEditing] = useState(false)
   const [editText, setEditText] = useState('')
@@ -836,6 +874,7 @@ function MessageRow({ message, prev, isActiveStream, user, onRetry, onDraftSent,
   const drafts = toolParts.map(draftFromTool).filter(Boolean)
   const proposals = toolParts.map(deleteFromTool).filter(Boolean)
   const images = toolParts.map(imageFromPart).filter(Boolean)
+  const webpages = webpagesFromParts(toolParts)
   const userAttachments =
     m.role === 'user'
       ? (m.parts ?? []).map(attachmentFromPart).filter(Boolean)
@@ -908,6 +947,9 @@ function MessageRow({ message, prev, isActiveStream, user, onRetry, onDraftSent,
           )}
           {images.map((img) => (
             <ImageCard key={img.imageId} image={img} />
+          ))}
+          {webpages.map((w) => (
+            <WebpageCard key={w.webpageId} webpage={w} onOpen={() => onOpenWebpage?.(w)} />
           ))}
           {!isActiveStream && drafts.map((d, di) => (
             <DraftCard
@@ -1145,7 +1187,7 @@ function Composer({
   )
 }
 
-export function ChatWindow({ chat, user, isStreaming, draft, onDraft, onSend, onRetry, onEdit, onRegenerate, onNavigateBranch, onDraftSent, onEventDeleted, inputRef, effort, onEffort, mode, onMode, attachments = [], uploading = false, attachError = '', onAttach, onRemoveAttachment }) {
+export function ChatWindow({ chat, user, isStreaming, draft, onDraft, onSend, onRetry, onEdit, onRegenerate, onNavigateBranch, onDraftSent, onEventDeleted, onOpenWebpage, inputRef, effort, onEffort, mode, onMode, attachments = [], uploading = false, attachError = '', onAttach, onRemoveAttachment }) {
   const listRef = useRef(null)
 
   const canAttach = !isStreaming && !uploading
@@ -1281,6 +1323,7 @@ export function ChatWindow({ chat, user, isStreaming, draft, onDraft, onSend, on
             onNavigateBranch={onNavigateBranch}
             onDraftSent={onDraftSent}
             onEventDeleted={onEventDeleted}
+            onOpenWebpage={onOpenWebpage}
           />
         ))}
       </div>
