@@ -133,6 +133,17 @@ def _chat_id(config: RunnableConfig | None) -> str:
     return ((config or {}).get("configurable", {}) or {}).get("chat_id", "")
 
 
+def _reply_id(config: RunnableConfig | None) -> str | None:
+    """The assistant-message uid of the reply being streamed, when known.
+
+    All writes of one AI run share it, which is what folds them into a single
+    iteration (db.commit_webpage_version). Missing -> None -> each write becomes
+    its own iteration, so no write is ever unrecorded.
+    """
+    value = ((config or {}).get("configurable", {}) or {}).get("reply_id")
+    return str(value) or None if value else None
+
+
 # ---------- image generation ----------
 
 # Resolutions the image tools may explicitly request. When the agent doesn't
@@ -775,11 +786,14 @@ def write_webpage_file(path: str, content: str, config: RunnableConfig) -> str:
     total = sum(len(v.encode("utf-8")) for k, v in others.items() if k != clean) + size
     if total > WEBPAGE_MAX_TOTAL_BYTES:
         return "The webpage is getting too big for the canvas. Try making it smaller."
-    env = db.put_webpage_file(user_id, chat_id, clean, content)
+    env = db.put_webpage_file(
+        user_id, chat_id, clean, content, message_uid=_reply_id(config)
+    )
     return json.dumps(
         {
             "status": "webpage_file_written",
             "webpage_id": env["id"],
+            "version_id": env["version"]["id"],
             "path": clean,
             "bytes": size,
             "files": sorted(env["files"]),

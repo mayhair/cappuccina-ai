@@ -46,6 +46,7 @@
   --code-function: #1f6feb;
   --code-literal: #7a4fd0;
   --code-param: #a25b1e;
+  --code-ident: #3b4374;
 
   --popover-bg: #ffffff;
   --popover-border: rgba(44, 49, 81, 0.14);
@@ -110,6 +111,7 @@
   --code-function: #7cb7ff;
   --code-literal: #cbb2f5;
   --code-param: #f0b982;
+  --code-ident: #c8cee6;
 
   --popover-bg: rgba(30, 34, 48, 0.94);
   --popover-border: rgba(238, 240, 246, 0.14);
@@ -2724,7 +2726,12 @@ a.settings-save { text-decoration: none; display: inline-flex; align-items: cent
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 12.5px;
   line-height: 1.55;
-  color: var(--ink-soft);
+  /* The edit overlay paints the same text twice (highlight behind, transparent
+     textarea in front): no ligatures and one tab size on both sides keeps the
+     caret exactly on the colored glyphs. */
+  font-variant-ligatures: none;
+  tab-size: 2;
+  color: var(--code-ident);
   white-space: pre;
   background: var(--code-bg);
   scrollbar-width: thin;
@@ -2740,6 +2747,189 @@ a.settings-save { text-decoration: none; display: inline-flex; align-items: cent
 }
 .canvas-code-body::-webkit-scrollbar-thumb:hover { background: var(--pink-strong); background-clip: padding-box; }
 .canvas-code-body::-webkit-scrollbar-corner { background: transparent; }
+
+/* Iteration history: one bar under the header, with the full list on demand. */
+.canvas-history {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.4rem 0.7rem;
+  border-bottom: 1px solid var(--hairline);
+  font-size: 12.5px;
+  color: var(--ink-faint);
+}
+.canvas-history-step,
+.canvas-history-btn {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  flex: none;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  transition: background 140ms ease, color 140ms ease;
+}
+.canvas-history-step:hover:not(:disabled),
+.canvas-history-btn:hover:not(:disabled) { background: var(--hover-tint); color: var(--ink); }
+.canvas-history-step:focus-visible,
+.canvas-history-btn:focus-visible { outline: 2px solid var(--pink-strong); outline-offset: 1px; }
+.canvas-history-step:disabled,
+.canvas-history-btn:disabled { opacity: 0.35; cursor: default; }
+.canvas-history-step svg,
+.canvas-history-btn svg { width: 16px; height: 16px; }
+/* One right-pointing chevron icon, turned into a left/right step pair. */
+.canvas-history-step:first-child svg { transform: rotate(180deg); }
+.canvas-history-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.canvas-history-count { color: var(--ink); font-weight: 700; }
+.canvas-history-meta {
+  font-size: 11.5px;
+  color: var(--ink-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.canvas-history-panel {
+  position: absolute;
+  top: 100%;
+  left: 0.7rem;
+  right: 0.7rem;
+  z-index: 6;
+  max-height: 320px;
+  overflow: auto;
+  padding: 0.35rem;
+  border: 1px solid var(--hairline);
+  border-radius: 12px;
+  background: var(--glass-strong);
+  box-shadow: var(--shadow);
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar) transparent;
+}
+.canvas-history-panel::-webkit-scrollbar { width: 8px; }
+.canvas-history-panel::-webkit-scrollbar-track { background: transparent; }
+.canvas-history-panel::-webkit-scrollbar-thumb { border-radius: 999px; background: var(--scrollbar); }
+.canvas-history-seq {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-faint);
+}
+.canvas-history-panel .canvas-file-name { flex: 1 1 auto; }
+
+.canvas-notice {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0 0.7rem 0.4rem;
+  padding: 0.4rem 0.6rem;
+  border-radius: 8px;
+  background: var(--danger-soak);
+  color: var(--danger-strong);
+  font-size: 12.5px;
+}
+.canvas-notice .canvas-icon-btn { width: 24px; height: 24px; margin-left: auto; color: inherit; }
+.canvas-notice .canvas-icon-btn svg { width: 15px; height: 15px; }
+
+/* Manual editing of the active iteration (its own iteration once saved). */
+.canvas-edit-btn { margin-left: auto; width: 28px; height: 28px; }
+.canvas-edit-btn:disabled { opacity: 0.35; cursor: default; }
+.canvas-edit-btn:disabled:hover { background: transparent; color: var(--ink-faint); }
+/* The edit textarea carries .canvas-code-body too, so the pane keeps the exact
+   code look (monospace stack, size, line-height, padding, panel background) and
+   only the textarea-specific bits are added here — no font/background overrides,
+   or the theme changes the moment the pencil is pressed. */
+.canvas-code-edit-wrap {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+/* The highlight layer paints the panel background and the text; the textarea on
+   top is fully transparent, so the pane looks exactly as it does when reading. */
+.canvas-code-highlight,
+.canvas-code-edit {
+  position: absolute;
+  inset: 0;
+}
+.canvas-code-highlight {
+  overflow: hidden;
+  pointer-events: none;
+  user-select: none;
+}
+.canvas-code-edit {
+  z-index: 1;
+  overflow: auto;
+  border: none;
+  outline: none;
+  resize: none;
+  background: transparent;
+  color: transparent;
+  caret-color: var(--pink-strong);
+}
+/* The selection tints the highlighted text instead of repainting it. */
+.canvas-code-edit::selection { background: var(--pink-soak); color: transparent; }
+.canvas-edit-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.45rem 0.7rem;
+  border-top: 1px solid var(--hairline);
+  font-size: 12.5px;
+  color: var(--ink-faint);
+}
+.canvas-edit-hint {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.canvas-edit-save,
+.canvas-edit-cancel {
+  border: none;
+  border-radius: 999px;
+  padding: 0.25rem 0.7rem;
+  font: inherit;
+  cursor: pointer;
+}
+.canvas-edit-save { background: var(--pink-soak); color: var(--pink-ink); font-weight: 700; }
+.canvas-edit-cancel { background: transparent; color: var(--ink-faint); }
+.canvas-edit-save:hover:not(:disabled) { background: var(--pink-strong); color: #fff; }
+.canvas-edit-cancel:hover { color: var(--ink); }
+.canvas-edit-save:disabled,
+.canvas-edit-cancel:disabled { opacity: 0.45; cursor: default; }
+
+/* Changes tab: the changed-file list above the unified diff. */
+.canvas-change-list {
+  flex: none;
+  max-height: 32%;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar) transparent;
+  display: flex;
+  flex-direction: column;
+  padding: 0.35rem 0.4rem;
+  border-bottom: 1px solid var(--hairline);
+}
+.canvas-change-list::-webkit-scrollbar { width: 8px; }
+.canvas-change-list::-webkit-scrollbar-track { background: transparent; }
+.canvas-change-list::-webkit-scrollbar-thumb { border-radius: 999px; background: var(--scrollbar); }
+.canvas-change-list .canvas-file-name { flex: 1 1 auto; }
+.canvas-change-list .canvas-history-meta { flex: none; padding-left: 0.4rem; }
+.canvas-diff { display: block; }
+.diff-line { display: block; white-space: pre; }
+.diff-ctx { color: var(--code-ident); }
+.diff-add { color: var(--ok-ink); }
+.diff-del { color: var(--danger); }
+.diff-hunk { color: var(--ink-faint); font-style: italic; }
+.canvas-diff-note { padding: 0.4rem 0.7rem; margin: 0; }
 
 .canvas-empty {
   flex: 1 1 auto;

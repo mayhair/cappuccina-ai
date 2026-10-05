@@ -50,10 +50,26 @@ Chat:
 
 Webpage environments (the canvas a built page renders in):
 
-- `GET /api/v1/webpages/{chat_id}` — `{webpageId, files, updatedAt}` for the
-  chat's page (empty `files` before anything is written). File text lives only
-  here; messages carry a small `{type: "webpage", webpageId, files}` part and
-  the `webpage` SSE event carries each write's text for the live preview.
+- `GET /api/v1/webpages/{chat_id}` — `{webpageId, files, updatedAt, activeVersionId}`
+  for the chat's page (empty `files` before anything is written). File text lives
+  only here; messages carry a small `{type: "webpage", webpageId, files}` part and
+  the `webpage` SSE event carries each write's text (plus its `versionId`) for the
+  live preview.
+- `GET /api/v1/webpages/{chat_id}/versions` — `{activeVersionId, versions}`: every
+  iteration (one per AI run, or one per manual save) with its changed-file and
+  ±line counts, oldest first. Capped at `db.WEBPAGE_VERSION_LIMIT` (50) per chat;
+  past the cap the oldest non-active rows are pruned.
+- `PUT /api/v1/webpages/{chat_id}/active` — JSON `{versionId}`: activate an
+  iteration; its snapshot becomes the working copy later runs branch from.
+- `PUT /api/v1/webpages/{chat_id}/files` — JSON `{path, content, baseVersionId}`:
+  save a hand-edited file as its own iteration (`baseVersionId` is the iteration
+  the canvas rendered; a stale value is a 409). Same path/size rules and messages
+  as the `write_webpage_file` tool.
+- `GET /api/v1/webpages/{chat_id}/versions/{version_id}/diff[?against=]` — unified
+  diff of one iteration against its parent (or an explicit base), capped at
+  `db.WEBPAGE_DIFF_LINE_LIMIT` lines with `truncated: true` past that.
+
+Both `PUT`s refuse with 409 while that chat's reply is still streaming.
 
 Text-to-speech (reads replies aloud; needs `FISH_API_KEY`, else 503):
 
@@ -76,7 +92,7 @@ the connected calendar's zone, then UTC), so long chats always read the live dat
 - `app/google_oauth.py` — OAuth code flow, token encryption, refresh
 - `app/gmail.py` — Gmail REST client (search/read/draft/send) over httpx
 - `app/calendar.py` — Calendar REST client (list/read/create/update/delete) over httpx
-- `app/db.py` — SQLite (users, sessions, chats, messages, google_grants, oauth_states, images, attachments, webpage_envs)
+- `app/db.py` — SQLite (users, sessions, chats, messages, google_grants, oauth_states, images, attachments, webpage_envs, webpage_versions)
 - `app/tts.py` — Fish Audio TTS proxy: pending jobs + MP3 streaming
 - `agent/graph.py` — LangGraph: `call_model -> (tool?) -> tools -> call_model ... -> END`; appends the FMHY ad-blocker safety note as a system message after FMHY tools run
 - `agent/tools.py` — `solve_equation`, `web_search`, `read_webpage`, `lore_lookup`, `generate_image`/`image_edit` (accept a `characters` argument to attach lore reference looks), `read_attachment`, `write_webpage_file`/`read_webpage_file` (build and edit the chat's webpage canvas), `search_emails`, `read_email`, `draft_email`, `list_events`, `read_event`, `create_event`, `update_event`, `propose_event_deletion`
@@ -85,8 +101,10 @@ the connected calendar's zone, then UTC), so long chats always read the live dat
 - `agent/model.py` — model factory (OpenRouter, `MODEL_ID` env, `glm-5.3-flash` default)
 
 The authenticated user id reaches the Google tools through LangGraph's
-`config={"configurable": {"user_id": ...}}`; tools declare a `RunnableConfig`
-parameter that is injected and hidden from the model's schema.
+`config={"configurable": {"user_id": ..., "chat_id": ..., "reply_id": ...}}`;
+tools declare a `RunnableConfig` parameter that is injected and hidden from the
+model's schema. `reply_id` is the assistant message the run is stored under, and
+it is what folds every webpage write of one run into a single iteration.
 
 ## Verify
 

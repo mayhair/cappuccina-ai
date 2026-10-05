@@ -330,7 +330,12 @@ def test_get_webpage_round_trip(signed_in):
 
     empty = signed_in.get(f"/api/v1/webpages/{chat['id']}")
     assert empty.status_code == 200
-    assert empty.json() == {"webpageId": None, "files": {}, "updatedAt": None}
+    assert empty.json() == {
+        "webpageId": None,
+        "files": {},
+        "updatedAt": None,
+        "activeVersionId": None,
+    }
 
     env = db.put_webpage_file(user["id"], chat["id"], "index.html", PAGE)
     db.put_webpage_file(user["id"], chat["id"], "styles.css", CSS)

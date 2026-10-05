@@ -9,7 +9,7 @@ import {
   uploadAttachment,
   deleteAttachment,
 } from '../api/chatClient'
-import { getWebpageEnv } from '../api/webpageClient'
+import { getWebpageEnv, getWebpageVersions, activateWebpageVersion, saveWebpageFile } from '../api/webpageClient'
 import tts from '../lib/tts'
 import {
   makeMessageId,
@@ -125,11 +125,15 @@ export function useChatController(enabled) {
   const [attachments, setAttachments] = useState([])
   const [uploading, setUploading] = useState(false)
   const [attachError, setAttachError] = useState('')
-  // The chat's webpage environment (canvas files), keyed by chat id. Only the
-  // file map lives here; the server is the source of truth and it is refetched
-  // when the user switches chats. `canvasOpen` is the canvas panel's visibility.
+  // The chat's webpage environment (canvas files), keyed by chat id:
+  // {webpageId, files, activeVersionId, versions}. Only the file map and the
+  // iteration list live here; the server is the source of truth and both are
+  // refetched when the user switches chats. `canvasOpen` is the canvas panel's
+  // visibility, `canvasNotice` a one-line failure message shown in the canvas.
   const [webpages, setWebpages] = useState({})
   const [canvasOpen, setCanvasOpen] = useState(false)
+  const [canvasNotice, setCanvasNotice] = useState(null)
+  const [canvasBusy, setCanvasBusy] = useState(false)
   const isStreaming = status === 'streaming'
   const inputRef = useRef(null)
   const chatsRef = useRef(chats)
@@ -212,9 +216,10 @@ export function useChatController(enabled) {
 
   const activeChat = chats.find((c) => c.id === activeChatId) ?? chats[0]
 
-  // Load the active chat's webpage files from the server (source of truth) so
-  // the canvas is correct after a reload or a switch from another device. Only
-  // chats that actually built a page have files worth fetching.
+  // Load the active chat's webpage files and iteration list from the server
+  // (source of truth) so the canvas is correct after a reload or a switch from
+  // another device. Only chats that actually built a page have files worth
+  // fetching.
   useEffect(() => {
     if (!enabled || !activeChatId) return
     const chat = chatsRef.current.find((c) => c.id === activeChatId)
@@ -224,18 +229,23 @@ export function useChatController(enabled) {
     )
     if (!built) return
     let cancelled = false
-    getWebpageEnv(activeChatId)
-      .then((env) => {
+    Promise.all([getWebpageEnv(activeChatId), getWebpageVersions(activeChatId)])
+      .then(([env, list]) => {
         if (cancelled) return
-        // Don't clobber files a live stream already produced for this chat:
-        // the fetch is a restore for reloads and chat switches, and it can
-        // resolve after the first write of a first turn.
         setWebpages((prev) => {
           const existing = prev[activeChatId]
-          if (existing && Object.keys(existing.files ?? {}).length > 0) return prev
+          // Don't clobber files a live stream already produced for this chat:
+          // the fetch is a restore for reloads and chat switches, and it can
+          // resolve after the first write of a first turn.
+          const keepFiles = Boolean(existing && Object.keys(existing.files ?? {}).length > 0)
           return {
             ...prev,
-            [activeChatId]: { webpageId: env.webpageId ?? null, files: env.files ?? {} },
+            [activeChatId]: {
+              webpageId: env.webpageId ?? null,
+              files: keepFiles ? existing.files : env.files ?? {},
+              activeVersionId: env.activeVersionId ?? list.activeVersionId ?? null,
+              versions: list.versions ?? [],
+            },
           }
         })
       })
@@ -244,6 +254,104 @@ export function useChatController(enabled) {
       cancelled = true
     }
   }, [activeChatId, enabled])
+
+  // Iterations are refetched whenever a run writes a page and when the canvas
+  // opens: a commit appears mid-stream, and pruning can drop old rows.
+  const refreshWebpageVersions = useCallback(async (chatId) => {
+    try {
+      const data = await getWebpageVersions(chatId)
+      setWebpages((prev) => ({
+        ...prev,
+        [chatId]: {
+          ...(prev[chatId] ?? { webpageId: null, files: {} }),
+          activeVersionId: data.activeVersionId ?? null,
+          versions: data.versions ?? [],
+        },
+      }))
+    } catch {
+      // The canvas falls back to hiding the history bar.
+    }
+  }, [])
+
+  // Force the files back to the server's copy. Unlike the restore effect this
+  // is unconditional: it runs after a rejected mutation, so the stale local
+  // state must give way even though files are already present.
+  const refreshWebpageEnv = useCallback(async (chatId) => {
+    try {
+      const env = await getWebpageEnv(chatId)
+      setWebpages((prev) => ({
+        ...prev,
+        [chatId]: {
+          ...(prev[chatId] ?? {}),
+          webpageId: env.webpageId ?? null,
+          files: env.files ?? {},
+          activeVersionId: env.activeVersionId ?? null,
+        },
+      }))
+    } catch {
+      // The canvas keeps showing what it has.
+    }
+  }, [])
+
+  // Clicking an iteration activates it immediately: the canvas always renders
+  // the active one, so there is no separate browse state.
+  const activateVersion = useCallback(
+    async (chatId, versionId) => {
+      setCanvasBusy(true)
+      try {
+        const data = await activateWebpageVersion(chatId, versionId)
+        setWebpages((prev) => ({
+          ...prev,
+          [chatId]: {
+            ...(prev[chatId] ?? {}),
+            webpageId: data.webpageId,
+            files: data.files ?? {},
+            activeVersionId: data.activeVersionId,
+          },
+        }))
+        setCanvasNotice(null)
+      } catch (err) {
+        setCanvasNotice(err.status === 409 ? err.message : 'Could not switch iteration.')
+        refreshWebpageEnv(chatId)
+        refreshWebpageVersions(chatId)
+      } finally {
+        setCanvasBusy(false)
+      }
+    },
+    [refreshWebpageEnv, refreshWebpageVersions],
+  )
+
+  // A manual edit lands as its own iteration. Returns false when the save was
+  // refused (stale tab or the reply was still streaming) so the canvas keeps
+  // the user's draft text.
+  const saveFile = useCallback(
+    async (chatId, path, content, baseVersionId) => {
+      setCanvasBusy(true)
+      try {
+        const data = await saveWebpageFile(chatId, { path, content, baseVersionId })
+        setWebpages((prev) => ({
+          ...prev,
+          [chatId]: {
+            ...(prev[chatId] ?? {}),
+            webpageId: data.webpageId,
+            files: data.files ?? {},
+            activeVersionId: data.activeVersionId,
+          },
+        }))
+        refreshWebpageVersions(chatId)
+        setCanvasNotice(null)
+        return true
+      } catch (err) {
+        setCanvasNotice(err.status === 409 ? err.message : 'Could not save that file.')
+        refreshWebpageEnv(chatId)
+        refreshWebpageVersions(chatId)
+        return false
+      } finally {
+        setCanvasBusy(false)
+      }
+    },
+    [refreshWebpageEnv, refreshWebpageVersions],
+  )
 
   // Upload picked files to the server and stage them for the next message.
   // The chat is persisted first so the files can be tied to a real chat id.
@@ -574,10 +682,18 @@ export function useChatController(enabled) {
           setWebpages((prev) => ({
             ...prev,
             [chatId]: {
+              ...(prev[chatId] ?? {}),
               webpageId: webpage.webpageId,
               files: { ...(prev[chatId]?.files ?? {}), [webpage.path]: webpage.content ?? '' },
+              activeVersionId: webpage.versionId ?? prev[chatId]?.activeVersionId ?? null,
             },
           }))
+          // The iteration list is server-side state (pruning included): refetch
+          // it, but only while this stream is still the live one — a newer
+          // stream's write must not resurrect an older list.
+          if (webpage.versionId && streamSeq.current === seq) {
+            refreshWebpageVersions(chatId)
+          }
           // A page is appearing: show the canvas without making the user ask.
           setCanvasOpen(true)
         },
@@ -607,7 +723,7 @@ export function useChatController(enabled) {
     }).finally(() => {
       if (streamSeq.current === seq) setStatus('idle')
     })
-  }, [effort, patchMessages, patchNode, patchChatState, persistChat, applyTitle])
+  }, [effort, patchMessages, patchNode, patchChatState, persistChat, applyTitle, refreshWebpageVersions])
 
   const setMode = useCallback((chatId, mode, subject) => {
     setChats((all) =>
@@ -761,12 +877,15 @@ export function useChatController(enabled) {
   // Close the canvas when the user leaves a chat that had one open.
   const selectChatAndCanvas = useCallback((id) => {
     setCanvasOpen(false)
+    setCanvasNotice(null)
     selectChat(id)
   }, [selectChat])
 
   // Closing hides the panel but keeps the page: the top-bar toggle and the
   // message card can reopen it at any time (and a later turn edits it).
   const closeWebpage = useCallback(() => setCanvasOpen(false), [])
+
+  const clearCanvasNotice = useCallback(() => setCanvasNotice(null), [])
 
   const openCanvas = useCallback(() => setCanvasOpen(true), [])
   const toggleCanvas = useCallback(() => setCanvasOpen((open) => !open), [])
@@ -824,9 +943,14 @@ export function useChatController(enabled) {
     attachError,
     addAttachments,
     removeAttachment,
-    webpage: activeWebpage,
+    webpage: { ...activeWebpage, chatId: activeChat?.id ?? null },
     hasWebpage,
     canvasOpen,
+    canvasNotice,
+    clearCanvasNotice,
+    canvasBusy,
+    activateVersion,
+    saveFile,
     openCanvas,
     closeCanvas: closeWebpage,
     toggleCanvas,

@@ -156,6 +156,11 @@ export default function App() {
     webpage,
     hasWebpage,
     canvasOpen,
+    canvasNotice,
+    clearCanvasNotice,
+    canvasBusy,
+    activateVersion,
+    saveFile,
     openCanvas,
     closeCanvas,
     toggleCanvas,
@@ -264,8 +269,18 @@ export default function App() {
 
       {canvasOpen && (
         <WebpageCanvas
+          chatId={webpage.chatId}
           files={webpage.files}
+          activeVersionId={webpage.activeVersionId ?? null}
+          versions={webpage.versions ?? []}
           streaming={isStreaming}
+          busy={canvasBusy}
+          notice={canvasNotice}
+          onDismissNotice={clearCanvasNotice}
+          onActivateVersion={(versionId) => activateVersion(webpage.chatId, versionId)}
+          onSaveFile={(path, content, baseVersionId) =>
+            saveFile(webpage.chatId, path, content, baseVersionId)
+          }
           onClose={closeCanvas}
         />
       )}

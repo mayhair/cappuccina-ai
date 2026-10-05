@@ -15,7 +15,13 @@ from agent.content import flatten_content
 from agent.fmhy import load_fmhy_tools
 from agent.graph import build_graph
 from agent.title import generate_title
-from agent.tools import ALL_TOOLS, TOOL_DISPLAY_NAMES
+from agent.tools import (
+    ALL_TOOLS,
+    TOOL_DISPLAY_NAMES,
+    WEBPAGE_MAX_FILE_BYTES,
+    WEBPAGE_MAX_TOTAL_BYTES,
+    _webpage_path,
+)
 from app import calendar, db, documents, gmail, google_oauth, tts
 from app.auth import (
     clear_session_cookie,
@@ -38,7 +44,9 @@ from app.schemas import (
     CreateChatRequest,
     GmailStatusResponse,
     RenameChatRequest,
+    SaveWebpageFileRequest,
     SetActiveBranchRequest,
+    SetWebpageVersionRequest,
     TtsJobResponse,
     TtsRequest,
     ToolCall,
@@ -186,6 +194,23 @@ def _webpage_part_from_result(output_text: str) -> dict | None:
         "path": data["path"],
         "files": data.get("files") or [],
     }
+
+
+def _webpage_version_id(output_text: str) -> str | None:
+    """The iteration id from a write_webpage_file marker, or None.
+
+    Only the live SSE payload carries it (via _webpage_part_from_result the
+    stored part stays as it was, so history sync payloads do not change).
+    """
+    if not output_text:
+        return None
+    try:
+        data = json.loads(output_text)
+    except (ValueError, TypeError):
+        return None
+    if not isinstance(data, dict) or data.get("status") != "webpage_file_written":
+        return None
+    return str(data["version_id"]) if data.get("version_id") else None
 
 
 def _merge_webpage_part(parts: list[dict], part: dict) -> None:
@@ -781,20 +806,131 @@ async def get_image(image_id: str, user=Depends(current_user)):
 async def get_webpage(chat_id: str, user=Depends(current_user)) -> dict:
     """The chat's webpage environment for the canvas.
 
-    Returns {webpageId, files, updatedAt}; a chat without a page yet returns an
-    empty files map so the canvas can show its empty state. User-scoped, and the
-    file text lives only here — never in the full-history sync payloads.
+    Returns {webpageId, files, updatedAt, activeVersionId}; a chat without a
+    page yet returns an empty files map so the canvas can show its empty state.
+    User-scoped, and the file text lives only here — never in the full-history
+    sync payloads.
     """
     if db.get_chat(user["id"], chat_id) is None:
         raise HTTPException(status_code=404, detail="Chat not found")
     env = db.get_webpage_env(user["id"], chat_id)
     if env is None:
-        return {"webpageId": None, "files": {}, "updatedAt": None}
+        return {"webpageId": None, "files": {}, "updatedAt": None, "activeVersionId": None}
     return {
         "webpageId": env["id"],
         "files": env["files"],
         "updatedAt": env["updated_at"],
+        "activeVersionId": env["active_version_id"],
     }
+
+
+@app.get("/api/v1/webpages/{chat_id}/versions")
+async def list_webpage_versions(chat_id: str, user=Depends(current_user)) -> dict:
+    """Every iteration of the chat, oldest first, plus the active one's id.
+
+    Summaries only (file text stays out): the canvas lists the history and
+    fetches one iteration's diff on demand.
+    """
+    if db.get_chat(user["id"], chat_id) is None:
+        raise HTTPException(status_code=404, detail="Chat not found")
+    env = db.get_webpage_env(user["id"], chat_id)
+    return {
+        "activeVersionId": env["active_version_id"] if env else None,
+        "versions": db.list_webpage_versions(user["id"], chat_id),
+    }
+
+
+@app.put("/api/v1/webpages/{chat_id}/active")
+async def set_webpage_active_version(
+    chat_id: str, req: SetWebpageVersionRequest, user=Depends(current_user)
+) -> dict:
+    """Activate one iteration: the canvas, later AI runs and manual edits use it."""
+    _webpage_idle_or_409(chat_id)
+    if db.get_chat(user["id"], chat_id) is None:
+        raise HTTPException(status_code=404, detail="Chat not found")
+    env = db.set_webpage_active_version(user["id"], chat_id, req.version_id)
+    if env is None:
+        raise HTTPException(status_code=404, detail="Iteration not found")
+    return {
+        "webpageId": env["id"],
+        "files": env["files"],
+        "updatedAt": env["updated_at"],
+        "activeVersionId": env["active_version_id"],
+    }
+
+
+@app.put("/api/v1/webpages/{chat_id}/files")
+async def save_webpage_file(
+    chat_id: str, req: SaveWebpageFileRequest, user=Depends(current_user)
+) -> dict:
+    """Save one hand-edited file as its own iteration.
+
+    Same path/size rules as the write_webpage_file tool; the messages are
+    identical so the canvas can show them verbatim. `baseVersionId` is the
+    iteration the tab rendered — a stale value is refused (409) instead of
+    silently overwriting a newer iteration.
+    """
+    _webpage_idle_or_409(chat_id)
+    if db.get_chat(user["id"], chat_id) is None:
+        raise HTTPException(status_code=404, detail="Chat not found")
+    env = db.get_webpage_env(user["id"], chat_id)
+    if env is None:
+        raise HTTPException(status_code=404, detail="No webpage yet")
+    clean = _webpage_path(req.path)
+    if clean is None:
+        raise HTTPException(
+            status_code=400,
+            detail="That file name isn't allowed. Use a simple relative name like "
+            "index.html, styles.css or script.js (letters, numbers, dot, dash).",
+        )
+    if not req.content:
+        raise HTTPException(status_code=400, detail="That file is empty — write something into it.")
+    size = len(req.content.encode("utf-8"))
+    if size > WEBPAGE_MAX_FILE_BYTES:
+        raise HTTPException(
+            status_code=400,
+            detail="That file is too big for the canvas. Keep each file under about 100 KB.",
+        )
+    others = env["files"]
+    total = sum(len(v.encode("utf-8")) for k, v in others.items() if k != clean) + size
+    if total > WEBPAGE_MAX_TOTAL_BYTES:
+        raise HTTPException(
+            status_code=400,
+            detail="The webpage is getting too big for the canvas. Try making it smaller.",
+        )
+    if req.base_version_id != env["active_version_id"]:
+        raise HTTPException(
+            status_code=409,
+            detail="The page changed since you opened it. Reload the canvas and try again.",
+        )
+    saved = db.put_webpage_file(
+        user["id"],
+        chat_id,
+        clean,
+        req.content,
+        message_uid=None,
+        origin="manual",
+        label=f"Edited {clean}",
+    )
+    return {
+        "webpageId": saved["id"],
+        "files": saved["files"],
+        "updatedAt": saved["updated_at"],
+        "activeVersionId": saved["active_version_id"],
+    }
+
+
+@app.get("/api/v1/webpages/{chat_id}/versions/{version_id}/diff")
+async def get_webpage_version_diff(
+    chat_id: str, version_id: str, against: str | None = None, user=Depends(current_user)
+) -> dict:
+    """Unified diff of one iteration against its parent (or `against`)."""
+    if db.get_chat(user["id"], chat_id) is None:
+        raise HTTPException(status_code=404, detail="Chat not found")
+    diff = db.webpage_version_diff(user["id"], chat_id, version_id, against)
+    if diff is None:
+        raise HTTPException(status_code=404, detail="Iteration not found")
+    return diff
 
 
 # ---------- attachments (user uploads) ----------
@@ -897,10 +1033,43 @@ def _owned_chat_or_404(user, req: ChatRequest):
     return chat
 
 
+# Chats whose reply is being generated right now. Activating an iteration or
+# saving a manual edit mid-run would race the agent's writes, so those routes
+# refuse. In-process state, which is exact for this single-process server; run
+# with several workers it degrades to best-effort (a race then just adds one
+# extra iteration, never corrupt data — every write is snapshot-committed).
+_WEBPAGE_BUSY: set[str] = set()
+
+
+def _webpage_idle_or_409(chat_id: str) -> None:
+    if chat_id in _WEBPAGE_BUSY:
+        raise HTTPException(
+            status_code=409, detail="A reply is still being written. Wait for it to finish."
+        )
+
+
+async def _tracked_events(chat_id: str, events):
+    """Mark the chat busy for the lifetime of the SSE body (cleared on disconnect too)."""
+    _WEBPAGE_BUSY.discard(chat_id)  # a previous run that leaked must not wedge the chat
+    _WEBPAGE_BUSY.add(chat_id)
+    try:
+        async for event in events:
+            yield event
+    finally:
+        _WEBPAGE_BUSY.discard(chat_id)
+
+
 def _graph_config(user, req: ChatRequest) -> RunnableConfig:
-    """Invisible tool context: user id (auth scoping) and chat id (so
-    generate_image/image_edit can persist pictures against the current chat)."""
-    return {"configurable": {"user_id": user["id"], "chat_id": req.chat_id}}
+    """Invisible tool context: user id (auth scoping), chat id (so
+    generate_image/image_edit can persist pictures against the current chat),
+    and reply id (so every webpage write of one run lands as one iteration)."""
+    return {
+        "configurable": {
+            "user_id": user["id"],
+            "chat_id": req.chat_id,
+            "reply_id": req.reply_id,
+        }
+    }
 
 
 def _sync_history(chat_id: str, req: ChatRequest) -> str | None:
@@ -959,26 +1128,31 @@ def _serialize_tool_calls(tool_calls: list[ToolCall]) -> list[dict]:
 @app.post("/api/v1/chat")
 async def chat(req: ChatRequest, user=Depends(current_user)) -> ChatResponse:
     _owned_chat_or_404(user, req)
-    think_start = time.monotonic()
-    result = await GRAPH.ainvoke(_state(req, user), config=_graph_config(user, req))
-    thought_seconds = time.monotonic() - think_start
-    messages = result["messages"]
-    reasoning, tool_calls, parts = _final_extras(messages)
-    db.append_chat_message(
-        req.chat_id,
-        role="assistant",
-        content=flatten_content(messages[-1].content),
-        reasoning=reasoning,
-        tools=_serialize_tool_calls(tool_calls),
-        parts=parts,
-        thinking_done=True,
-        thought_seconds=thought_seconds,
-    )
-    return ChatResponse(
-        content=flatten_content(messages[-1].content),
-        reasoning=reasoning,
-        tool_calls=tool_calls,
-    )
+    _WEBPAGE_BUSY.discard(req.chat_id)
+    _WEBPAGE_BUSY.add(req.chat_id)
+    try:
+        think_start = time.monotonic()
+        result = await GRAPH.ainvoke(_state(req, user), config=_graph_config(user, req))
+        thought_seconds = time.monotonic() - think_start
+        messages = result["messages"]
+        reasoning, tool_calls, parts = _final_extras(messages)
+        db.append_chat_message(
+            req.chat_id,
+            role="assistant",
+            content=flatten_content(messages[-1].content),
+            reasoning=reasoning,
+            tools=_serialize_tool_calls(tool_calls),
+            parts=parts,
+            thinking_done=True,
+            thought_seconds=thought_seconds,
+        )
+        return ChatResponse(
+            content=flatten_content(messages[-1].content),
+            reasoning=reasoning,
+            tool_calls=tool_calls,
+        )
+    finally:
+        _WEBPAGE_BUSY.discard(req.chat_id)
 
 
 class _ThinkingBlockTimer:
@@ -1148,6 +1322,7 @@ async def _stream_chat_events(req: ChatRequest, user: dict):
                             "path": webpage_part["path"],
                             "files": webpage_part["files"],
                             "content": content,
+                            "versionId": _webpage_version_id(output_text),
                         }
                     ),
                 }
@@ -1204,7 +1379,7 @@ async def _stream_chat_events(req: ChatRequest, user: dict):
 @app.post("/api/v1/chat/stream")
 async def chat_stream(req: ChatRequest, user=Depends(current_user)):
     _owned_chat_or_404(user, req)
-    return EventSourceResponse(_stream_chat_events(req, user), ping=15)
+    return EventSourceResponse(_tracked_events(req.chat_id, _stream_chat_events(req, user)), ping=15)
 
 
 # ---------- text-to-speech (read replies aloud) ----------

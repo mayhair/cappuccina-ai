@@ -99,6 +99,20 @@ class SetActiveBranchRequest(BaseModel):
     model_config = {"populate_by_name": True}
 
 
+class SetWebpageVersionRequest(BaseModel):
+    version_id: str = Field(alias="versionId")
+
+    model_config = {"populate_by_name": True}
+
+
+class SaveWebpageFileRequest(BaseModel):
+    path: str
+    content: str
+    base_version_id: str = Field(alias="baseVersionId")
+
+    model_config = {"populate_by_name": True}
+
+
 class TtsRequest(BaseModel):
     text: str = Field(min_length=1, max_length=10_000)
 
