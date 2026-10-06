@@ -195,6 +195,66 @@ await page.click('.ctrl-btn[aria-label="Show the webpage"]');
 await page.waitForSelector(".webpage-canvas", { timeout: 3000 });
 console.log("canvas reopened:", await page.locator(".webpage-canvas").isVisible());
 
+// 8b. fullscreen: the canvas covers the whole browser window (whatever its
+// size), the small header icon leaves it, and Escape does too.
+const viewport = page.viewportSize();
+await page.click('.canvas-icon-btn[aria-label="Fullscreen"]');
+await page.waitForTimeout(250);
+const fills = await page.evaluate(() => {
+  const box = document.querySelector(".webpage-canvas").getBoundingClientRect();
+  return {
+    x: Math.round(box.x),
+    y: Math.round(box.y),
+    w: Math.round(box.width),
+    h: Math.round(box.height),
+  };
+});
+const fillsWindow =
+  fills.x === 0 && fills.y === 0 && fills.w === viewport.width && fills.h === viewport.height;
+console.log("canvas fills the window:", fillsWindow, fills, viewport);
+// The chat sits directly behind the fullscreen canvas: the surface must be
+// opaque (glass would let the conversation read through the panel).
+const surface = await page.locator(".webpage-canvas").evaluate((el) => {
+  const style = getComputedStyle(el);
+  return { background: style.backgroundColor, backdrop: style.backdropFilter };
+});
+const opaqueSurface =
+  /^rgb\(/.test(surface.background) && (surface.backdrop === "none" || !surface.backdrop);
+console.log("fullscreen surface is opaque:", opaqueSurface, surface);
+const rendersFullscreen = (await page.locator(".canvas-frame").getAttribute("srcdoc")).includes("Hello cats");
+console.log("page still renders fullscreen:", rendersFullscreen);
+// With room to spare the tabs stay left of the icons, on one row.
+const wideRow = await page.evaluate(() => {
+  const t = document.querySelector(".canvas-tabs").getBoundingClientRect();
+  const i = document.querySelector(".canvas-icons").getBoundingClientRect();
+  return Math.abs(t.y - i.y) < 2 && t.right <= i.x + 1;
+});
+console.log("wide header keeps tabs then icons on one row:", wideRow);
+const exitBtn = page.locator('.canvas-head .canvas-icon-btn[aria-label="Exit fullscreen"]');
+const exitBox = await exitBtn.boundingBox();
+// The same small header icon as Refresh/Download (34px, in the header row),
+// not a banner or an overlay button.
+const exitSmall =
+  (await exitBtn.isVisible()) && exitBox.width <= 36 && exitBox.height <= 36 && exitBox.y < 60;
+console.log("exit button is a small header icon:", exitSmall, exitBox);
+await page.keyboard.press("Escape");
+await page.waitForTimeout(250);
+const backBox = await page.locator(".webpage-canvas").boundingBox();
+const escapeExits = backBox.width < viewport.width - 20 && backBox.x > 1;
+console.log("escape leaves fullscreen:", escapeExits);
+await page.setViewportSize({ width: 900, height: 620 });
+await page.click('.canvas-icon-btn[aria-label="Fullscreen"]');
+await page.waitForTimeout(250);
+const smallBox = await page.locator(".webpage-canvas").boundingBox();
+const fillsSmall =
+  Math.abs(smallBox.x) < 1 && Math.abs(smallBox.y) < 1 && Math.abs(smallBox.width - 900) < 1 && Math.abs(smallBox.height - 620) < 1;
+console.log("fills a smaller window too:", fillsSmall, smallBox);
+await page.click('.canvas-icon-btn[aria-label="Exit fullscreen"]');
+await page.setViewportSize({ width: viewport.width, height: viewport.height });
+await page.waitForTimeout(250);
+const restoresPanel = (await page.locator(".webpage-canvas").boundingBox()).width < viewport.width - 20;
+console.log("exit button restores the panel:", restoresPanel);
+
 // 9. reload: the canvas restores from the fetched environment. The server now
 // has the persisted turn (with its small webpage part) and the environment,
 // including the folder picture's metadata and its iteration.
@@ -251,6 +311,43 @@ console.log("picture still inlined after reload:", reloadedImage.startsWith("dat
 const iterationLabel = await page.locator(".canvas-history-count").textContent();
 console.log("iteration bar shows the run:", iterationLabel === "Iteration 1 of 1", iterationLabel);
 
+// 10. a canvas too narrow for one row (the page has history here, so all three
+// tabs show): the icons keep the top row and the tabs drop below them — never
+// an icon orphaned under the tabs — and nothing is clipped.
+await page.click('.canvas-icon-btn[aria-label="Fullscreen"]');
+await page.setViewportSize({ width: 360, height: 640 });
+await page.waitForTimeout(250);
+const narrow = await page.evaluate(() => {
+  const box = (sel) => {
+    const r = document.querySelector(sel).getBoundingClientRect();
+    return { x: r.x, y: r.y, right: r.right, bottom: r.bottom };
+  };
+  const head = document.querySelector(".canvas-head");
+  return {
+    tabs: box(".canvas-tabs"),
+    icons: box(".canvas-icons"),
+    buttons: [...document.querySelectorAll(".canvas-icons .canvas-icon-btn")].map((b) => {
+      const r = b.getBoundingClientRect();
+      return { x: r.x, right: r.right, bottom: r.bottom };
+    }),
+    width: document.querySelector(".webpage-canvas").getBoundingClientRect().width,
+    clipped: head.scrollWidth > head.clientWidth,
+  };
+});
+const iconsAboveTabs = narrow.icons.bottom <= narrow.tabs.y + 1;
+const narrowFits =
+  !narrow.clipped &&
+  [...narrow.buttons, narrow.tabs].every((b) => b.x >= 0 && b.right <= narrow.width + 1);
+console.log(
+  "narrow header stacks the icons above the tabs:",
+  iconsAboveTabs,
+  `icons.bottom=${Math.round(narrow.icons.bottom)} tabs.y=${Math.round(narrow.tabs.y)}`,
+);
+console.log("narrow header fits, nothing clipped:", narrowFits);
+await page.click('.canvas-icon-btn[aria-label="Exit fullscreen"]');
+await page.setViewportSize({ width: viewport.width, height: viewport.height });
+await page.waitForTimeout(250);
+
 console.log("console errors:", errors.length ? errors : "none");
 await browser.close();
 
@@ -269,7 +366,17 @@ if (
   !reloadedImage.startsWith("data:image/png") ||
   iterationLabel !== "Iteration 1 of 1" ||
   card !== 1 ||
-  !restored
+  !restored ||
+  !fillsWindow ||
+  !opaqueSurface ||
+  !rendersFullscreen ||
+  !exitSmall ||
+  !escapeExits ||
+  !fillsSmall ||
+  !restoresPanel ||
+  !wideRow ||
+  !iconsAboveTabs ||
+  !narrowFits
 ) {
   process.exit(1);
 }

@@ -3,8 +3,10 @@ import {
   ArrowLeftIcon,
   ChevronIcon,
   CloseIcon,
+  CollapseIcon,
   DotsIcon,
   DownloadIcon,
+  ExpandIcon,
   FileIcon,
   PencilIcon,
   RefreshIcon,
@@ -117,6 +119,9 @@ export function WebpageCanvas({
   const [menuOpen, setMenuOpen] = useState(true)
   const [revision, setRevision] = useState(0)
   const [historyOpen, setHistoryOpen] = useState(false)
+  // The canvas normally shares the window with the chat; fullscreen makes it
+  // cover the whole browser window instead (whatever size that window is).
+  const [fullscreen, setFullscreen] = useState(false)
   // { path, text, baseVersionId }: the draft keeps the iteration it was started
   // from, so the save is refused (409) rather than overwriting a newer one.
   const [draft, setDraft] = useState(null)
@@ -199,6 +204,17 @@ export function WebpageCanvas({
     area.setSelectionRange(area.value.length, area.value.length)
   }, [draft?.path])
 
+  // Escape leaves fullscreen. While a draft is open Escape belongs to the
+  // editor (it cancels the edit), so fullscreen stays put.
+  useEffect(() => {
+    if (!fullscreen) return
+    const onKeyDown = (e) => {
+      if (e.key === 'Escape' && !draft) setFullscreen(false)
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [fullscreen, draft])
+
   // The diff is fetched when the Changes tab is shown and refetched whenever
   // the active iteration moves (activation, a new run, a manual save).
   useEffect(() => {
@@ -268,10 +284,11 @@ export function WebpageCanvas({
   }
 
   const change = diff.files.find((f) => f.path === diffFile) ?? diff.files[0] ?? null
+  const shellClass = fullscreen ? 'webpage-canvas canvas-fullscreen' : 'webpage-canvas'
 
   if (!hasFiles(files)) {
     return (
-      <aside className="webpage-canvas" aria-label="Webpage canvas">
+      <aside className={shellClass} aria-label="Webpage canvas">
         <header className="canvas-head">
           <span className="canvas-title">
             <WindowIcon /> Webpage
@@ -290,7 +307,7 @@ export function WebpageCanvas({
   }
 
   return (
-    <aside className="webpage-canvas" aria-label="Webpage canvas">
+    <aside className={shellClass} aria-label="Webpage canvas">
       <header className="canvas-head">
         <span className="canvas-title">
           <WindowIcon /> Webpage
@@ -331,15 +348,29 @@ export function WebpageCanvas({
               </button>
             )}
           </div>
-          <button type="button" className="canvas-icon-btn has-tip" data-tip="Refresh" aria-label="Refresh preview" onClick={refresh}>
-            <RefreshIcon />
-          </button>
-          <button type="button" className="canvas-icon-btn has-tip" data-tip="Download" aria-label="Download the page" onClick={() => downloadPage(files, assetUrls)}>
-            <DownloadIcon />
-          </button>
-          <button type="button" className="canvas-icon-btn has-tip" data-tip="Close" aria-label="Close canvas" onClick={onClose}>
-            <CloseIcon />
-          </button>
+          {/* The icon cluster is one unit, so on a narrow canvas the whole row
+              moves above the tabs rather than splitting around them. */}
+          <div className="canvas-icons">
+            <button
+              type="button"
+              className="canvas-icon-btn has-tip"
+              data-tip={fullscreen ? 'Exit fullscreen' : 'Fullscreen'}
+              aria-label={fullscreen ? 'Exit fullscreen' : 'Fullscreen'}
+              aria-pressed={fullscreen}
+              onClick={() => setFullscreen((on) => !on)}
+            >
+              {fullscreen ? <CollapseIcon /> : <ExpandIcon />}
+            </button>
+            <button type="button" className="canvas-icon-btn has-tip" data-tip="Refresh" aria-label="Refresh preview" onClick={refresh}>
+              <RefreshIcon />
+            </button>
+            <button type="button" className="canvas-icon-btn has-tip" data-tip="Download" aria-label="Download the page" onClick={() => downloadPage(files, assetUrls)}>
+              <DownloadIcon />
+            </button>
+            <button type="button" className="canvas-icon-btn has-tip" data-tip="Close" aria-label="Close canvas" onClick={onClose}>
+              <CloseIcon />
+            </button>
+          </div>
         </div>
       </header>
 
