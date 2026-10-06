@@ -37,10 +37,6 @@ function downloadPage(files, assetUrls) {
 // switching iterations and tabs).
 const assetUrlCache = new Map()
 
-function cachedAssetUrl(chatId, path) {
-  return assetUrlCache.get(`${chatId}:${path}`)
-}
-
 async function loadAssetUrl(chatId, path) {
   const key = `${chatId}:${path}`
   if (assetUrlCache.has(key)) return assetUrlCache.get(key)
@@ -98,6 +94,340 @@ function iterationWhen(iso) {
 function historyMeta(version) {
   const when = iterationWhen(version?.createdAt)
   return when ? `${historyLabel(version)} · ${when}` : historyLabel(version)
+}
+
+function CanvasTitle({ streaming }) {
+  return (
+    <span className="canvas-title">
+      <WindowIcon /> Webpage
+      {streaming && <span className="canvas-heading-dots" aria-hidden="true"><i /><i /><i /></span>}
+    </span>
+  )
+}
+
+// The iteration stepper under the canvas head: steps through the page's runs,
+// plus the full list on demand.
+function IterationsBar({
+  versions,
+  index,
+  current,
+  activeVersionId,
+  canSwitch,
+  historyOpen,
+  onToggleHistory,
+  onStep,
+  onSelect,
+}) {
+  return (
+    <div className="canvas-history" role="group" aria-label="Iterations">
+      <button
+        type="button"
+        className="canvas-history-step"
+        aria-label="Previous iteration"
+        disabled={!canSwitch || index <= 0}
+        onClick={() => onStep(versions[index - 1].id)}
+      >
+        <ChevronIcon />
+      </button>
+      <div className="canvas-history-label">
+        <span className="canvas-history-count">
+          Iteration {index + 1} of {versions.length}
+        </span>
+        <span className="canvas-history-meta">{historyMeta(current)}</span>
+      </div>
+      <button
+        type="button"
+        className="canvas-history-step"
+        aria-label="Next iteration"
+        disabled={!canSwitch || index < 0 || index >= versions.length - 1}
+        onClick={() => onStep(versions[index + 1].id)}
+      >
+        <ChevronIcon />
+      </button>
+      <button
+        type="button"
+        className="canvas-history-btn"
+        aria-expanded={historyOpen}
+        aria-label="All iterations"
+        disabled={!canSwitch}
+        onClick={onToggleHistory}
+      >
+        <DotsIcon />
+      </button>
+      {historyOpen && (
+        <div className="canvas-history-panel" role="listbox" aria-label="Iterations">
+          {[...versions].reverse().map((v) => (
+            <button
+              key={v.id}
+              type="button"
+              role="option"
+              aria-selected={v.id === activeVersionId}
+              className={`canvas-file-row${v.id === activeVersionId ? ' active' : ''}`}
+              disabled={!canSwitch}
+              onClick={() => onSelect(v.id)}
+            >
+              <span className="canvas-history-seq">#{v.seq}</span>
+              <span className="canvas-file-name">{historyLabel(v)}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// The sandboxed live page: one assembled document, reloaded by `revision`.
+function PreviewTab({ preview, revision }) {
+  return (
+    <div className="canvas-stage">
+      <iframe
+        key={revision}
+        className="canvas-frame"
+        title="Webpage preview"
+        sandbox="allow-scripts"
+        srcDoc={preview}
+      />
+    </div>
+  )
+}
+
+// The Changes tab: one iteration's unified diff, one file at a time.
+function ChangesTab({ diff, loading, selected, onSelect }) {
+  const change = diff.files.find((f) => f.path === selected) ?? diff.files[0] ?? null
+  return (
+    <div className="canvas-code">
+      {loading ? (
+        <div className="canvas-empty">
+          <p>Loading changes…</p>
+        </div>
+      ) : diff.files.length === 0 ? (
+        <div className="canvas-empty">
+          <p>No changes yet.</p>
+          <p className="canvas-empty-hint">This iteration is the first version of the page.</p>
+        </div>
+      ) : (
+        <>
+          <div className="canvas-change-list" role="listbox" aria-label="Changed files">
+            {diff.files.map((f) => (
+              <button
+                key={f.path}
+                type="button"
+                role="option"
+                aria-selected={f.path === change?.path}
+                className={`canvas-file-row${f.path === change?.path ? ' active' : ''}`}
+                onClick={() => onSelect(f.path)}
+              >
+                <FileIcon />
+                <span className="canvas-file-name">{f.path}</span>
+                <span className="canvas-history-meta">
+                  +{f.added} −{f.removed}
+                </span>
+              </button>
+            ))}
+          </div>
+          <pre className="canvas-code-body canvas-diff">
+            {(change?.lines ?? []).map((line, i) => (
+              <span key={i} className={`diff-line diff-${line.kind}`}>
+                {line.kind === 'add' ? '+ ' : line.kind === 'del' ? '- ' : line.kind === 'hunk' ? '' : '  '}
+                {line.text}
+              </span>
+            ))}
+          </pre>
+          {diff.truncated && (
+            <p className="canvas-empty-hint canvas-diff-note">
+              Diff truncated — open a single file to see the rest.
+            </p>
+          )}
+        </>
+      )}
+    </div>
+  )
+}
+
+// The Code tab's file list.
+function FileMenu({ names, shownFile, assetNames, assets, onPick }) {
+  return (
+    <div className="canvas-file-menu">
+      <div className="canvas-file-menu-head">Files</div>
+      <div className="canvas-file-list" role="listbox" aria-label="Files">
+        {names.map((name) => (
+          <button
+            key={name}
+            type="button"
+            role="option"
+            aria-selected={name === shownFile}
+            className={`canvas-file-row${name === shownFile ? ' active' : ''}`}
+            onClick={() => onPick(name)}
+          >
+            <FileIcon />
+            <span className="canvas-file-name">{name}</span>
+            {assetNames.includes(name) && (
+              <span className="canvas-history-meta">{assetSize(assets?.[name])}</span>
+            )}
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// A picture in the folder: show it, with its size. There is no text to edit —
+// the page references it by name.
+function AssetPane({ name, url, info }) {
+  const size = assetSize(info)
+  return (
+    <div className="canvas-asset">
+      {url ? (
+        <img className="canvas-asset-preview" src={url} alt={name} />
+      ) : (
+        <p className="canvas-empty-hint">Loading {name}…</p>
+      )}
+      <p className="canvas-empty-hint">
+        {name}
+        {size ? ` · ${size}` : ''}
+        {info?.mime ? ` · ${info.mime}` : ''}
+      </p>
+    </div>
+  )
+}
+
+// The highlighted copy stays in place behind a transparent textarea, so the
+// text keeps its colors while editing.
+function CodeEditor({
+  draft,
+  shownCode,
+  busy,
+  draftHighlight,
+  highlightRef,
+  editRef,
+  syncEditScroll,
+  onDraftChange,
+  onKeyDown,
+  onSave,
+  onCancel,
+}) {
+  return (
+    <>
+      <div className="canvas-code-edit-wrap">
+        <pre
+          className="canvas-code-body canvas-code-highlight"
+          aria-hidden="true"
+          ref={highlightRef}
+          dangerouslySetInnerHTML={{ __html: draftHighlight }}
+        />
+        <textarea
+          className="canvas-code-body canvas-code-edit"
+          aria-label={`Edit ${draft.path}`}
+          spellCheck={false}
+          wrap="off"
+          ref={editRef}
+          value={draft.text}
+          onChange={(e) => onDraftChange(e.target.value)}
+          onKeyDown={onKeyDown}
+          onScroll={syncEditScroll}
+        />
+      </div>
+      <div className="canvas-edit-bar">
+        <span className="canvas-edit-hint">Editing {draft.path}</span>
+        <button type="button" className="canvas-edit-cancel" onClick={onCancel}>
+          Cancel
+        </button>
+        <button
+          type="button"
+          className="canvas-edit-save"
+          disabled={busy || draft.text === shownCode}
+          onClick={onSave}
+        >
+          {busy ? 'Saving…' : 'Save'}
+        </button>
+      </div>
+    </>
+  )
+}
+
+// The Code tab: the file list, or one file's viewer (picture, editor, or
+// highlighted text).
+function CodeTab({
+  menuOpen,
+  names,
+  shownFile,
+  shownAsset,
+  shownCode,
+  assetNames,
+  assets,
+  assetUrls,
+  highlighted,
+  draft,
+  draftHighlight,
+  streaming,
+  busy,
+  canEdit,
+  highlightRef,
+  editRef,
+  syncEditScroll,
+  onPick,
+  onBack,
+  onStartEdit,
+  onDraftChange,
+  onEditKeyDown,
+  onSaveDraft,
+  onCancelDraft,
+}) {
+  return (
+    <div className="canvas-code">
+      {menuOpen ? (
+        <FileMenu names={names} shownFile={shownFile} assetNames={assetNames} assets={assets} onPick={onPick} />
+      ) : (
+        <>
+          <div className="canvas-code-head">
+            <button
+              type="button"
+              className="canvas-back-btn"
+              aria-label="Back to files"
+              onClick={onBack}
+            >
+              <ArrowLeftIcon />
+            </button>
+            <FileIcon />
+            <span className="canvas-file-name">{shownFile}</span>
+            {!shownAsset && (
+              <button
+                type="button"
+                className="canvas-icon-btn canvas-edit-btn"
+                aria-label={`Edit ${shownFile}`}
+                disabled={streaming || busy || !canEdit}
+                onClick={onStartEdit}
+              >
+                <PencilIcon />
+              </button>
+            )}
+          </div>
+          {shownAsset ? (
+            <AssetPane name={shownFile} url={assetUrls[shownFile]} info={assets?.[shownFile]} />
+          ) : draft ? (
+            <CodeEditor
+              draft={draft}
+              shownCode={shownCode}
+              busy={busy}
+              draftHighlight={draftHighlight}
+              highlightRef={highlightRef}
+              editRef={editRef}
+              syncEditScroll={syncEditScroll}
+              onDraftChange={onDraftChange}
+              onKeyDown={onEditKeyDown}
+              onSave={onSaveDraft}
+              onCancel={onCancelDraft}
+            />
+          ) : (
+            <pre
+              className="canvas-code-body"
+              dangerouslySetInnerHTML={{ __html: highlighted }}
+            />
+          )}
+        </>
+      )}
+    </div>
+  )
 }
 
 export function WebpageCanvas({
@@ -283,16 +613,13 @@ export function WebpageCanvas({
     }
   }
 
-  const change = diff.files.find((f) => f.path === diffFile) ?? diff.files[0] ?? null
   const shellClass = fullscreen ? 'webpage-canvas canvas-fullscreen' : 'webpage-canvas'
 
   if (!hasFiles(files)) {
     return (
       <aside className={shellClass} aria-label="Webpage canvas">
         <header className="canvas-head">
-          <span className="canvas-title">
-            <WindowIcon /> Webpage
-          </span>
+          <CanvasTitle />
           <button type="button" className="canvas-icon-btn" aria-label="Close canvas" onClick={onClose}>
             <CloseIcon />
           </button>
@@ -309,10 +636,7 @@ export function WebpageCanvas({
   return (
     <aside className={shellClass} aria-label="Webpage canvas">
       <header className="canvas-head">
-        <span className="canvas-title">
-          <WindowIcon /> Webpage
-          {streaming && <span className="canvas-heading-dots" aria-hidden="true"><i /><i /><i /></span>}
-        </span>
+        <CanvasTitle streaming={streaming} />
         <div className="canvas-actions">
           <div className="canvas-tabs" role="tablist" aria-label="Canvas view">
             <button
@@ -375,63 +699,20 @@ export function WebpageCanvas({
       </header>
 
       {versions.length > 0 && (
-        <div className="canvas-history" role="group" aria-label="Iterations">
-          <button
-            type="button"
-            className="canvas-history-step"
-            aria-label="Previous iteration"
-            disabled={!canSwitch || index <= 0}
-            onClick={() => onActivateVersion(versions[index - 1].id)}
-          >
-            <ChevronIcon />
-          </button>
-          <div className="canvas-history-label">
-            <span className="canvas-history-count">
-              Iteration {index + 1} of {versions.length}
-            </span>
-            <span className="canvas-history-meta">{historyMeta(current)}</span>
-          </div>
-          <button
-            type="button"
-            className="canvas-history-step"
-            aria-label="Next iteration"
-            disabled={!canSwitch || index < 0 || index >= versions.length - 1}
-            onClick={() => onActivateVersion(versions[index + 1].id)}
-          >
-            <ChevronIcon />
-          </button>
-          <button
-            type="button"
-            className="canvas-history-btn"
-            aria-expanded={historyOpen}
-            aria-label="All iterations"
-            disabled={!canSwitch}
-            onClick={() => setHistoryOpen((open) => !open)}
-          >
-            <DotsIcon />
-          </button>
-          {historyOpen && (
-            <div className="canvas-history-panel" role="listbox" aria-label="Iterations">
-              {[...versions].reverse().map((v) => (
-                <button
-                  key={v.id}
-                  type="button"
-                  role="option"
-                  aria-selected={v.id === activeVersionId}
-                  className={`canvas-file-row${v.id === activeVersionId ? ' active' : ''}`}
-                  disabled={!canSwitch}
-                  onClick={() => {
-                    setHistoryOpen(false)
-                    onActivateVersion(v.id)
-                  }}
-                >
-                  <span className="canvas-history-seq">#{v.seq}</span>
-                  <span className="canvas-file-name">{historyLabel(v)}</span>
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
+        <IterationsBar
+          versions={versions}
+          index={index}
+          current={current}
+          activeVersionId={activeVersionId}
+          canSwitch={canSwitch}
+          historyOpen={historyOpen}
+          onToggleHistory={() => setHistoryOpen((open) => !open)}
+          onStep={onActivateVersion}
+          onSelect={(id) => {
+            setHistoryOpen(false)
+            onActivateVersion(id)
+          }}
+        />
       )}
 
       {notice && (
@@ -444,173 +725,36 @@ export function WebpageCanvas({
       )}
 
       {tab === 'preview' ? (
-        <div className="canvas-stage">
-          <iframe
-            key={revision}
-            className="canvas-frame"
-            title="Webpage preview"
-            sandbox="allow-scripts"
-            srcDoc={preview}
-          />
-        </div>
+        <PreviewTab preview={preview} revision={revision} />
       ) : tab === 'changes' ? (
-        <div className="canvas-code">
-          {diffLoading ? (
-            <div className="canvas-empty">
-              <p>Loading changes…</p>
-            </div>
-          ) : diff.files.length === 0 ? (
-            <div className="canvas-empty">
-              <p>No changes yet.</p>
-              <p className="canvas-empty-hint">This iteration is the first version of the page.</p>
-            </div>
-          ) : (
-            <>
-              <div className="canvas-change-list" role="listbox" aria-label="Changed files">
-                {diff.files.map((f) => (
-                  <button
-                    key={f.path}
-                    type="button"
-                    role="option"
-                    aria-selected={f.path === change?.path}
-                    className={`canvas-file-row${f.path === change?.path ? ' active' : ''}`}
-                    onClick={() => setDiffFile(f.path)}
-                  >
-                    <FileIcon />
-                    <span className="canvas-file-name">{f.path}</span>
-                    <span className="canvas-history-meta">
-                      +{f.added} −{f.removed}
-                    </span>
-                  </button>
-                ))}
-              </div>
-              <pre className="canvas-code-body canvas-diff">
-                {(change?.lines ?? []).map((line, i) => (
-                  <span key={i} className={`diff-line diff-${line.kind}`}>
-                    {line.kind === 'add' ? '+ ' : line.kind === 'del' ? '- ' : line.kind === 'hunk' ? '' : '  '}
-                    {line.text}
-                  </span>
-                ))}
-              </pre>
-              {diff.truncated && (
-                <p className="canvas-empty-hint canvas-diff-note">
-                  Diff truncated — open a single file to see the rest.
-                </p>
-              )}
-            </>
-          )}
-        </div>
+        <ChangesTab diff={diff} loading={diffLoading} selected={diffFile} onSelect={setDiffFile} />
       ) : (
-        <div className="canvas-code">
-          {menuOpen ? (
-            <div className="canvas-file-menu">
-              <div className="canvas-file-menu-head">Files</div>
-              <div className="canvas-file-list" role="listbox" aria-label="Files">
-                {names.map((name) => (
-                  <button
-                    key={name}
-                    type="button"
-                    role="option"
-                    aria-selected={name === shownFile}
-                    className={`canvas-file-row${name === shownFile ? ' active' : ''}`}
-                    onClick={() => pick(name)}
-                  >
-                    <FileIcon />
-                    <span className="canvas-file-name">{name}</span>
-                    {assetNames.includes(name) && (
-                      <span className="canvas-history-meta">{assetSize(assets?.[name])}</span>
-                    )}
-                  </button>
-                ))}
-              </div>
-            </div>
-          ) : (
-            <>
-              <div className="canvas-code-head">
-                <button
-                  type="button"
-                  className="canvas-back-btn"
-                  aria-label="Back to files"
-                  onClick={() => setMenuOpen(true)}
-                >
-                  <ArrowLeftIcon />
-                </button>
-                <FileIcon />
-                <span className="canvas-file-name">{shownFile}</span>
-                {!shownAsset && (
-                  <button
-                    type="button"
-                    className="canvas-icon-btn canvas-edit-btn"
-                    aria-label={`Edit ${shownFile}`}
-                    disabled={streaming || busy || !onSaveFile}
-                    onClick={startEdit}
-                  >
-                    <PencilIcon />
-                  </button>
-                )}
-              </div>
-              {shownAsset ? (
-                // A picture in the folder: show it, with its size. There is no
-                // text to edit — the page references it by name.
-                <div className="canvas-asset">
-                  {assetUrls[shownFile] ? (
-                    <img className="canvas-asset-preview" src={assetUrls[shownFile]} alt={shownFile} />
-                  ) : (
-                    <p className="canvas-empty-hint">Loading {shownFile}…</p>
-                  )}
-                  <p className="canvas-empty-hint">
-                    {shownFile}
-                    {assetSize(assets?.[shownFile]) ? ` · ${assetSize(assets?.[shownFile])}` : ''}
-                    {assets?.[shownFile]?.mime ? ` · ${assets[shownFile].mime}` : ''}
-                  </p>
-                </div>
-              ) : draft ? (
-                <>
-                  {/* The highlighted copy stays in place behind a transparent
-                      textarea, so the text keeps its colors while editing. */}
-                  <div className="canvas-code-edit-wrap">
-                    <pre
-                      className="canvas-code-body canvas-code-highlight"
-                      aria-hidden="true"
-                      ref={highlightRef}
-                      dangerouslySetInnerHTML={{ __html: draftHighlight }}
-                    />
-                    <textarea
-                      className="canvas-code-body canvas-code-edit"
-                      aria-label={`Edit ${draft.path}`}
-                      spellCheck={false}
-                      wrap="off"
-                      ref={editRef}
-                      value={draft.text}
-                      onChange={(e) => setDraft({ ...draft, text: e.target.value })}
-                      onKeyDown={onEditKeyDown}
-                      onScroll={syncEditScroll}
-                    />
-                  </div>
-                  <div className="canvas-edit-bar">
-                    <span className="canvas-edit-hint">Editing {draft.path}</span>
-                    <button type="button" className="canvas-edit-cancel" onClick={() => setDraft(null)}>
-                      Cancel
-                    </button>
-                    <button
-                      type="button"
-                      className="canvas-edit-save"
-                      disabled={busy || draft.text === shownCode}
-                      onClick={saveDraft}
-                    >
-                      {busy ? 'Saving…' : 'Save'}
-                    </button>
-                  </div>
-                </>
-              ) : (
-                <pre
-                  className="canvas-code-body"
-                  dangerouslySetInnerHTML={{ __html: highlighted }}
-                />
-              )}
-            </>
-          )}
-        </div>
+        <CodeTab
+          menuOpen={menuOpen}
+          names={names}
+          shownFile={shownFile}
+          shownAsset={shownAsset}
+          shownCode={shownCode}
+          assetNames={assetNames}
+          assets={assets}
+          assetUrls={assetUrls}
+          highlighted={highlighted}
+          draft={draft}
+          draftHighlight={draftHighlight}
+          streaming={streaming}
+          busy={busy}
+          canEdit={Boolean(onSaveFile)}
+          highlightRef={highlightRef}
+          editRef={editRef}
+          syncEditScroll={syncEditScroll}
+          onPick={pick}
+          onBack={() => setMenuOpen(true)}
+          onStartEdit={startEdit}
+          onDraftChange={(text) => setDraft({ ...draft, text })}
+          onEditKeyDown={onEditKeyDown}
+          onSaveDraft={saveDraft}
+          onCancelDraft={() => setDraft(null)}
+        />
       )}
     </aside>
   )
