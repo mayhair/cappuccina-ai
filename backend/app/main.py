@@ -814,6 +814,17 @@ async def get_image(image_id: str, user=Depends(current_user)):
 
 # ---------- webpage environments (the canvas) ----------
 
+def _webpage_env_response(env: dict) -> dict:
+    """The canvas-facing shape of one environment (db keys -> camelCase)."""
+    return {
+        "webpageId": env["id"],
+        "files": env["files"],
+        "assets": env["assets"],
+        "updatedAt": env["updated_at"],
+        "activeVersionId": env["active_version_id"],
+    }
+
+
 @app.get("/api/v1/webpages/{chat_id}")
 async def get_webpage(chat_id: str, user=Depends(current_user)) -> dict:
     """The chat's webpage environment for the canvas.
@@ -835,13 +846,7 @@ async def get_webpage(chat_id: str, user=Depends(current_user)) -> dict:
             "updatedAt": None,
             "activeVersionId": None,
         }
-    return {
-        "webpageId": env["id"],
-        "files": env["files"],
-        "assets": env["assets"],
-        "updatedAt": env["updated_at"],
-        "activeVersionId": env["active_version_id"],
-    }
+    return _webpage_env_response(env)
 
 
 @app.get("/api/v1/webpages/{chat_id}/versions")
@@ -871,13 +876,7 @@ async def set_webpage_active_version(
     env = db.set_webpage_active_version(user["id"], chat_id, req.version_id)
     if env is None:
         raise HTTPException(status_code=404, detail="Iteration not found")
-    return {
-        "webpageId": env["id"],
-        "files": env["files"],
-        "assets": env["assets"],
-        "updatedAt": env["updated_at"],
-        "activeVersionId": env["active_version_id"],
-    }
+    return _webpage_env_response(env)
 
 
 @app.put("/api/v1/webpages/{chat_id}/files")
@@ -914,13 +913,7 @@ async def save_webpage_file(
         origin="manual",
         label=f"Edited {clean}",
     )
-    return {
-        "webpageId": saved["id"],
-        "files": saved["files"],
-        "assets": saved["assets"],
-        "updatedAt": saved["updated_at"],
-        "activeVersionId": saved["active_version_id"],
-    }
+    return _webpage_env_response(saved)
 
 
 @app.get("/api/v1/webpages/{chat_id}/assets/{asset_path:path}")

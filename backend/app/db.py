@@ -1107,6 +1107,31 @@ def _asset_line(path: str, info: dict) -> str:
     return " · ".join(parts)
 
 
+def _webpage_env_result(
+    env_id: str,
+    user_id: str,
+    chat_id: str,
+    files: dict[str, str],
+    updated_at: str,
+    active_version_id: str | None,
+) -> dict:
+    """The environment shape every read/write path returns.
+
+    Callers add their own extras on top ("version" for the commit paths,
+    "asset" for a folder copy). `assets` is always the folder's metadata map,
+    never the bytes.
+    """
+    return {
+        "id": env_id,
+        "user_id": user_id,
+        "chat_id": chat_id,
+        "files": files,
+        "assets": _webpage_asset_map(user_id, chat_id),
+        "updated_at": updated_at,
+        "active_version_id": active_version_id,
+    }
+
+
 def get_webpage_env(user_id: str, chat_id: str) -> dict | None:
     """The chat's webpage environment as {id, files, assets, updated_at,
     active_version_id}.
@@ -1124,15 +1149,14 @@ def get_webpage_env(user_id: str, chat_id: str) -> dict | None:
     ).fetchone()
     if row is None:
         return None
-    return {
-        "id": row["id"],
-        "user_id": row["user_id"],
-        "chat_id": row["chat_id"],
-        "files": _parse_webpage_files(row["files"]),
-        "assets": _webpage_asset_map(user_id, chat_id),
-        "updated_at": row["updated_at"],
-        "active_version_id": row["active_version_id"],
-    }
+    return _webpage_env_result(
+        row["id"],
+        row["user_id"],
+        row["chat_id"],
+        _parse_webpage_files(row["files"]),
+        row["updated_at"],
+        row["active_version_id"],
+    )
 
 
 def put_webpage_file(
@@ -1190,16 +1214,9 @@ def put_webpage_file(
         message_uid=message_uid,
         label=label,
     )
-    return {
-        "id": env_id,
-        "user_id": user_id,
-        "chat_id": chat_id,
-        "files": files,
-        "assets": _webpage_asset_map(user_id, chat_id),
-        "updated_at": now,
-        "active_version_id": version["id"],
-        "version": version,
-    }
+    result = _webpage_env_result(env_id, user_id, chat_id, files, now, version["id"])
+    result["version"] = version
+    return result
 
 
 def _webpage_diff_summary(
@@ -1436,17 +1453,10 @@ def put_webpage_asset(
         message_uid=message_uid,
         label=label,
     )
-    return {
-        "id": row["id"],
-        "user_id": user_id,
-        "chat_id": chat_id,
-        "files": files,
-        "assets": _webpage_asset_map(user_id, chat_id),
-        "updated_at": now,
-        "active_version_id": version["id"],
-        "version": version,
-        "asset": {"path": path, "mime": mime, "size": len(data)},
-    }
+    result = _webpage_env_result(row["id"], user_id, chat_id, files, now, version["id"])
+    result["version"] = version
+    result["asset"] = {"path": path, "mime": mime, "size": len(data)}
+    return result
 
 
 def get_webpage_asset(user_id: str, chat_id: str, path: str) -> sqlite3.Row | None:
@@ -1540,13 +1550,7 @@ def set_webpage_active_version(user_id: str, chat_id: str, version_id: str) -> d
         {"files": json.dumps(files), "version": version_id, "now": now, "id": env["id"]},
     )
     conn.commit()
-    return {
-        "id": env["id"],
-        "files": files,
-        "assets": _webpage_asset_map(user_id, chat_id),
-        "updated_at": now,
-        "active_version_id": version_id,
-    }
+    return _webpage_env_result(env["id"], user_id, chat_id, files, now, version_id)
 
 
 def webpage_version_diff(
