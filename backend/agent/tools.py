@@ -1,7 +1,9 @@
 import base64
 import json
+import mimetypes
+import os
 import re
-from collections.abc import Iterable
+import secrets
 from datetime import datetime
 from pathlib import PurePosixPath
 from zoneinfo import ZoneInfo
@@ -19,12 +21,13 @@ from sympy.parsing.sympy_parser import (
 )
 
 from agent import lorebook
-from app import calendar, db, gmail
+from app import calendar, db, gmail, sitebox, webpage_git
 from app.config import (
     CHARACTER_REF_IMAGES,
     IMAGE_MODEL_ID,
     OPENAI_API_KEY,
     PARALLEL_API_KEY,
+    SITE_EXEC_TIMEOUT,
 )
 from app.google_oauth import ServiceNotConnected
 
@@ -132,17 +135,6 @@ def _user_id(config: RunnableConfig | None) -> str:
 
 def _chat_id(config: RunnableConfig | None) -> str:
     return ((config or {}).get("configurable", {}) or {}).get("chat_id", "")
-
-
-def _reply_id(config: RunnableConfig | None) -> str | None:
-    """The assistant-message uid of the reply being streamed, when known.
-
-    All writes of one AI run share it, which is what folds them into a single
-    iteration (db.commit_webpage_version). Missing -> None -> each write becomes
-    its own iteration, so no write is ever unrecorded.
-    """
-    value = ((config or {}).get("configurable", {}) or {}).get("reply_id")
-    return str(value) or None if value else None
 
 
 # ---------- image generation ----------
@@ -739,134 +731,149 @@ def propose_event_deletion(event_id: str, config: RunnableConfig) -> str:
 
 # ---------- webpage builder (the canvas) ----------
 
-# One path segment: starts with a letter or number, then letters, numbers,
-# ".", "_" or "-". ".." and hidden names never match, so paths stay relative
-# and can't climb out of the environment.
-_WEBPAGE_SEGMENT = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
+# One path segment: letters, numbers, ".", "_" and "-". Anything else (a
+# colon, a space, an empty segment) is refused, and ".." and ".git*" are
+# refused by name below, so a path can never leave the chat's folder.
+_WEBPAGE_SEGMENT = re.compile(r"[A-Za-z0-9._-]+")
 
-# Text files the canvas can show and edit. Anything else (a picture or other
-# binary) belongs in the folder as an asset: add_webpage_asset copies it in.
-WEBPAGE_EXTENSIONS = (".html", ".htm", ".css", ".js", ".mjs", ".json", ".svg", ".txt", ".md")
+# A path may be ten folders deep; the site may keep any file type in them.
+_WEBPAGE_PATH_SEGMENTS = 10
 
-WEBPAGE_MAX_FILE_BYTES = 100_000
-WEBPAGE_MAX_TOTAL_BYTES = 300_000
+# One file's size ceiling and what read_webpage_file hands back in one piece.
+_WEBPAGE_FILE_LIMIT = 1_000_000
+_WEBPAGE_READ_LIMIT = 200_000
+_WEBPAGE_LIST_LIMIT = 200
+_WEBPAGE_ASSET_LIMIT = 10_000_000
+
+_WEBPAGE_TIMEOUT_MAX = 600
 
 
-def _webpage_path(path: str, extensions: tuple[str, ...] = WEBPAGE_EXTENSIONS) -> str | None:
-    """A safe relative path inside the environment, or None when rejected.
+def _webpage_path(path: str) -> str | None:
+    """A safe relative path inside the chat's site folder, or None rejected.
 
-    ``extensions`` is what the name may end in: the text files above, or — for
-    an asset — the one extension its source file actually has.
+    Backslashes become "/" so Windows-minded names still work. The path must
+    not be absolute, must not climb out with "..", and must not touch .git.
     """
     clean = (path or "").strip().replace("\\", "/")
+    if not clean or clean.startswith("/"):
+        return None
     segments = clean.split("/")
-    if not clean or len(segments) > 4:
+    if len(segments) > _WEBPAGE_PATH_SEGMENTS:
         return None
-    if not all(_WEBPAGE_SEGMENT.fullmatch(segment) for segment in segments):
-        return None
-    if PurePosixPath(clean).suffix.lower() not in extensions:
-        return None
+    for segment in segments:
+        if (
+            not _WEBPAGE_SEGMENT.fullmatch(segment)
+            or segment == ".."
+            or segment.startswith(".git")
+        ):
+            return None
     return clean
 
 
-def validate_webpage_write(
-    files: dict[str, str], path: str, content: str, *, asset_names: Iterable[str] = ()
-) -> tuple[str | None, str | None]:
+def validate_webpage_write(path: str, content: str) -> tuple[str | None, str | None]:
     """Check one webpage file write; shared by the tool and the canvas save route.
 
     Returns ``(clean_path, error)`` with ``error`` None when the write is
-    allowed. ``files`` is the environment's current text files (the size budget
-    is for all of them together) and ``asset_names`` are folder pictures the
-    write must not shadow — the tool checks those, the save route passes none,
-    matching what each has always accepted. The messages are what the tool
-    returns and the route shows verbatim, so they live here only.
+    allowed. There is no per-site total: the files live on disk, so only the
+    one file's size matters. The messages are what the tool returns and the
+    route shows verbatim, so they live here only.
     """
     clean = _webpage_path(path)
     if clean is None:
         return None, (
-            "That file name isn't allowed. Use a simple relative name like "
-            "index.html, styles.css or script.js (letters, numbers, dot, dash)."
+            "That file name isn't allowed. Use a relative path like index.html, "
+            "src/app.js or pages/about.astro."
         )
     if not content:
         return None, "That file is empty — write something into it."
-    size = len(content.encode("utf-8"))
-    if size > WEBPAGE_MAX_FILE_BYTES:
-        return None, "That file is too big for the canvas. Keep each file under about 100 KB."
-    if clean in asset_names:
-        return None, (
-            f"The page folder already has {clean} as a picture — pick a "
-            "different name for this file."
-        )
-    total = sum(len(v.encode("utf-8")) for k, v in files.items() if k != clean) + size
-    if total > WEBPAGE_MAX_TOTAL_BYTES:
-        return None, "The webpage is getting too big for the canvas. Try making it smaller."
+    if len(content.encode("utf-8")) > _WEBPAGE_FILE_LIMIT:
+        return None, "That file is too big. Keep each file under 1 MB."
     return clean, None
+
+
+def _ensure_site(config: RunnableConfig) -> dict | None:
+    """The chat's website registry row, folder and git repo, made on first use.
+
+    None when the config carries no user or chat; each tool then answers with
+    its own "not available right now" line. Parallel tool calls of one run all
+    come through here, so the row is claimed atomically (db layer) and the repo
+    is only initialised when it is missing (webpage_git serialises that).
+    """
+    user_id = _user_id(config)
+    chat_id = _chat_id(config)
+    if not user_id or not chat_id:
+        return None
+    site = db.get_or_create_webpage_site(user_id, chat_id, secrets.token_urlsafe(18))
+    webpage_git.ensure_repo(sitebox.workspace_dir(site["id"]))
+    return site
+
+
+def _human_size(size: int) -> str:
+    """A short file size for tool messages, like "812 KB" or "1.4 MB"."""
+    if size >= 1_000_000:
+        return f"{size / 1_000_000:.1f} MB"
+    if size >= 1_000:
+        return f"{size / 1_000:.0f} KB"
+    return f"{size} bytes"
 
 
 @tool
 def write_webpage_file(path: str, content: str, config: RunnableConfig) -> str:
-    """Build or update a webpage in the user's live canvas. Use this whenever the user asks you to make a webpage, website, landing page, game, quiz, or anything else that runs in a browser. Write one file per call: start with `index.html`, and add `styles.css` and `script.js` when they help. The canvas shows `index.html` and loads the others by the exact relative names you give — link them like `<link rel="stylesheet" href="styles.css">` and `<script src="script.js"></script>`. Keep it a single static page with no build step and nothing a browser can't load directly; load fonts from https URLs, and put a picture the user attached or you drew into the page with add_webpage_asset, then reference it by the name you gave it there. To change a page you already made, call read_webpage_file first to see the current text, then write the whole file back. The page appears live in the canvas as you write, so when you're finished tell the user it's ready. Never invent a webpage_id; the returned JSON describes what was written."""
-    user_id = _user_id(config)
-    chat_id = _chat_id(config)
-    if not user_id or not chat_id:
+    """Build or update a webpage in the user's live website workspace. Use this whenever the user asks you to make a webpage, website, landing page, game, quiz, or anything else that runs in a browser. Write one file per call: start with `index.html`, then add `styles.css` and `script.js` when they help, and use folders (`src/`, `pages/`, `img/` …) whenever they make the site clearer. Link files with RELATIVE paths — `<link rel="stylesheet" href="styles.css">`, `<script src="script.js"></script>` — because the page is served from the site's own root. Fonts and libraries come from https URLs. A picture the user attached, or one you drew with generate_image, goes into the site folder with add_webpage_asset; reference it by the name you gave it there (`<img src="cat.png">`). When the user asks for a real app, a framework or a build step, use webpage_shell instead. To change a page you already made, call read_webpage_file first to see the current text, then write the whole file back. The page appears live in the canvas as you write, so when you're finished tell the user it's ready. Never invent a webpage_id; the returned JSON describes what was written."""
+    site = _ensure_site(config)
+    if site is None:
         return "Building webpages isn't available right now."
-    existing = db.get_webpage_env(user_id, chat_id)
-    clean, problem = validate_webpage_write(
-        existing["files"] if existing else {},
-        path,
-        content,
-        asset_names=existing["assets"] if existing else (),
-    )
+    clean, problem = validate_webpage_write(path, content)
     if problem:
         return problem
-    size = len(content.encode("utf-8"))
-    env = db.put_webpage_file(
-        user_id, chat_id, clean, content, message_uid=_reply_id(config)
-    )
+    target = sitebox.workspace_dir(site["id"]) / clean
+    os.makedirs(target.parent, exist_ok=True)
+    target.write_text(content, encoding="utf-8")
     return json.dumps(
         {
             "status": "webpage_file_written",
-            "webpage_id": env["id"],
-            "version_id": env["version"]["id"],
+            "webpage_id": site["id"],
+            "version_id": None,
             "path": clean,
-            "bytes": size,
-            "files": sorted(env["files"]),
+            "bytes": len(content.encode("utf-8")),
+            "files": webpage_git.changed_files(site),
         }
     )
 
 
 @tool
 def read_webpage_file(path: str, config: RunnableConfig) -> str:
-    """Read a file from the user's webpage environment. Call this before editing a page you made earlier, so you change the current text instead of starting over. Returns the file's text, or the list of files that exist when the name doesn't match."""
+    """Read a file from the user's website workspace. Call this before editing a page you made earlier, so you change the current text instead of starting over. Returns the file's text; a picture comes back described rather than dumped, and an unknown name comes back as the list of files that do exist."""
     user_id = _user_id(config)
     chat_id = _chat_id(config)
-    if not user_id or not chat_id:
-        return "The webpage isn't available right now."
-    env = db.get_webpage_env(user_id, chat_id)
-    files = env["files"] if env else {}
-    assets = env["assets"] if env else {}
-    if not files:
-        return "There's no webpage yet — build one with write_webpage_file first."
+    site = db.get_webpage_site(user_id, chat_id) if user_id and chat_id else None
+    names = webpage_git.changed_files(site) if site else []
+    if not names:
+        return "There is no website in this chat yet — build one with write_webpage_file first."
     clean = _webpage_path(path)
-    if clean is None or clean not in files:
-        raw = (path or "").strip().replace("\\", "/")
-        if raw and raw in assets:
-            return (
-                f"{raw} is a picture in the page folder — reference it by name "
-                "from the page instead of reading it. Files: "
-                + ", ".join(sorted(files))
-                + "."
-            )
-        named = ", ".join(sorted(files)) + ("; pictures: " + ", ".join(sorted(assets)) if assets else "")
-        return "No file named that. The webpage has: " + named + "."
-    return files[clean]
+    if clean is None or clean not in names:
+        return (
+            "No file named that. The website has: "
+            + ", ".join(names[:_WEBPAGE_LIST_LIMIT])
+        )
+    data = (sitebox.workspace_dir(site["id"]) / clean).read_bytes()
+    if len(data) > _WEBPAGE_READ_LIMIT:
+        return f"That file is too big to read in one piece ({len(data)} bytes)."
+    try:
+        return data.decode("utf-8")
+    except UnicodeDecodeError:
+        mime = mimetypes.guess_type(clean)[0] or "application/octet-stream"
+        return (
+            f"{clean} is a picture in the site folder ({mime}, "
+            f"{_human_size(len(data))}) — reference it from your page as {clean}."
+        )
 
 
 @tool
 def add_webpage_asset(
     path: str, config: RunnableConfig, image_id: str = "", attachment_id: str = ""
 ) -> str:
-    """Put a picture or file into the webpage's folder so the page can show or link it. Pass exactly one source: `image_id` for a picture you drew in this chat (the id from a generate_image or image_edit result), or `attachment_id` for a file the user attached. `path` is the name the page uses — keep the file's own extension, for example "cat.png", "photo.jpg" or "report.pdf" — and reference it from the page with that same name: `<img src="cat.png">`, `background-image: url(cat.png)` or `<a href="report.pdf">`. Use this whenever the user wants a picture or a file of theirs on the webpage; write the page with write_webpage_file first, then add the pictures it shows."""
+    """Put a picture or file into the website's folder so the page can show or link it. Pass exactly one source: `image_id` for a picture you drew in this chat (the id from a generate_image or image_edit result), or `attachment_id` for a file the user attached. `path` is the name the page uses — keep the file's own extension, for example "cat.png", "photo.jpg" or "report.pdf", in whatever folder you like — and reference it from the page with that same name: `<img src="cat.png">`, `background-image: url(img/cat.png)` or `<a href="report.pdf">`. Use this whenever the user wants a picture or a file of theirs on the website; write the page with write_webpage_file first, then add the pictures it shows."""
     user_id = _user_id(config)
     chat_id = _chat_id(config)
     if not user_id or not chat_id:
@@ -880,45 +887,60 @@ def add_webpage_asset(
         return "I couldn't find that picture or file."
     data, mime, filename = source
     suffix = PurePosixPath(filename).suffix.lower()
-    clean = _webpage_path(path, (suffix,))
-    if clean is None:
+    clean = _webpage_path(path)
+    if clean is None or PurePosixPath(clean).suffix.lower() != suffix:
         return (
-            f"That name isn't allowed. Use a simple relative name ending in {suffix}, "
-            f"like cat{suffix} (letters, numbers, dot, dash)."
+            f"That name isn't allowed. Use a relative path ending in {suffix}, "
+            f"like cat{suffix}."
         )
-    env = db.get_webpage_env(user_id, chat_id)
-    if env is None:
-        return "There's no webpage yet — write index.html with write_webpage_file first."
-    if clean in env["files"]:
-        return (
-            f"The page already has a file called {clean}. Pick a different name "
-            "for the picture."
-        )
-    if clean in env["assets"]:
-        return f"The page folder already has {clean}. Pick a different name."
-    if len(data) > db.WEBPAGE_MAX_ASSET_BYTES:
+    if len(data) > _WEBPAGE_ASSET_LIMIT:
         return "That file is too big for the page folder (10 MB max)."
-    total = sum(int(info.get("size") or 0) for info in env["assets"].values())
-    if total + len(data) > db.WEBPAGE_MAX_ASSET_TOTAL_BYTES:
-        return "The page folder is full (20 MB of pictures and files max)."
-    env = db.put_webpage_asset(
-        user_id, chat_id, clean, data, mime, message_uid=_reply_id(config)
-    )
+    site = db.get_webpage_site(user_id, chat_id)
+    if site is None:
+        return "There's no webpage yet — write index.html with write_webpage_file first."
+    target = sitebox.workspace_dir(site["id"]) / clean
+    if target.exists():
+        return f"The site folder already has {clean}. Pick a different name."
+    os.makedirs(target.parent, exist_ok=True)
+    target.write_bytes(data)
     return json.dumps(
         {
             "status": "webpage_asset_added",
-            "webpage_id": env["id"],
-            "version_id": env["version"]["id"],
+            "webpage_id": site["id"],
+            "version_id": None,
             "path": clean,
             "mime": mime,
             "bytes": len(data),
-            "files": sorted(env["files"]),
-            "assets": sorted(env["assets"]),
+            "files": webpage_git.changed_files(site),
+            "assets": [],
         }
     )
 
 
-ALL_TOOLS = [solve_equation, web_search, read_webpage, lore_lookup, generate_image, image_edit, read_attachment, write_webpage_file, add_webpage_asset, read_webpage_file, search_emails, read_email, draft_email, list_events, read_event, create_event, update_event, propose_event_deletion]
+@tool
+def webpage_shell(command: str, config: RunnableConfig, timeout: int = SITE_EXEC_TIMEOUT) -> str:
+    """Run a shell command inside the chat's website container. Use this to scaffold, install and build a real site instead of writing plain files by hand: bash, node, npm, git and curl are installed, and the command runs at /workspace — the site's own folder — so `mkdir`, `npm create vite@latest scaffold -- --template react` followed by `cp -a scaffold/. . && rm -rf scaffold`, `npm install` and `npm run build` all work, and anything they create lands in the canvas's files. A build only links its assets correctly in the canvas when its config sets `base: process.env.PREVIEW_BASE` (vite.config.js or astro.config.mjs): PREVIEW_BASE is already set in the container and is the only base that keeps the built site's asset URLs working there. `npm install` and `npm run build` are slow, so pass a larger `timeout` (up to 600 seconds) for them; the default (SITE_EXEC_TIMEOUT) is 120. If a build needs a tool outside node (a compiler, imagemagick, jq …), install it with `sudo apt-get install -y <package>` (run `sudo apt-get update` first when apt asks): sudo runs apt-get/apt/dpkg only, and the package lives in this site's container. The canvas serves `dist/` automatically once it exists and the workspace root otherwise, so rebuild after every change. Client-side routing must be hash-based (`#/page`) — the canvas preview is a sandboxed iframe where pushState URLs throw — while multi-page static output is fine. Do not run git yourself; the system versions every change automatically. The returned JSON has the exit code and the command's output."""
+    site = _ensure_site(config)
+    if site is None:
+        return "The website workspace isn't available right now."
+    try:
+        exit_code, output = sitebox.run_command(
+            site, command, max(1, min(_WEBPAGE_TIMEOUT_MAX, int(timeout)))
+        )
+    except sitebox.SiteboxUnavailable:
+        return sitebox.UNAVAILABLE_MESSAGE
+    return json.dumps(
+        {
+            "status": "webpage_command_ran",
+            "webpage_id": site["id"],
+            "exit_code": exit_code,
+            "output": output,
+            "files": webpage_git.changed_files(site),
+        }
+    )
+
+
+ALL_TOOLS = [solve_equation, web_search, read_webpage, lore_lookup, generate_image, image_edit, read_attachment, write_webpage_file, add_webpage_asset, read_webpage_file, webpage_shell, search_emails, read_email, draft_email, list_events, read_event, create_event, update_event, propose_event_deletion]
 
 # Human-friendly names for UI display ("Called Tool: ...").
 TOOL_DISPLAY_NAMES = {
@@ -932,6 +954,7 @@ TOOL_DISPLAY_NAMES = {
     "write_webpage_file": "Building Webpage",
     "add_webpage_asset": "Adding to Webpage",
     "read_webpage_file": "Reading Webpage",
+    "webpage_shell": "Running Site Command",
     "search_emails": "Inbox Search",
     "read_email": "Read Email",
     "draft_email": "Compose Email",

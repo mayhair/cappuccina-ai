@@ -69,6 +69,19 @@ GOOGLE_CALENDAR_SCOPES = [
     "https://www.googleapis.com/auth/calendar.events",
 ]
 
+# ---------- Containerized website workspaces ----------
+# Each chat's webpage lives in its own rootless container (see app/sitebox.py).
+# `docker` behaves identically to `podman`; every invocation is [CLI, ...].
+SITE_CONTAINER_CLI = os.getenv("SITE_CONTAINER_CLI", "podman")
+# Containers idle longer than this get stopped by the background sweeper and
+# started again on the next command, so an abandoned chat costs nothing.
+SITE_IDLE_MINUTES = int(os.getenv("SITE_IDLE_MINUTES", "10"))
+# Default shell timeout for webpage_shell; the tool clamps each call to 1-600.
+SITE_EXEC_TIMEOUT = int(os.getenv("SITE_EXEC_TIMEOUT", "120"))
+# `npm run build` gets a longer leash than a plain shell command: a cold
+# install plus a framework build routinely takes minutes.
+SITE_BUILD_TIMEOUT = int(os.getenv("SITE_BUILD_TIMEOUT", "300"))
+
 REASONING_LEVELS = {"low", "high", "max"}
 
 TUTOR_SUFFIX = """

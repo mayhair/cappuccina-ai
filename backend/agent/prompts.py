@@ -68,15 +68,41 @@ come back in chunks; keep calling with the offset shown until you have what \
 you need."""
 
 WEBPAGE_NOTE = """\
-When the user asks for a webpage, a website, a game, a quiz, or anything else \
-that runs in a browser, build it one file at a time with write_webpage_file. \
-Start with index.html, then add styles.css and script.js when they help — the \
-page appears live in the user's canvas as you write. To change a page you made \
-earlier, call read_webpage_file first, then write the whole file back. Keep it \
-a single static page: no build step, and load fonts from https URLs. A picture \
-the user attached, or one you drew with generate_image, goes into the page's \
-folder with add_webpage_asset — then reference it from the page by the name you \
-gave it there (for example <img src="cat.png">)."""
+When the user asks for a webpage, a website, a game, a quiz, or anything else
+that runs in a browser, build it in their live website workspace. By default
+write plain static code directly: start with index.html, then styles.css and
+script.js when they help, in any folders you like (src/, pages/, img/ …) — the
+page appears in the user's canvas as you write. Link files with RELATIVE paths
+(`<link rel="stylesheet" href="styles.css">`), never root-absolute ones. Fonts
+and libraries come from https URLs. To change something you made earlier, call
+read_webpage_file first, then write the whole file back. A picture the user
+attached, or one you drew with generate_image, goes into the site folder with
+add_webpage_asset; reference it by the name you gave it there (for example
+<img src="cat.png">).
+
+If the user asks for a real app, framework or build step, use webpage_shell to
+work in the container (bash, node, npm, git and curl are available; make
+folders freely):
+- React/Vite: `npm create vite@latest scaffold -- --template react`, then
+  `cp -a scaffold/. . && rm -rf scaffold && npm install`
+- Astro: `npm create astro@latest scaffold -- --template minimal --no-git --no-install --yes`
+  then `cp -a scaffold/. . && rm -rf scaffold && npm install`
+  (scaffold into a subfolder and copy it up: the site folder is never empty, so
+  `npm create … .` would stop and ask a question; if a scaffold command needs
+  different flags, run it and adapt)
+- In the build config set `base: process.env.PREVIEW_BASE` (vite.config.js /
+  astro.config.mjs). PREVIEW_BASE is already set in the container and is the
+  only way the built site's asset links work in the user's canvas.
+- Build with `npm run build`; the canvas serves dist/ automatically when it
+  exists (otherwise the workspace root). Rebuild after every change.
+- A tool outside node that a build needs (a compiler, imagemagick, jq …) can be
+  installed with `sudo apt-get install -y <package>`; run `sudo apt-get update`
+  first when apt asks for it. sudo runs apt-get/apt/dpkg only, and packages
+  live in this site's container — keep the site itself on npm or plain files
+  wherever you can.
+- Client-side routing must be hash-based (`#/page`): the canvas preview is a
+  sandboxed iframe where pushState URLs throw. Multi-page static output is fine.
+Do not run git yourself; the system versions every change automatically."""
 
 
 def build_system_prompt(mode: str, subject: str | None) -> str:

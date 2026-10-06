@@ -1,7 +1,13 @@
+import asyncio
 import base64
 import json
+import mimetypes
+import os
+import re
 import time
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
+from pathlib import Path
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
@@ -19,9 +25,10 @@ from agent.title import generate_title
 from agent.tools import (
     ALL_TOOLS,
     TOOL_DISPLAY_NAMES,
+    _webpage_path,
     validate_webpage_write,
 )
-from app import calendar, db, documents, gmail, google_oauth, tts
+from app import calendar, db, documents, gmail, google_oauth, sitebox, tts, webpage_git
 from app.auth import (
     clear_session_cookie,
     current_user,
@@ -55,6 +62,17 @@ from app.schemas import (
 )
 
 
+async def _stop_idle_sites() -> None:
+    """Stop containers that have not been used for a while (see sitebox.stop_idle).
+
+    A stopped container is transparently restarted by `ensure_running`, so this
+    is purely about not leaving a bash/npm session running per chat forever.
+    """
+    while True:
+        await asyncio.sleep(60)
+        await asyncio.to_thread(sitebox.stop_idle)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Load the FMHY free-media tools, then compile the graph around them.
@@ -65,7 +83,13 @@ async def lifespan(app: FastAPI):
     global GRAPH
     fmhy_tools = await load_fmhy_tools()
     GRAPH = build_graph([*ALL_TOOLS, *fmhy_tools])
-    yield
+    idle_task = asyncio.create_task(_stop_idle_sites())
+    try:
+        yield
+    finally:
+        idle_task.cancel()
+        # Drain it so shutdown never leaves a cancelled task complaining.
+        await asyncio.gather(idle_task, return_exceptions=True)
 
 
 GRAPH = build_graph(ALL_TOOLS)
@@ -212,16 +236,16 @@ def _webpage_tool_args(name: str, args: dict) -> dict:
 
 
 def _webpage_result(output_text: str) -> tuple[dict | None, str | None]:
-    """One parse of a webpage tool result: its {"type": "webpage"} part and the
-    iteration id the write landed as.
+    """One parse of a webpage tool result: its {"type": "webpage"} part.
 
-    The part only references the saved environment by id and names its files, so
-    the page text never flows through the full-history sync payloads. An asset
-    (a picture copied into the folder) has no file text and no path of its own to
-    show, so the part only marks the environment as touched. The iteration id
-    rides only the live SSE payload — the stored part stays as it was, so history
-    sync payloads do not change. (None, None) for any other tool or a
-    failed/malformed result.
+    The part only references the workspace by id and names its files, so the
+    page text never flows through the full-history sync payloads. An asset (a
+    picture copied into the folder) or a shell command has no file text of its
+    own to show, so the part only marks the workspace as touched; a write keeps
+    its path for the card. The iteration id now comes from the run's finalize
+    step (one commit per reply), never from a tool result, so the second tuple
+    element is always None — the signature stays for its two callers.
+    (None, None) for any other tool or a failed/malformed result.
     """
     if not output_text:
         return None, None
@@ -231,23 +255,17 @@ def _webpage_result(output_text: str) -> tuple[dict | None, str | None]:
         return None, None
     if not isinstance(data, dict) or not data.get("webpage_id"):
         return None, None
-    version_id = str(data["version_id"]) if data.get("version_id") else None
     status = data.get("status")
-    if status == "webpage_asset_added":
-        return {
-            "type": "webpage",
-            "webpageId": data["webpage_id"],
-            "files": data.get("files") or [],
-            "asset": True,
-        }, version_id
-    if status != "webpage_file_written" or not data.get("path"):
+    if status not in ("webpage_file_written", "webpage_asset_added", "webpage_command_ran"):
         return None, None
-    return {
+    part = {
         "type": "webpage",
         "webpageId": data["webpage_id"],
-        "path": data["path"],
         "files": data.get("files") or [],
-    }, version_id
+    }
+    if status == "webpage_file_written" and data.get("path"):
+        part["path"] = data["path"]
+    return part, None
 
 
 def _webpage_part_from_result(output_text: str) -> dict | None:
@@ -843,56 +861,195 @@ async def get_image(image_id: str, user=Depends(current_user)):
     )
 
 
-# ---------- webpage environments (the canvas) ----------
+# ---------- webpage workspaces (the canvas) ----------
 
-def _webpage_env_response(env: dict) -> dict:
-    """The canvas-facing shape of one environment (db keys -> camelCase)."""
+# The most recent build attempt per chat, so the canvas can show a failed
+# rebuild after a save or an AI run (`lastBuild`). Same best-effort,
+# single-process state as _WEBPAGE_BUSY below: with several workers a notice
+# may be missing or stale, which only ever means a banner that does not show.
+_WEBPAGE_BUILDS: dict[str, dict] = {}
+
+# One file may be read into the Code tab at a time; past this it is described
+# (binary: true) instead of loaded. Mirrors the tools' 1 MB write cap.
+WEBPAGE_FILE_READ_MAX = 1024 * 1024
+
+# mimetypes guesses text/plain (or nothing) for a module script, and the
+# browser refuses a script served with the wrong type — so these are pinned.
+WEBPAGE_MIME_OVERRIDES = {
+    ".js": "text/javascript",
+    ".mjs": "text/javascript",
+    ".css": "text/css",
+    ".wasm": "application/wasm",
+    ".json": "application/json",
+    ".map": "application/json",
+    ".svg": "image/svg+xml",
+}
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _preview_base(chat_id: str, site: dict) -> str:
+    """The root-absolute URL prefix a chat's page is served from.
+
+    A capability URL: `preview_key` is unguessable and the preview route
+    carries no session, which is what lets the sandboxed canvas iframe load
+    module scripts and fetch() a page's own assets.
+    """
+    return f"/api/v1/webpages/{chat_id}/preview/{site['preview_key']}/"
+
+
+def _record_build(chat_id: str, build: dict | None) -> None:
+    """Remember the latest build attempt so the canvas can show it."""
+    if build:
+        _WEBPAGE_BUILDS[chat_id] = {**build, "at": _now_iso()}
+
+
+async def _rebuild_site(chat_id: str, site: dict) -> None:
+    """Rebuild a site that has a build step, recording the outcome.
+
+    Best-effort by design: the file writes already landed on the host, so a
+    dead container engine (or a failing build) is a canvas notice, never a
+    failed save. Off the event loop because a cold npm build can take minutes
+    and every chat stream shares this loop.
+    """
+    workspace = sitebox.workspace_dir(site["id"])
+    if not sitebox.has_build(workspace):
+        return
+    try:
+        ok, error = await asyncio.to_thread(sitebox.run_build, site)
+    except sitebox.SiteboxUnavailable as exc:
+        ok, error = False, str(exc)
+    _record_build(chat_id, {"ok": ok, "error": error or None})
+
+
+def _webpage_mime(path: str) -> str:
+    """Content type for a served site file, with the overrides above."""
+    override = WEBPAGE_MIME_OVERRIDES.get(os.path.splitext(path)[1].lower())
+    if override:
+        return override
+    return mimetypes.guess_type(path)[0] or "application/octet-stream"
+
+
+def _webpage_blocked_segment(path: str) -> bool:
+    """True when a path walks into git's or npm's own directories."""
+    return any(
+        segment in (".git", "node_modules") for segment in path.replace("\\", "/").split("/")
+    )
+
+
+def _resolve_under(root: Path, relative: str) -> Path | None:
+    """The absolute path of `relative` inside `root`, or None when it escapes.
+
+    normpath first, so a path like a/../../b is judged on its real shape, then
+    a resolved-prefix test. Shared by the file routes and the preview route so
+    neither can read or write outside the workspace it belongs to.
+    """
+    resolved = Path(os.path.normpath(os.path.join(root, relative))).resolve()
+    base = root.resolve()
+    if resolved != base and base not in resolved.parents:
+        return None
+    return resolved
+
+
+def _webpage_env_payload(chat_id: str, site: dict | None) -> dict:
+    """The canvas-facing shape of one workspace (db row -> camelCase, no file text).
+
+    `files` is the workspace tree as names only — the canvas fetches one file's
+    text when the Code tab opens it. `serveRoot` is where the preview serves
+    from, which is `dist` exactly when a build output exists.
+    """
+    if site is None:
+        return {
+            "webpageId": None,
+            "files": [],
+            "updatedAt": None,
+            "activeVersionId": None,
+            "previewUrl": None,
+            "previewBase": None,
+            "entry": "index.html",
+            "serveRoot": "",
+            "hasBuild": False,
+            "lastBuild": _WEBPAGE_BUILDS.get(chat_id),
+        }
+    workspace = sitebox.workspace_dir(site["id"])
+    preview_base = _preview_base(chat_id, site)
     return {
-        "webpageId": env["id"],
-        "files": env["files"],
-        "assets": env["assets"],
-        "updatedAt": env["updated_at"],
-        "activeVersionId": env["active_version_id"],
+        "webpageId": site["id"],
+        "files": webpage_git.changed_files(site)[:500],
+        "updatedAt": site["updated_at"],
+        "activeVersionId": site["active_commit"],
+        "previewUrl": preview_base + "index.html",
+        "previewBase": preview_base,
+        "entry": "index.html",
+        "serveRoot": "dist" if (workspace / "dist" / "index.html").is_file() else "",
+        "hasBuild": sitebox.has_build(workspace),
+        "lastBuild": _WEBPAGE_BUILDS.get(chat_id),
     }
 
 
 @app.get("/api/v1/webpages/{chat_id}")
 async def get_webpage(chat_id: str, user=Depends(current_user)) -> dict:
-    """The chat's webpage environment for the canvas.
+    """The chat's website workspace for the canvas.
 
-    Returns {webpageId, files, assets, updatedAt, activeVersionId}; a chat
-    without a page yet returns an empty files map so the canvas can show its
-    empty state. User-scoped, and the file text lives only here — never in the
-    full-history sync payloads. `assets` is the folder's binary side, metadata
-    only ({path: {mime, size}}); its bytes come from the asset route.
+    Returns {webpageId, files, updatedAt, activeVersionId, previewUrl,
+    previewBase, entry, serveRoot, hasBuild, lastBuild}; a chat without a site
+    yet returns the same keys empty so the canvas can show its empty state.
+    User-scoped, and file text lives only on disk — never in this payload nor
+    in the full-history sync payloads.
     """
     if db.get_chat(user["id"], chat_id) is None:
         raise HTTPException(status_code=404, detail="Chat not found")
-    env = db.get_webpage_env(user["id"], chat_id)
-    if env is None:
-        return {
-            "webpageId": None,
-            "files": {},
-            "assets": {},
-            "updatedAt": None,
-            "activeVersionId": None,
-        }
-    return _webpage_env_response(env)
+    return _webpage_env_payload(chat_id, db.get_webpage_site(user["id"], chat_id))
+
+
+@app.get("/api/v1/webpages/{chat_id}/files/{path:path}")
+async def get_webpage_file(chat_id: str, path: str, user=Depends(current_user)) -> dict:
+    """One file of the workspace: its text, or its size and type when binary.
+
+    The Code tab fetches a single file on demand, so the canvas never holds a
+    whole file map. A name the write rules reject is a 400, a name that is not
+    in the workspace a 404.
+    """
+    if db.get_chat(user["id"], chat_id) is None:
+        raise HTTPException(status_code=404, detail="Chat not found")
+    site = db.get_webpage_site(user["id"], chat_id)
+    if site is None:
+        raise HTTPException(status_code=404, detail="No webpage yet")
+    clean = _webpage_path(path)
+    if clean is None or _webpage_blocked_segment(clean):
+        raise HTTPException(status_code=400, detail="That file name isn't allowed.")
+    target = _resolve_under(sitebox.workspace_dir(site["id"]), clean)
+    if target is None or not target.is_file():
+        raise HTTPException(status_code=404, detail="File not found")
+    size = target.stat().st_size
+    if size <= WEBPAGE_FILE_READ_MAX:
+        try:
+            return {"path": clean, "content": target.read_text(encoding="utf-8")}
+        except UnicodeDecodeError:
+            pass
+    return {
+        "path": clean,
+        "binary": True,
+        "mime": _webpage_mime(clean),
+        "size": size,
+    }
 
 
 @app.get("/api/v1/webpages/{chat_id}/versions")
-async def list_webpage_versions(chat_id: str, user=Depends(current_user)) -> dict:
+async def list_webpage_iterations(chat_id: str, user=Depends(current_user)) -> dict:
     """Every iteration of the chat, oldest first, plus the active one's id.
 
-    Summaries only (file text stays out): the canvas lists the history and
+    Summaries only (file text stays on disk): the canvas lists the history and
     fetches one iteration's diff on demand.
     """
     if db.get_chat(user["id"], chat_id) is None:
         raise HTTPException(status_code=404, detail="Chat not found")
-    env = db.get_webpage_env(user["id"], chat_id)
+    site = db.get_webpage_site(user["id"], chat_id)
     return {
-        "activeVersionId": env["active_version_id"] if env else None,
-        "versions": db.list_webpage_versions(user["id"], chat_id),
+        "activeVersionId": site["active_commit"] if site else None,
+        "versions": webpage_git.list_versions(site) if site else [],
     }
 
 
@@ -900,14 +1057,21 @@ async def list_webpage_versions(chat_id: str, user=Depends(current_user)) -> dic
 async def set_webpage_active_version(
     chat_id: str, req: SetWebpageVersionRequest, user=Depends(current_user)
 ) -> dict:
-    """Activate one iteration: the canvas, later AI runs and manual edits use it."""
+    """Activate one iteration: the canvas, later AI runs and manual edits use it.
+
+    The working copy is checked out to that snapshot and everything with a
+    build step is rebuilt from it, so the preview shows the iteration itself.
+    """
     _webpage_idle_or_409(chat_id)
     if db.get_chat(user["id"], chat_id) is None:
         raise HTTPException(status_code=404, detail="Chat not found")
-    env = db.set_webpage_active_version(user["id"], chat_id, req.version_id)
-    if env is None:
+    site = db.get_webpage_site(user["id"], chat_id)
+    if site is None or not webpage_git.is_version(site, req.version_id):
         raise HTTPException(status_code=404, detail="Iteration not found")
-    return _webpage_env_response(env)
+    webpage_git.checkout(site, req.version_id)
+    db.set_webpage_active_commit(user["id"], chat_id, req.version_id)
+    await _rebuild_site(chat_id, site)
+    return _webpage_env_payload(chat_id, db.get_webpage_site(user["id"], chat_id))
 
 
 @app.put("/api/v1/webpages/{chat_id}/files")
@@ -924,60 +1088,146 @@ async def save_webpage_file(
     _webpage_idle_or_409(chat_id)
     if db.get_chat(user["id"], chat_id) is None:
         raise HTTPException(status_code=404, detail="Chat not found")
-    env = db.get_webpage_env(user["id"], chat_id)
-    if env is None:
+    site = db.get_webpage_site(user["id"], chat_id)
+    if site is None:
         raise HTTPException(status_code=404, detail="No webpage yet")
-    clean, problem = validate_webpage_write(env["files"], req.path, req.content)
+    clean, problem = validate_webpage_write(req.path, req.content)
     if problem:
         raise HTTPException(status_code=400, detail=problem)
-    if req.base_version_id != env["active_version_id"]:
+    if req.base_version_id != site["active_commit"]:
         raise HTTPException(
             status_code=409,
             detail="The page changed since you opened it. Reload the canvas and try again.",
         )
-    saved = db.put_webpage_file(
-        user["id"],
-        chat_id,
-        clean,
-        req.content,
-        message_uid=None,
-        origin="manual",
-        label=f"Edited {clean}",
-    )
-    return _webpage_env_response(saved)
-
-
-@app.get("/api/v1/webpages/{chat_id}/assets/{asset_path:path}")
-async def get_webpage_asset(chat_id: str, asset_path: str, user=Depends(current_user)):
-    """Serve one binary asset of the page's folder, user- and chat-scoped.
-
-    The canvas fetches these itself and inlines them into the preview as data
-    URIs: the preview iframe is sandboxed without same-origin, so it has no
-    session and cannot load an authenticated URL on its own. Assets never
-    change once added, but the row is cheap, so the response is not cached
-    beyond the request (the canvas keeps its own copy).
-    """
-    row = db.get_webpage_asset(user["id"], chat_id, asset_path)
-    if row is None:
-        raise HTTPException(status_code=404, detail="Asset not found")
-    return Response(
-        content=row["data"],
-        media_type=row["mime"],
-        headers={"Cache-Control": "private, no-cache"},
-    )
+    workspace = sitebox.workspace_dir(site["id"])
+    target = _resolve_under(workspace, clean)
+    if target is None or _webpage_blocked_segment(clean):
+        raise HTTPException(status_code=400, detail="That file name isn't allowed.")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(req.content, encoding="utf-8")
+    webpage_git.commit_workspace(site, origin="manual", label=f"Edited {clean}", message_uid=None)
+    await _rebuild_site(chat_id, site)
+    return _webpage_env_payload(chat_id, db.get_webpage_site(user["id"], chat_id))
 
 
 @app.get("/api/v1/webpages/{chat_id}/versions/{version_id}/diff")
-async def get_webpage_version_diff(
+async def get_webpage_iteration_diff(
     chat_id: str, version_id: str, against: str | None = None, user=Depends(current_user)
 ) -> dict:
     """Unified diff of one iteration against its parent (or `against`)."""
     if db.get_chat(user["id"], chat_id) is None:
         raise HTTPException(status_code=404, detail="Chat not found")
-    diff = db.webpage_version_diff(user["id"], chat_id, version_id, against)
+    site = db.get_webpage_site(user["id"], chat_id)
+    diff = webpage_git.version_diff(site, version_id, against) if site else None
     if diff is None:
         raise HTTPException(status_code=404, detail="Iteration not found")
     return diff
+
+
+# ---------- webpage preview (capability URL, no session) ----------
+
+# A page's own assets are fetched by the sandboxed iframe, whose origin is
+# opaque: no usable cookie, and module scripts/fetch() are CORS requests with
+# `Origin: null`. So every preview response is public, uncacheable and free of
+# referrer leakage (the key is what keeps the URL unguessable).
+PREVIEW_HEADERS = {
+    "Access-Control-Allow-Origin": "*",
+    "Referrer-Policy": "no-referrer",
+    "X-Content-Type-Options": "nosniff",
+    "Cache-Control": "no-cache",
+}
+
+# Shown when a site has been created but has nothing to serve yet (no root
+# index.html and no build output), so the canvas iframe shows words instead of
+# a bare 404 or a blank document.
+PREVIEW_PLACEHOLDER = (
+    "<!doctype html><html><head><meta charset=\"utf-8\">"
+    "<title>Preview</title></head><body>"
+    "<p>This site has no index.html yet.</p></body></html>"
+)
+
+# Root-absolute URLs in a page's own html/css are rebased onto the preview URL:
+# a hand-written <link href="/styles.css"> (or a build whose `base` was not
+# configured) would otherwise resolve against the backend's root. Relative and
+# protocol-relative (//) values, and data: URIs, never match.
+_ROOT_ABSOLUTE_URL = re.compile(
+    r"""((?:href|src|action)\s*=\s*)(["']?)(/(?!/)[^"'\s>]*)""", re.IGNORECASE
+)
+_CSS_URL = re.compile(r"""(url\(\s*)(["']?)(/(?!/)[^"')]*)""", re.IGNORECASE)
+
+
+def _rebase_root_absolute(body: str, preview_base: str) -> str:
+    """Prefix root-absolute html/css URLs with the preview base.
+
+    Values that already carry the preview base (a correctly configured build)
+    pass through byte-identical, as do relative ones.
+    """
+
+    def attr(match: re.Match) -> str:
+        value = match.group(3)
+        if value.startswith(preview_base):
+            return match.group(0)
+        return f"{match.group(1)}{match.group(2)}{preview_base}{value[1:]}"
+
+    def css(match: re.Match) -> str:
+        value = match.group(3)
+        if value.startswith(preview_base):
+            return match.group(0)
+        return f"{match.group(1)}{match.group(2)}{preview_base}{value[1:]}"
+
+    return _CSS_URL.sub(css, _ROOT_ABSOLUTE_URL.sub(attr, body))
+
+
+def _preview_response(body: bytes, mime: str) -> Response:
+    return Response(content=body, media_type=mime, headers=PREVIEW_HEADERS)
+
+
+def _preview_404() -> HTTPException:
+    return HTTPException(status_code=404, detail="Not found", headers=PREVIEW_HEADERS)
+
+
+def _preview_file(path: Path, preview_base: str) -> Response:
+    """One file, with html/css bodies rebased onto the preview URL."""
+    body = path.read_bytes()
+    mime = _webpage_mime(path.name)
+    if mime in ("text/html", "text/css"):
+        body = _rebase_root_absolute(body.decode("utf-8", errors="replace"), preview_base).encode(
+            "utf-8"
+        )
+    return _preview_response(body, mime)
+
+
+@app.get("/api/v1/webpages/{chat_id}/preview/{key}/{path:path}")
+async def webpage_preview(chat_id: str, key: str, path: str) -> Response:
+    """Serve one file of a site to the sandboxed canvas iframe.
+
+    Deliberately unauthenticated: `preview_key` is the capability, because the
+    iframe has no session. Serves the build output (`dist/`) when there is one,
+    else the workspace root, with a directory or extension-less miss falling
+    back to that root's index.html.
+    """
+    site = db.get_webpage_site_by_chat(chat_id)
+    if site is None or key != site["preview_key"]:
+        raise _preview_404()
+    workspace = sitebox.workspace_dir(site["id"])
+    serve_root = (
+        workspace / "dist" if (workspace / "dist" / "index.html").is_file() else workspace
+    )
+    requested = (path or "").replace("\\", "/")
+    if _webpage_blocked_segment(requested):
+        raise _preview_404()
+    target = _resolve_under(serve_root, requested)
+    if target is None:
+        raise _preview_404()
+    if target.is_dir():
+        target = target / "index.html"
+    if not target.is_file() and not os.path.splitext(requested)[1]:
+        target = serve_root / "index.html"
+    if target.is_file():
+        return _preview_file(target, _preview_base(chat_id, site))
+    if not (serve_root / "index.html").is_file():
+        return _preview_response(PREVIEW_PLACEHOLDER.encode("utf-8"), "text/html")
+    raise _preview_404()
 
 
 # ---------- attachments (user uploads) ----------
@@ -1181,6 +1431,13 @@ async def chat(req: ChatRequest, user=Depends(current_user)) -> ChatResponse:
         think_start = time.monotonic()
         result = await GRAPH.ainvoke(_state(req, user), config=_graph_config(user, req))
         thought_seconds = time.monotonic() - think_start
+        # Fold whatever the run wrote into one iteration (and rebuild a site
+        # that has a build step) before the reply is stored, so the iteration
+        # the canvas shows is the one this turn produced.
+        _, build = await asyncio.to_thread(
+            sitebox.finalize_run, user["id"], req.chat_id, None
+        )
+        _record_build(req.chat_id, build)
         messages = result["messages"]
         reasoning, tool_calls, parts = _final_extras(messages)
         db.append_chat_message(
@@ -1403,36 +1660,40 @@ async def _stream_chat_events(req: ChatRequest, user: dict):
             if tool_id not in tools_by_id:
                 # A nested internal run we deliberately did not surface.
                 continue
-            output_text = _tool_result_text(event["data"].get("output", ""))
+            output = event["data"].get("output", "")
+            output_text = _tool_result_text(output)
+            # A tool that failed comes back as an error ToolMessage rather than
+            # an exception (see agent/graph.py's handler); keep the card honest.
+            ok = getattr(output, "status", "success") != "error"
             tools_by_id[tool_id]["result"] = output_text
             tool_part = parts_by_tool_id.get(tool_id)
             if tool_part is not None:
                 tool_part["result"] = output_text
-                tool_part["ok"] = True
-            yield _tool_result_event(tool_id, event.get("name", ""), output_text, True)
+                tool_part["ok"] = ok
+            yield _tool_result_event(tool_id, event.get("name", ""), output_text, ok)
             image_part = _image_part_from_result(
                 event.get("name", ""), output_text
             )
             if image_part is not None:
                 parts.append(image_part)
                 yield {"event": "image", "data": json.dumps(image_part)}
-            webpage_part, version_id = _webpage_result(output_text)
+            webpage_part, _ = _webpage_result(output_text)
             if webpage_part is not None:
                 _merge_webpage_part(parts, webpage_part)
-                env = db.get_webpage_env(user["id"], req.chat_id)
-                path = webpage_part.get("path", "")
-                content = (env["files"] if env else {}).get(path, "")
+                site = db.get_webpage_site(user["id"], req.chat_id)
+                preview_base = _preview_base(req.chat_id, site) if site else None
                 yield {
                     "event": "webpage",
                     "data": json.dumps(
                         {
                             "webpageId": webpage_part["webpageId"],
-                            "path": path,
                             "files": webpage_part["files"],
-                            "content": content,
-                            "versionId": version_id,
-                            "asset": bool(webpage_part.get("asset")),
-                            "assets": (env["assets"] if env else {}),
+                            "versionId": None,
+                            "build": None,
+                            "previewBase": preview_base,
+                            "previewUrl": (
+                                preview_base + "index.html" if preview_base else None
+                            ),
                         }
                     ),
                 }
@@ -1449,6 +1710,29 @@ async def _stream_chat_events(req: ChatRequest, user: dict):
                 tool_part["result"] = error_text
                 tool_part["ok"] = False
             yield _tool_result_event(tool_id, event.get("name", ""), error_text, False)
+    # The run is over: whatever it wrote becomes one iteration, and a site with
+    # a build step is rebuilt from it. The final event carries the iteration id
+    # and the build outcome — this is where the canvas learns a rebuild failed.
+    sha, build = await asyncio.to_thread(
+        sitebox.finalize_run, user["id"], req.chat_id, req.reply_id
+    )
+    _record_build(req.chat_id, build)
+    if sha or build:
+        site = db.get_webpage_site(user["id"], req.chat_id)
+        preview_base = _preview_base(req.chat_id, site) if site else None
+        yield {
+            "event": "webpage",
+            "data": json.dumps(
+                {
+                    "webpageId": site["id"] if site else None,
+                    "files": webpage_git.changed_files(site) if site else [],
+                    "versionId": sha,
+                    "build": build,
+                    "previewBase": preview_base,
+                    "previewUrl": preview_base + "index.html" if preview_base else None,
+                }
+            ),
+        }
     yield {"event": "done", "data": "{}"}
     blocks.close()
     if req.generate_title and req.messages:

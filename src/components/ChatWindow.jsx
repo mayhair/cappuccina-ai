@@ -153,17 +153,25 @@ function imageResultSummary(tool) {
   }
 }
 
-// A write_webpage_file result is a machine-readable pointer at the chat's
-// webpage environment (see backend/app/main.py); the page renders in the canvas,
-// so the thinking panel only needs a one-liner.
-const WEBPAGE_FILE_TOOL = 'write_webpage_file'
-
+// A webpage tool result is a machine-readable pointer at the chat's webpage
+// workspace (see backend/app/main.py); the page renders in the canvas, so the
+// thinking panel only needs a one-liner. Any result carrying a webpage_id
+// counts — the write, the asset copy and the site command.
 function webpageResultSummary(tool) {
-  if (tool?.name !== WEBPAGE_FILE_TOOL || typeof tool.result !== 'string') return null
+  if (typeof tool?.result !== 'string') return null
   try {
     const data = JSON.parse(tool.result)
-    if (data?.status !== 'webpage_file_written' || !data.path) return null
-    return `Saved ${data.path} — see the canvas ✨`
+    if (!data?.webpage_id) return null
+    if (data.status === 'webpage_file_written' && data.path) {
+      return `Saved ${data.path} — see the canvas ✨`
+    }
+    if (data.status === 'webpage_asset_added' && data.path) {
+      return `Added ${data.path} — see the canvas ✨`
+    }
+    if (data.status === 'webpage_command_ran') {
+      return 'Ran a site command — see the canvas ✨'
+    }
+    return null
   } catch {
     return null
   }

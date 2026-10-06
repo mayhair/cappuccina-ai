@@ -102,6 +102,8 @@ const CSS = "body { color: rgb(1, 2, 3); }";
 // Hostile string literal: if the canvas failed to escape, this would become a
 // real <img> in the app DOM and fire onerror.
 const JS = 'const evil = "<img src=x onerror=window.__code_xss=1>";\nfunction f(x) { return x; }';
+// The workspace tree the canvas lists and fetches one file of at a time.
+const TEXT = { "index.html": INDEX, "styles.css": CSS, "script.js": JS };
 
 await page.route("**/api/v1/auth/me", (route) =>
   route.fulfill({
@@ -123,18 +125,55 @@ await page.route("**/api/v1/chats", (route) =>
   }),
 );
 
-let env = { webpageId: null, files: {}, updatedAt: null };
-await page.route("**/api/v1/webpages/**", (route) =>
-  route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(env) }),
-);
+// The canvas fetches the env (names only), one file's text at a time, and the
+// served preview URL; the sandboxed iframe needs a real document to load.
+const NAMES = Object.keys(TEXT);
+const PREVIEW_BASE = `/api/v1/webpages/chat-check/preview/key-check/`;
+let env = {
+  webpageId: "webpage-check",
+  files: NAMES,
+  updatedAt: "2026-01-01T00:00:00Z",
+  activeVersionId: null,
+  previewUrl: `${PREVIEW_BASE}index.html`,
+  previewBase: PREVIEW_BASE,
+  entry: "index.html",
+  serveRoot: "",
+  hasBuild: false,
+  lastBuild: null,
+};
+await page.route("**/api/v1/webpages/**", (route) => {
+  const url = new URL(route.request().url());
+  const parts = url.pathname.split("/api/v1/webpages/")[1]?.split("/").filter(Boolean) ?? [];
+  const [, sub, ...rest] = parts;
+  if (sub === "preview") {
+    return route.fulfill({
+      status: 200,
+      contentType: "text/html",
+      body: "<!doctype html><html><body><h1>mock</h1></body></html>",
+    });
+  }
+  if (sub === "files") {
+    const path = rest.join("/");
+    return typeof TEXT[path] === "string"
+      ? route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ path, content: TEXT[path] }) })
+      : route.fulfill({ status: 404, contentType: "application/json", body: JSON.stringify({ detail: "File not found" }) });
+  }
+  if (sub === "versions") {
+    return route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ activeVersionId: env.activeVersionId, versions: [] }),
+    });
+  }
+  return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(env) });
+});
 
-const files = { "index.html": INDEX, "styles.css": CSS, "script.js": JS };
 const sse = [
   "event: start\ndata: {}\n\n",
-  ...Object.entries(files).flatMap(([path, content], i) => [
+  ...Object.entries(TEXT).flatMap(([path, content], i) => [
     `event: tool_call\ndata: ${JSON.stringify({ id: `t${i}`, name: "write_webpage_file", display: "Building Webpage", args: { path, bytes: content.length } })}\n\n`,
-    `event: tool_result\ndata: ${JSON.stringify({ id: `t${i}`, name: "write_webpage_file", content: JSON.stringify({ status: "webpage_file_written", path }), ok: true })}\n\n`,
-    `event: webpage\ndata: ${JSON.stringify({ webpageId: "env-check", path, files: Object.keys(files).slice(0, i + 1), content })}\n\n`,
+    `event: tool_result\ndata: ${JSON.stringify({ id: `t${i}`, name: "write_webpage_file", content: JSON.stringify({ status: "webpage_file_written", webpage_id: "webpage-check", version_id: null, path, bytes: content.length, files: NAMES.slice(0, i + 1) }), ok: true })}\n\n`,
+    `event: webpage\ndata: ${JSON.stringify({ webpageId: "webpage-check", path, files: NAMES.slice(0, i + 1), versionId: null, build: null, previewBase: PREVIEW_BASE, previewUrl: `${PREVIEW_BASE}index.html` })}\n\n`,
   ]),
   'event: token\ndata: {"content":"Done!"}\n\n',
   "event: done\ndata: {}\n\n",
@@ -283,7 +322,11 @@ check("canvas html: tag text keeps source case", tagStyle.text.includes("html") 
 
 // 3. markdown fenced block uses Prism tokens (restored chat with a fence).
 const fenced = "Here you go:\n\n```js\nconst x = 1;\n```\n";
-env = { webpageId: "env-check", files, updatedAt: "2026-01-01T00:00:00Z" };
+env = {
+  ...env,
+  updatedAt: "2026-01-01T00:00:00Z",
+  activeVersionId: null,
+};
 savedChats = [
   {
     id: "chat-check",

@@ -1,3 +1,9 @@
+// The canvas on the containerized workspace API (see backend/app/main.py): the
+// preview iframe loads the served preview URL (a sandboxed, session-less
+// capability URL — never srcdoc), the Code tab lists the workspace tree and
+// fetches one file's text on demand, and a hand edit saves against the
+// iteration it rendered.
+// Run against `npm run preview` (port 4173): node scripts/webpage-check.mjs
 import { chromium } from "playwright";
 
 const browser = await chromium.launch();
@@ -6,65 +12,166 @@ const errors = [];
 page.on("console", (m) => m.type() === "error" && errors.push(m.text()));
 page.on("pageerror", (e) => errors.push(String(e)));
 
-const INDEX = "<!doctype html><html><head><title>Cat zone</title><link rel=\"stylesheet\" href=\"styles.css\"></head><body><h1>Hello cats</h1><img src=\"cat.png\" alt=\"a cat\"><script src=\"script.js\"></script></body></html>";
+const INDEX =
+  "<!doctype html><html><head><title>Cat zone</title><link rel=\"stylesheet\" href=\"styles.css\"></head><body><h1>Hello cats</h1><img src=\"cat.png\" alt=\"a cat\"><script src=\"script.js\"></script></body></html>";
 const CSS = "body { background: rgb(1, 2, 3); }";
 const JS =
   "const heading = 'from script';\nfunction label(text) {\n  return text;\n}\ndocument.querySelector('h1').textContent = label(heading);";
 
-// A real 1x1 PNG: the canvas fetches folder assets itself and inlines them as
-// data URLs, so this is what proves the picture reaches the sandboxed iframe.
+// A real 1x1 PNG: the preview route serves it like any other workspace file, so
+// the sandboxed iframe proves the picture loaded from the site's own URL (the
+// canvas holds no bytes of its own).
 const PNG = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg==",
   "base64",
 );
 
+const CHAT = "chat-check";
+// The preview URL is a capability URL scoped to the chat: the canvas iframe and
+// the Code tab's <img> both load from it, with no session cookie.
+const PREVIEW_BASE = `/api/v1/webpages/${CHAT}/preview/key-check/`;
+const PREVIEW_URL = `${PREVIEW_BASE}index.html`;
+const TEXT = { "index.html": INDEX, "styles.css": CSS, "script.js": JS };
+const BINARY = { "cat.png": { mime: "image/png", size: PNG.length } };
+const NAMES = ["index.html", "styles.css", "script.js", "cat.png"];
+
+// The mirrored server state: two AI runs, the second one active.
+let activeVersionId = "v-run-2";
+const versions = [
+  {
+    id: "v-run-1",
+    seq: 1,
+    parentVersionId: null,
+    origin: "ai",
+    label: "",
+    messageUid: "reply-1",
+    assets: [],
+    summary: { files: 3, added: 3, removed: 0 },
+    createdAt: "2026-01-01T00:00:00Z",
+  },
+  {
+    id: "v-run-2",
+    seq: 2,
+    parentVersionId: "v-run-1",
+    origin: "ai",
+    label: "",
+    messageUid: "reply-2",
+    assets: [],
+    summary: { files: 1, added: 1, removed: 0 },
+    createdAt: "2026-01-01T00:01:00Z",
+  },
+];
+const envJson = () => ({
+  webpageId: "webpage-check",
+  files: NAMES,
+  updatedAt: "2026-01-01T00:01:00Z",
+  activeVersionId,
+  previewUrl: PREVIEW_URL,
+  previewBase: PREVIEW_BASE,
+  entry: "index.html",
+  serveRoot: "",
+  hasBuild: false,
+  lastBuild: null,
+});
+const activationRequests = [];
+const saveRequests = [];
+
+const json = (body, status = 200) => ({
+  status,
+  contentType: "application/json",
+  body: JSON.stringify(body),
+});
+
 // unauthenticated preview: mock the session + chat list
 await page.route("**/api/v1/auth/me", async (route) => {
-  await route.fulfill({
-    status: 200,
-    contentType: "application/json",
-    body: JSON.stringify({ id: "check", email: "check@example.com", displayName: "Check" }),
-  });
+  await route.fulfill(
+    json({ id: "check", email: "check@example.com", displayName: "Check" }),
+  );
 });
 // mutable server state: empty until the stream "persists" a finished turn
 let savedChats = [];
 await page.route("**/api/v1/chats", async (route) => {
-  const body =
-    route.request().method() === "GET"
-      ? JSON.stringify(savedChats)
-      : JSON.stringify({ id: "chat-check", title: "New chat" });
-  await route.fulfill({ status: 200, contentType: "application/json", body });
+  await route.fulfill(
+    json(route.request().method() === "GET" ? savedChats : { id: CHAT, title: "New chat" }),
+  );
 });
-// The canvas fetches the environment, the iteration list and any folder
-// picture's bytes; all three live behind /api/v1/webpages/.
-const ASSET = { path: "cat.png", mime: "image/png", size: PNG.length };
-let env = { webpageId: null, files: {}, assets: {}, updatedAt: null };
-let versions = [];
+// Everything the workspace exposes: the env, the tree-by-name, one file's text
+// (or its binary metadata), the iteration list, an activation, a save, a diff,
+// and the served preview (the iframe and its stylesheet/script/picture).
 await page.route("**/api/v1/webpages/**", async (route) => {
-  const url = new URL(route.request().url());
-  if (url.pathname.includes("/assets/")) {
-    await route.fulfill({ status: 200, contentType: "image/png", body: PNG });
+  const request = route.request();
+  const url = new URL(request.url());
+  const parts = url.pathname.split(`/api/v1/webpages/${CHAT}/`)[1]?.split("/").filter(Boolean) ?? [];
+  const [sub, ...rest] = parts;
+  if (sub === "preview") {
+    const name = rest.slice(1).join("/") || "index.html";
+    if (name === "index.html") {
+      await route.fulfill({ status: 200, contentType: "text/html", body: INDEX });
+    } else if (name === "styles.css") {
+      await route.fulfill({ status: 200, contentType: "text/css", body: CSS });
+    } else if (name === "script.js") {
+      await route.fulfill({ status: 200, contentType: "text/javascript", body: JS });
+    } else if (name === "cat.png") {
+      await route.fulfill({ status: 200, contentType: "image/png", body: PNG });
+    } else {
+      await route.fulfill(json({ detail: "Not found" }, 404));
+    }
     return;
   }
-  const body = url.pathname.endsWith("/versions")
-    ? { activeVersionId: versions.at(-1)?.id ?? null, versions }
-    : env;
-  await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) });
+  if (sub === "versions" && rest[0]) {
+    await route.fulfill(json({ versionId: rest[0], baseVersionId: null, files: [], truncated: false }));
+    return;
+  }
+  if (sub === "versions") {
+    await route.fulfill(json({ activeVersionId, versions }));
+    return;
+  }
+  if (sub === "active" && request.method() === "PUT") {
+    const body = JSON.parse(request.postData() ?? "{}");
+    activationRequests.push(body);
+    if (versions.some((v) => v.id === body.versionId)) activeVersionId = body.versionId;
+    await route.fulfill(json(envJson()));
+    return;
+  }
+  if (sub === "files" && request.method() === "PUT") {
+    const body = JSON.parse(request.postData() ?? "{}");
+    saveRequests.push(body);
+    await route.fulfill(json(envJson()));
+    return;
+  }
+  if (sub === "files") {
+    const path = rest.join("/");
+    if (typeof TEXT[path] === "string") {
+      await route.fulfill(json({ path, content: TEXT[path] }));
+      return;
+    }
+    if (BINARY[path]) {
+      await route.fulfill(json({ path, binary: true, mime: BINARY[path].mime, size: BINARY[path].size }));
+      return;
+    }
+    await route.fulfill(json({ detail: "File not found" }, 404));
+    return;
+  }
+  if (!sub) {
+    await route.fulfill(json(envJson()));
+    return;
+  }
+  await route.fulfill(json({ detail: "Not found" }, 404));
 });
 
 // One page built as three file writes, each announced with a webpage event,
-// then a picture added to the folder (announced without file text).
-const files = { "index.html": INDEX, "styles.css": CSS, "script.js": JS };
+// then a picture added to the folder. The tools hold no file text any more: the
+// canvas refetches the env, the iteration list and the file it shows.
 const sse = [
   "event: start\ndata: {}\n\n",
-  ...Object.entries(files).flatMap(([path, content], i) => [
+  ...Object.entries(TEXT).flatMap(([path, content], i) => [
     `event: tool_call\ndata: ${JSON.stringify({ id: `t${i}`, name: "write_webpage_file", display: "Building Webpage", args: { path, bytes: content.length }, label: `write_webpage_file(path='${path}')` })}\n\n`,
-    `event: tool_result\ndata: ${JSON.stringify({ id: `t${i}`, name: "write_webpage_file", content: JSON.stringify({ status: "webpage_file_written", webpage_id: "env-check", path, bytes: content.length, files: Object.keys(files).slice(0, i + 1) }), ok: true })}\n\n`,
-    `event: webpage\ndata: ${JSON.stringify({ webpageId: "env-check", path, files: Object.keys(files).slice(0, i + 1), content, versionId: "v-page", asset: false, assets: {} })}\n\n`,
+    `event: tool_result\ndata: ${JSON.stringify({ id: `t${i}`, name: "write_webpage_file", content: JSON.stringify({ status: "webpage_file_written", webpage_id: "webpage-check", version_id: null, path, bytes: content.length, files: NAMES.slice(0, i + 1) }), ok: true })}\n\n`,
+    `event: webpage\ndata: ${JSON.stringify({ webpageId: "webpage-check", path, files: NAMES.slice(0, i + 1), versionId: null, build: null, previewBase: PREVIEW_BASE, previewUrl: PREVIEW_URL })}\n\n`,
   ]),
-  `event: tool_call\ndata: ${JSON.stringify({ id: "t9", name: "add_webpage_asset", display: "Adding to Webpage", args: { path: ASSET.path, image_id: "img-1" }, label: `add_webpage_asset(path='${ASSET.path}')` })}\n\n`,
-  `event: tool_result\ndata: ${JSON.stringify({ id: "t9", name: "add_webpage_asset", content: JSON.stringify({ status: "webpage_asset_added", webpage_id: "env-check", version_id: "v-asset", path: ASSET.path, mime: ASSET.mime, bytes: ASSET.size, files: Object.keys(files), assets: [ASSET.path] }), ok: true })}\n\n`,
-  `event: webpage\ndata: ${JSON.stringify({ webpageId: "env-check", path: "", files: Object.keys(files), content: "", versionId: "v-asset", asset: true, assets: { [ASSET.path]: { mime: ASSET.mime, size: ASSET.size } } })}\n\n`,
+  `event: tool_call\ndata: ${JSON.stringify({ id: "t9", name: "add_webpage_asset", display: "Adding to Webpage", args: { path: "cat.png", image_id: "img-1" }, label: `add_webpage_asset(path='cat.png')` })}\n\n`,
+  `event: tool_result\ndata: ${JSON.stringify({ id: "t9", name: "add_webpage_asset", content: JSON.stringify({ status: "webpage_asset_added", webpage_id: "webpage-check", version_id: null, path: "cat.png", mime: "image/png", bytes: PNG.length, files: NAMES, assets: [] }), ok: true })}\n\n`,
+  `event: webpage\ndata: ${JSON.stringify({ webpageId: "webpage-check", path: "", files: NAMES, versionId: null, build: null, previewBase: PREVIEW_BASE, previewUrl: PREVIEW_URL })}\n\n`,
   'event: token\ndata: {"content":"Your page is ready!"}\n\n',
   "event: done\ndata: {}\n\n",
 ].join("");
@@ -72,6 +179,15 @@ const sse = [
 await page.route("**/api/v1/chat/stream", async (route) => {
   await route.fulfill({ status: 200, contentType: "text/event-stream", body: sse });
 });
+
+async function waitFor(fn, timeout = 5000) {
+  const start = Date.now();
+  for (;;) {
+    if (await fn()) return true;
+    if (Date.now() - start > timeout) return false;
+    await page.waitForTimeout(50);
+  }
+}
 
 await page.goto("http://localhost:4173/", { waitUntil: "networkidle" });
 await page.fill('textarea[aria-label="Message Cappuccina"]', "make me a webpage about cats");
@@ -83,40 +199,50 @@ const open = await page.locator(".webpage-canvas").isVisible();
 console.log("canvas auto-opened:", open);
 await page.waitForSelector(".canvas-frame", { timeout: 5000 });
 
-// 2. the iframe is sandboxed without same-origin, so the page can't touch the app
+// 2. the iframe is sandboxed without same-origin, so the page can't touch the
+//    app — and it loads the served preview URL, not an inlined srcdoc.
 const sandbox = await page.locator(".canvas-frame").getAttribute("sandbox");
 console.log("iframe sandbox:", sandbox);
 const sandboxed = sandbox === "allow-scripts";
 console.log("iframe sandboxed script-only:", sandboxed);
-
-// 3. the preview inlines the linked stylesheet and script by name
+const frameSrc = await page.locator(".canvas-frame").getAttribute("src");
 const srcdoc = await page.locator(".canvas-frame").getAttribute("srcdoc");
-const inlinedCss = srcdoc.includes(CSS);
-const inlinedJs = srcdoc.includes(JS);
-const externalTagsGone = !srcdoc.includes('href="styles.css"') && !srcdoc.includes('src="script.js"');
-console.log("preview inlines css:", inlinedCss);
-console.log("preview inlines js:", inlinedJs);
-console.log("linked tags rewritten:", externalTagsGone);
+console.log("iframe src is the preview URL:", frameSrc === PREVIEW_URL, frameSrc);
+console.log("iframe carries no srcdoc:", srcdoc === null);
 
-// 4. the rendered iframe really ran the inlined code
+// 3. the served page really runs in the frame: its linked stylesheet and script
+//    load from the preview URL, and the picture too.
 const frame = page.frameLocator(".canvas-frame");
-const renderedHeading = await frame.locator("h1").textContent({ timeout: 3000 });
-console.log("inlined script ran:", renderedHeading === "from script");
+const renderedHeading = await frame.locator("h1").textContent({ timeout: 5000 });
+console.log("preview ran the served script:", renderedHeading === "from script");
+const frameBody = await frame
+  .locator("body")
+  .evaluate((el) => getComputedStyle(el).backgroundColor);
+console.log("preview applied the served stylesheet:", frameBody === "rgb(1, 2, 3)", frameBody);
+const frameImage = await frame
+  .locator("img")
+  .evaluate((el) => ({ w: el.naturalWidth, src: el.src }));
+console.log(
+  "preview loaded the picture from the preview URL:",
+  frameImage.w > 0 && frameImage.src.endsWith("/preview/key-check/cat.png"),
+);
 
-// 5. the Code tab opens a file menu; picking a file collapses it to the editor
-//    with a back button that returns to the menu.
+// 4. the Code tab lists the workspace tree (entry first), fetches a file's text
+//    on demand, and highlights it.
 await page.click('.canvas-tabs button:has-text("Code")');
 await page.waitForSelector(".canvas-file-row", { timeout: 3000 });
 const rows = await page.locator(".canvas-file-row .canvas-file-name").allTextContents();
 console.log("code files:", rows.join(", "));
-const listsAll = ["index.html", "script.js", "styles.css"].every((n) => rows.includes(n));
+const listsAll = NAMES.every((n) => rows.includes(n));
+console.log("code tab lists the whole tree (entry first):", listsAll && rows[0] === NAMES[0]);
 await page.click('.canvas-file-row:has-text("index.html")');
 await page.waitForSelector(".canvas-code-head", { timeout: 3000 });
 const menuGone = (await page.locator(".canvas-file-row").count()) === 0;
 const openLabel = await page.locator(".canvas-code-head .canvas-file-name").textContent();
 console.log("file menu collapses on pick:", menuGone && openLabel === "index.html");
+await page.waitForSelector(".canvas-code-body .token.tag", { timeout: 3000 });
 const codeText = await page.locator(".canvas-code-body").textContent();
-console.log("code tab shows the page:", codeText.includes("Hello cats"));
+console.log("code tab shows the fetched file:", codeText.includes("Hello cats"));
 const htmlTag = await page.locator(".canvas-code-body .token.tag").first().textContent();
 console.log("html highlighted (tag token):", !!htmlTag);
 const htmlAttr = await page.locator(".canvas-code-body .token.attr-name").count();
@@ -152,42 +278,65 @@ const scrollbarStyled = await page
 console.log("code pane scrollbar themed:", String(scrollbarStyled).includes("rgba(234, 114, 178") || String(scrollbarStyled) === "thin");
 await page.click('.canvas-back-btn');
 await page.waitForSelector(".canvas-file-row", { timeout: 3000 });
-console.log("back returns to the file menu:", await page.locator(".canvas-file-row").count() >= 3);
+console.log("back returns to the file menu:", (await page.locator(".canvas-file-row").count()) >= 4);
 
-// 6. the folder picture: listed with its size, inlined into the preview as a
-//    data URL, decoded by the sandboxed iframe, and shown (not edited) in the
-//    Code tab.
-await page.click('.canvas-tabs button:has-text("Code")');
+// 5. editing + Save puts the file back with the iteration it rendered as the
+//    base, and the canvas refetches the env it saved against.
+await page.click('.canvas-file-row:has-text("index.html")');
+await page.waitForSelector(".canvas-code-head", { timeout: 3000 });
+const baseBeforeEdit = activeVersionId;
+await page.click('.canvas-icon-btn[aria-label="Edit index.html"]');
+await page.waitForSelector("textarea.canvas-code-edit", { timeout: 3000 });
+await page.fill("textarea.canvas-code-edit", INDEX.replace("Hello cats", "Hello edited cats"));
+await page.click(".canvas-edit-save");
+const saved = await waitFor(() => saveRequests.length > 0);
+console.log("save issues the file PUT:", saved);
+console.log("save carries the rendered baseVersionId:", saveRequests[0]?.baseVersionId === baseBeforeEdit, saveRequests[0]?.baseVersionId);
+console.log("save carries the edited text:", (saveRequests[0]?.content ?? "").includes("Hello edited cats"));
+await page.waitForTimeout(150);
+console.log("editor closes after a successful save:", (await page.locator("textarea.canvas-code-edit").count()) === 0);
+
+// 6. the folder picture: listed in the tree, served by URL into the canvas
+//    (decoded, not editable) and into the sandboxed iframe.
+await page.click('.canvas-back-btn');
 await page.waitForSelector(".canvas-file-row", { timeout: 3000 });
 const assetRow = await page.locator('.canvas-file-row:has-text("cat.png")').count();
-const assetChip = await page
-  .locator('.canvas-file-row:has-text("cat.png") .canvas-history-meta')
-  .textContent();
-console.log("folder picture listed with its size:", assetRow === 1 && /B|KB/.test(assetChip ?? ""));
+console.log("folder picture listed in the tree:", assetRow === 1);
 await page.click('.canvas-file-row:has-text("cat.png")');
 await page.waitForSelector(".canvas-asset-preview", { timeout: 3000 });
-const assetDecoded = await page
-  .locator(".canvas-asset-preview")
-  .evaluate((el) => el.naturalWidth > 0);
+const assetDecoded = await waitFor(() =>
+  page.locator(".canvas-asset-preview").evaluate((el) => el.naturalWidth > 0),
+);
+const assetHint = await page.locator(".canvas-asset").textContent();
 const noEditForAsset = (await page.locator(".canvas-edit-btn").count()) === 0;
 console.log("picture shown in the code tab (decoded, not editable):", assetDecoded && noEditForAsset);
+console.log("picture pane names its type and size:", /image\/png/.test(assetHint) && /B|KB/.test(assetHint), assetHint);
 await page.click('.canvas-back-btn');
 await page.waitForSelector(".canvas-file-row", { timeout: 3000 });
 await page.click('.canvas-tabs button:has-text("Preview")');
 await page.waitForSelector(".canvas-frame", { timeout: 3000 });
-const withAsset = await page.locator(".canvas-frame").getAttribute("srcdoc");
-const assetInlined = withAsset.includes("data:image/png;base64,") && !withAsset.includes('src="cat.png"');
-console.log("preview inlines the picture as a data URL:", assetInlined);
-const frameImage = await frame
-  .locator("img")
-  .evaluate((el) => ({ w: el.naturalWidth, src: el.getAttribute("src") }));
-console.log("sandboxed iframe decoded the picture:", frameImage.w > 0 && frameImage.src.startsWith("data:image/png"));
 
-// 7. the message carries a card to reopen the canvas
+// 7. the history bar steps through the runs (each step activates server-side)
+const bar = () => page.locator(".canvas-history-count").textContent();
+console.log("iteration bar shows the latest run:", await waitFor(async () => (await bar()) === "Iteration 2 of 2"), await bar());
+await page.click('.canvas-history-step[aria-label="Previous iteration"]');
+const steppedBack = await waitFor(() => activationRequests.length > 0);
+console.log("previous iteration activates the older run:", steppedBack);
+console.log("activation body carries versionId:", activationRequests[0]?.versionId === "v-run-1");
+console.log("bar back to iteration 1 of 2:", await waitFor(async () => (await bar()) === "Iteration 1 of 2"), await bar());
+await page.click('.canvas-history-step[aria-label="Next iteration"]');
+console.log("next iteration returns to 2 of 2:", await waitFor(async () => (await bar()) === "Iteration 2 of 2"), await bar());
+
+// 8. the open-in-a-new-tab button replaces the old download link
+const newTabBtn = page.locator('.canvas-icon-btn[aria-label="Open the page in a new tab"]');
+const newTabButton = (await newTabBtn.count()) === 1;
+console.log("open-in-new-tab button present:", newTabButton);
+
+// 9. the message carries a card to reopen the canvas
 const card = await page.locator(".webpage-card").count();
 console.log("message webpage card:", card === 1);
 
-// 8. closing hides it; the top-bar toggle appears and reopens it
+// 10. closing hides it; the top-bar toggle appears and reopens it
 await page.click('.canvas-icon-btn[aria-label="Close canvas"]');
 await page.waitForTimeout(150);
 console.log("canvas closed:", (await page.locator(".webpage-canvas").count()) === 0);
@@ -195,7 +344,7 @@ await page.click('.ctrl-btn[aria-label="Show the webpage"]');
 await page.waitForSelector(".webpage-canvas", { timeout: 3000 });
 console.log("canvas reopened:", await page.locator(".webpage-canvas").isVisible());
 
-// 8b. fullscreen: the canvas covers the whole browser window (whatever its
+// 11. fullscreen: the canvas covers the whole browser window (whatever its
 // size), the small header icon leaves it, and Escape does too.
 const viewport = page.viewportSize();
 await page.click('.canvas-icon-btn[aria-label="Fullscreen"]');
@@ -221,7 +370,8 @@ const surface = await page.locator(".webpage-canvas").evaluate((el) => {
 const opaqueSurface =
   /^rgb\(/.test(surface.background) && (surface.backdrop === "none" || !surface.backdrop);
 console.log("fullscreen surface is opaque:", opaqueSurface, surface);
-const rendersFullscreen = (await page.locator(".canvas-frame").getAttribute("srcdoc")).includes("Hello cats");
+const rendersFullscreen =
+  (await page.locator(".canvas-frame").getAttribute("src")) === PREVIEW_URL;
 console.log("page still renders fullscreen:", rendersFullscreen);
 // With room to spare the tabs stay left of the icons, on one row.
 const wideRow = await page.evaluate(() => {
@@ -232,8 +382,8 @@ const wideRow = await page.evaluate(() => {
 console.log("wide header keeps tabs then icons on one row:", wideRow);
 const exitBtn = page.locator('.canvas-head .canvas-icon-btn[aria-label="Exit fullscreen"]');
 const exitBox = await exitBtn.boundingBox();
-// The same small header icon as Refresh/Download (34px, in the header row),
-// not a banner or an overlay button.
+// The same small header icon as Refresh/Open-in-new-tab (34px, in the header
+// row), not a banner or an overlay button.
 const exitSmall =
   (await exitBtn.isVisible()) && exitBox.width <= 36 && exitBox.height <= 36 && exitBox.y < 60;
 console.log("exit button is a small header icon:", exitSmall, exitBox);
@@ -255,32 +405,12 @@ await page.waitForTimeout(250);
 const restoresPanel = (await page.locator(".webpage-canvas").boundingBox()).width < viewport.width - 20;
 console.log("exit button restores the panel:", restoresPanel);
 
-// 9. reload: the canvas restores from the fetched environment. The server now
-// has the persisted turn (with its small webpage part) and the environment,
-// including the folder picture's metadata and its iteration.
-env = {
-  webpageId: "env-check",
-  files,
-  assets: { [ASSET.path]: { mime: ASSET.mime, size: ASSET.size } },
-  updatedAt: "2026-01-01T00:00:00Z",
-  activeVersionId: "v-asset",
-};
-versions = [
-  {
-    id: "v-asset",
-    seq: 1,
-    parentVersionId: null,
-    origin: "ai",
-    label: "",
-    messageUid: "reply-1",
-    assets: [ASSET.path],
-    summary: { files: 4, added: 4, removed: 0 },
-    createdAt: "2026-01-01T00:00:00Z",
-  },
-];
+// 12. reload: the canvas restores from the fetched environment. The server now
+// has the persisted turn (with its small webpage part) and the workspace env,
+// including its preview URL and its iterations.
 savedChats = [
   {
-    id: "chat-check",
+    id: CHAT,
     title: "New chat",
     mode: "chat",
     subject: null,
@@ -293,8 +423,7 @@ savedChats = [
         content: "Your page is ready!",
         parts: [
           { type: "text", text: "Your page is ready!" },
-          { type: "webpage", webpageId: "env-check", path: "script.js", files: Object.keys(files) },
-          { type: "webpage", webpageId: "env-check", files: Object.keys(files), asset: true },
+          { type: "webpage", webpageId: "webpage-check", path: "script.js", files: NAMES },
         ],
       },
     ],
@@ -304,14 +433,20 @@ await page.reload({ waitUntil: "networkidle" });
 await page.waitForSelector('.ctrl-btn[aria-label="Show the webpage"]', { timeout: 5000 });
 await page.click('.ctrl-btn[aria-label="Show the webpage"]');
 await page.waitForSelector(".canvas-frame", { timeout: 5000 });
-const restored = (await page.locator(".canvas-frame").getAttribute("srcdoc")).includes("Hello cats");
-console.log("canvas restored after reload:", restored);
-const reloadedImage = await frame.locator("img").evaluate((el) => el.getAttribute("src") ?? "");
-console.log("picture still inlined after reload:", reloadedImage.startsWith("data:image/png"));
+const restoredSrc = await page.locator(".canvas-frame").getAttribute("src");
+const reloadedFrame = page.frameLocator(".canvas-frame");
+const restored = await waitFor(async () =>
+  (await reloadedFrame.locator("h1").textContent().catch(() => null)) === "from script",
+);
+console.log("canvas restored after reload:", restored && restoredSrc === PREVIEW_URL);
+const reloadedImage = await reloadedFrame
+  .locator("img")
+  .evaluate((el) => el.naturalWidth > 0 && el.src.endsWith("/preview/key-check/cat.png"));
+console.log("picture still loaded after reload:", reloadedImage);
 const iterationLabel = await page.locator(".canvas-history-count").textContent();
-console.log("iteration bar shows the run:", iterationLabel === "Iteration 1 of 1", iterationLabel);
+console.log("iteration bar shows the run:", iterationLabel === "Iteration 2 of 2", iterationLabel);
 
-// 10. a canvas too narrow for one row (the page has history here, so all three
+// 13. a canvas too narrow for one row (the page has history here, so all three
 // tabs show): the icons keep the top row and the tabs drop below them — never
 // an icon orphaned under the tabs — and nothing is clipped.
 await page.click('.canvas-icon-btn[aria-label="Fullscreen"]');
@@ -354,19 +489,25 @@ await browser.close();
 if (
   !open ||
   !sandboxed ||
-  !inlinedCss ||
-  !inlinedJs ||
-  !externalTagsGone ||
+  frameSrc !== PREVIEW_URL ||
+  srcdoc !== null ||
   renderedHeading !== "from script" ||
+  frameBody !== "rgb(1, 2, 3)" ||
+  frameImage.w === 0 ||
+  !frameImage.src.endsWith("/preview/key-check/cat.png") ||
   !listsAll ||
+  !menuGone ||
   !highlightOk ||
-  !assetInlined ||
+  !saved ||
+  saveRequests[0]?.baseVersionId !== baseBeforeEdit ||
   !assetDecoded ||
   !noEditForAsset ||
-  !reloadedImage.startsWith("data:image/png") ||
-  iterationLabel !== "Iteration 1 of 1" ||
+  !newTabButton ||
   card !== 1 ||
   !restored ||
+  restoredSrc !== PREVIEW_URL ||
+  !reloadedImage ||
+  iterationLabel !== "Iteration 2 of 2" ||
   !fillsWindow ||
   !opaqueSurface ||
   !rendersFullscreen ||

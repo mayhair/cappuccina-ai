@@ -5,63 +5,36 @@ import {
   CloseIcon,
   CollapseIcon,
   DotsIcon,
-  DownloadIcon,
   ExpandIcon,
   FileIcon,
   PencilIcon,
   RefreshIcon,
   WindowIcon,
 } from './Icons'
-import { assemblePreview, hasFiles, pickEntryFile } from '../lib/webpagePreview'
 import { highlightCode } from '../lib/highlightCode'
-import { getWebpageAssetDataUrl, getWebpageVersionDiff } from '../api/webpageClient'
+import { getWebpageFile, getWebpageVersionDiff, previewFileUrl } from '../api/webpageClient'
 
-// One download: the same assembled document the preview shows, so a saved page
-// works on its own (linked styles/scripts and folder pictures are inlined).
-function downloadPage(files, assetUrls) {
-  const html = assemblePreview(files, assetUrls)
-  if (!html) return
-  const blob = new Blob([html], { type: 'text/html' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = 'cappuccina-webpage.html'
-  document.body.appendChild(a)
-  a.click()
-  a.remove()
-  URL.revokeObjectURL(url)
+const ENTRY_FILE = 'index.html'
+const IMAGE_EXTENSIONS = ['png', 'jpg', 'jpeg', 'webp', 'gif', 'svg']
+
+// The files the Code tab lists: the entry on top (it is what the canvas shows),
+// then the rest alphabetically.
+function fileList(names, entry) {
+  const list = [...(names ?? [])]
+  const first = list.includes(entry) ? entry : null
+  return [...(first ? [first] : []), ...list.filter((name) => name !== first).sort()]
 }
 
-// Assets never change once added, so their data URLs are fetched once per
-// session and kept here (a page's pictures are a handful, and this survives
-// switching iterations and tabs).
-const assetUrlCache = new Map()
-
-async function loadAssetUrl(chatId, path) {
-  const key = `${chatId}:${path}`
-  if (assetUrlCache.has(key)) return assetUrlCache.get(key)
-  const url = await getWebpageAssetDataUrl(chatId, path)
-  assetUrlCache.set(key, url)
-  return url
+// A picture is shown as a picture, not as text — by its name's extension, since
+// an svg is text on the wire but still an image in the pane.
+function isImage(name) {
+  const ext = String(name ?? '').split('.').pop().toLowerCase()
+  return IMAGE_EXTENSIONS.includes(ext)
 }
 
-// The page's text files first (the entry file on top), then the folder's
-// pictures, alphabetically — the order the canvas has always used for files.
-function fileList(files, assetNames) {
-  const entry = pickEntryFile(files)
-  return [...Object.keys(files), ...assetNames].sort((a, b) => {
-    const aAsset = assetNames.includes(a)
-    const bAsset = assetNames.includes(b)
-    if (aAsset !== bAsset) return aAsset ? 1 : -1
-    if (a === entry) return -1
-    if (b === entry) return 1
-    return a.localeCompare(b)
-  })
-}
-
-// How a folder picture reads in the file list: "812 KB".
-function assetSize(info) {
-  const size = info?.size ?? 0
+// How a file's size reads: "812 KB".
+function formatBytes(bytes) {
+  const size = Number(bytes) || 0
   if (size <= 0) return ''
   if (size < 1024) return `${size} B`
   if (size < 1024 * 1024) return `${Math.round(size / 1024)} KB`
@@ -176,16 +149,18 @@ function IterationsBar({
   )
 }
 
-// The sandboxed live page: one assembled document, reloaded by `revision`.
-function PreviewTab({ preview, revision }) {
+// The live page: the site as the server serves it, in a sandboxed frame. The
+// frame reloads on the controller's revision (a run's writes, an activation, a
+// save) and on the Refresh button's own counter.
+function PreviewTab({ previewUrl, revision, localRevision }) {
   return (
     <div className="canvas-stage">
       <iframe
-        key={revision}
+        key={`${revision}-${localRevision}`}
         className="canvas-frame"
         title="Webpage preview"
         sandbox="allow-scripts"
-        srcDoc={preview}
+        src={previewUrl}
       />
     </div>
   )
@@ -244,8 +219,9 @@ function ChangesTab({ diff, loading, selected, onSelect }) {
   )
 }
 
-// The Code tab's file list.
-function FileMenu({ names, shownFile, assetNames, assets, onPick }) {
+// The Code tab's file list: the workspace tree's names, nothing more — the text
+// of the one that is picked is fetched on demand.
+function FileMenu({ names, shownFile, onPick }) {
   return (
     <div className="canvas-file-menu">
       <div className="canvas-file-menu-head">Files</div>
@@ -261,9 +237,6 @@ function FileMenu({ names, shownFile, assetNames, assets, onPick }) {
           >
             <FileIcon />
             <span className="canvas-file-name">{name}</span>
-            {assetNames.includes(name) && (
-              <span className="canvas-history-meta">{assetSize(assets?.[name])}</span>
-            )}
           </button>
         ))}
       </div>
@@ -271,10 +244,10 @@ function FileMenu({ names, shownFile, assetNames, assets, onPick }) {
   )
 }
 
-// A picture in the folder: show it, with its size. There is no text to edit —
-// the page references it by name.
-function AssetPane({ name, url, info }) {
-  const size = assetSize(info)
+// A picture in the folder: served by URL from the preview route, since the
+// canvas holds no bytes of its own and the frame has no session to fetch with.
+function AssetPane({ name, url, mime, size }) {
+  const shown = formatBytes(size)
   return (
     <div className="canvas-asset">
       {url ? (
@@ -284,8 +257,22 @@ function AssetPane({ name, url, info }) {
       )}
       <p className="canvas-empty-hint">
         {name}
-        {size ? ` · ${size}` : ''}
-        {info?.mime ? ` · ${info.mime}` : ''}
+        {shown ? ` · ${shown}` : ''}
+        {mime ? ` · ${mime}` : ''}
+      </p>
+    </div>
+  )
+}
+
+// A binary with nothing to show as text: no editor, just what it is.
+function BinaryPane({ name, mime, size }) {
+  const shown = formatBytes(size)
+  return (
+    <div className="canvas-asset">
+      <p className="canvas-empty-hint">
+        {name}
+        {mime ? ` · ${mime}` : ''}
+        {shown ? ` · ${shown}` : ''}
       </p>
     </div>
   )
@@ -345,18 +332,18 @@ function CodeEditor({
   )
 }
 
-// The Code tab: the file list, or one file's viewer (picture, editor, or
-// highlighted text).
+// The Code tab: the file list, or one file's viewer (picture, binary hint,
+// editor, or highlighted text).
 function CodeTab({
   menuOpen,
   names,
   shownFile,
-  shownAsset,
+  kind,
+  imageUrl,
+  binary,
   shownCode,
-  assetNames,
-  assets,
-  assetUrls,
   highlighted,
+  loading,
   draft,
   draftHighlight,
   streaming,
@@ -376,7 +363,7 @@ function CodeTab({
   return (
     <div className="canvas-code">
       {menuOpen ? (
-        <FileMenu names={names} shownFile={shownFile} assetNames={assetNames} assets={assets} onPick={onPick} />
+        <FileMenu names={names} shownFile={shownFile} onPick={onPick} />
       ) : (
         <>
           <div className="canvas-code-head">
@@ -390,7 +377,7 @@ function CodeTab({
             </button>
             <FileIcon />
             <span className="canvas-file-name">{shownFile}</span>
-            {!shownAsset && (
+            {kind === 'text' && (
               <button
                 type="button"
                 className="canvas-icon-btn canvas-edit-btn"
@@ -402,8 +389,14 @@ function CodeTab({
               </button>
             )}
           </div>
-          {shownAsset ? (
-            <AssetPane name={shownFile} url={assetUrls[shownFile]} info={assets?.[shownFile]} />
+          {loading ? (
+            <div className="canvas-empty">
+              <p>Loading {shownFile}…</p>
+            </div>
+          ) : kind === 'image' ? (
+            <AssetPane name={shownFile} url={imageUrl} mime={binary?.mime} size={binary?.size} />
+          ) : kind === 'binary' ? (
+            <BinaryPane name={shownFile} mime={binary?.mime} size={binary?.size} />
           ) : draft ? (
             <CodeEditor
               draft={draft}
@@ -433,12 +426,17 @@ function CodeTab({
 export function WebpageCanvas({
   chatId,
   files,
-  assets,
+  previewUrl,
+  previewBase,
   activeVersionId,
   versions,
+  hasBuild,
+  lastBuild,
   streaming,
   busy,
   notice,
+  revision,
+  entry = ENTRY_FILE,
   onDismissNotice,
   onActivateVersion,
   onSaveFile,
@@ -447,7 +445,8 @@ export function WebpageCanvas({
   const [tab, setTab] = useState('preview')
   const [activeFile, setActiveFile] = useState(null)
   const [menuOpen, setMenuOpen] = useState(true)
-  const [revision, setRevision] = useState(0)
+  // The Refresh button's own counter, on top of the controller's revision.
+  const [localRevision, setLocalRevision] = useState(0)
   const [historyOpen, setHistoryOpen] = useState(false)
   // The canvas normally shares the window with the chat; fullscreen makes it
   // cover the whole browser window instead (whatever size that window is).
@@ -458,33 +457,24 @@ export function WebpageCanvas({
   const [diff, setDiff] = useState({ files: [], truncated: false })
   const [diffFile, setDiffFile] = useState(null)
   const [diffLoading, setDiffLoading] = useState(false)
-  // {path: dataUrl} for the pictures the page folder shows, plus the ones still
-  // loading (the preview redraws as each arrives).
-  const [assetUrls, setAssetUrls] = useState({})
+  // The shown file, fetched one at a time: its text, or the metadata of a
+  // binary the API refused to decode.
+  const [code, setCode] = useState('')
+  const [binary, setBinary] = useState(null)
+  const [fileLoading, setFileLoading] = useState(false)
   const highlightRef = useRef(null)
   const editRef = useRef(null)
 
   const index = versions.findIndex((v) => v.id === activeVersionId)
   const current = index >= 0 ? versions[index] : null
-  // The folder holds the pictures the active iteration had; without an
-  // iteration list (a page built before this change) it falls back to all of
-  // the environment's assets.
-  const assetNames = useMemo(() => {
-    const known = Object.keys(assets ?? {})
-    const shown = current ? current.assets ?? [] : known
-    return shown.filter((name) => known.includes(name)).sort()
-  }, [assets, current])
-  const names = useMemo(() => fileList(files ?? {}, assetNames), [files, assetNames])
+  const names = useMemo(() => fileList(files, entry), [files, entry])
   const shownFile = activeFile && names.includes(activeFile) ? activeFile : names[0] ?? null
-  // A picture (or other binary) has no text to show or edit: the Code tab
-  // renders it, and the pencil stays away.
-  const shownAsset = Boolean(shownFile && assetNames.includes(shownFile))
-  const shownCode = files?.[shownFile] ?? ''
-  const preview = useMemo(
-    () => assemblePreview(files ?? {}, assetUrls),
-    [files, assetUrls],
-  )
-  const highlighted = useMemo(() => highlightCode(shownCode, shownFile), [shownCode, shownFile])
+  // A picture is shown as a picture; a binary the API reports as such has no
+  // text to show or edit; anything else opens in the viewer/editor.
+  const shownKind = !shownFile ? null : isImage(shownFile) ? 'image' : binary ? 'binary' : 'text'
+  const imageUrl =
+    shownKind === 'image' && previewBase ? previewFileUrl({ previewBase }, shownFile) : null
+  const highlighted = useMemo(() => highlightCode(code, shownFile), [code, shownFile])
   // The same highlighting for the text being edited, rendered behind the
   // textarea. A trailing newline is padded so the pre keeps exactly as many
   // lines as the textarea (a trailing newline is dropped when rendering HTML,
@@ -569,33 +559,46 @@ export function WebpageCanvas({
     }
   }, [tab, activeVersionId, chatId])
 
-  // The pictures the active iteration shows are fetched once (the module cache
-  // keeps them for the session) and inlined into the preview and the Code tab.
+  // One file at a time, only while the Code tab is showing. `revision` covers a
+  // save, an activation or a run's writes: the file on screen may have moved.
   useEffect(() => {
-    if (!chatId || assetNames.length === 0) return
+    if (tab !== 'code' || !chatId || !shownFile) return
     let cancelled = false
-    Promise.all(
-      assetNames.map((name) =>
-        loadAssetUrl(chatId, name)
-          .then((url) => [name, url])
-          .catch(() => [name, null]),
-      ),
-    ).then((entries) => {
-      if (cancelled) return
-      setAssetUrls(Object.fromEntries(entries.filter(([, url]) => url)))
-    })
+    setFileLoading(true)
+    setBinary(null)
+    getWebpageFile(chatId, shownFile)
+      .then((data) => {
+        if (cancelled) return
+        if (data?.binary) {
+          setBinary(data)
+          setCode('')
+        } else {
+          setBinary(null)
+          setCode(data?.content ?? '')
+        }
+      })
+      .catch(() => {
+        if (cancelled) return
+        setBinary(null)
+        setCode('')
+      })
+      .finally(() => {
+        if (!cancelled) setFileLoading(false)
+      })
     return () => {
       cancelled = true
     }
-  }, [chatId, assetNames])
+  }, [tab, chatId, shownFile, revision])
 
-  const refresh = () => setRevision((r) => r + 1)
+  const refresh = () => setLocalRevision((r) => r + 1)
+  const openInNewTab = () => window.open(previewUrl, '_blank', 'noopener')
   const pick = (name) => {
     setActiveFile(name)
     setMenuOpen(false)
   }
 
-  const startEdit = () => setDraft({ path: shownFile, text: shownCode, baseVersionId: activeVersionId })
+  const startEdit = () =>
+    setDraft({ path: shownFile, text: code, baseVersionId: activeVersionId })
 
   const saveDraft = async () => {
     if (!draft) return
@@ -614,8 +617,13 @@ export function WebpageCanvas({
   }
 
   const shellClass = fullscreen ? 'webpage-canvas canvas-fullscreen' : 'webpage-canvas'
+  // A failed build is not an error the user has to fix right now: the last good
+  // build keeps serving. The banner says so and the message stays dismissible.
+  const buildFailed = Boolean(lastBuild && !lastBuild.ok)
 
-  if (!hasFiles(files)) {
+  // No site yet: the server answers with a null webpageId (and no preview URL),
+  // so there is nothing to show or list.
+  if (!previewUrl) {
     return (
       <aside className={shellClass} aria-label="Webpage canvas">
         <header className="canvas-head">
@@ -688,8 +696,8 @@ export function WebpageCanvas({
             <button type="button" className="canvas-icon-btn has-tip" data-tip="Refresh" aria-label="Refresh preview" onClick={refresh}>
               <RefreshIcon />
             </button>
-            <button type="button" className="canvas-icon-btn has-tip" data-tip="Download" aria-label="Download the page" onClick={() => downloadPage(files, assetUrls)}>
-              <DownloadIcon />
+            <button type="button" className="canvas-icon-btn has-tip" data-tip="Open in a new tab" aria-label="Open the page in a new tab" onClick={openInNewTab}>
+              <WindowIcon />
             </button>
             <button type="button" className="canvas-icon-btn has-tip" data-tip="Close" aria-label="Close canvas" onClick={onClose}>
               <CloseIcon />
@@ -724,8 +732,18 @@ export function WebpageCanvas({
         </div>
       )}
 
+      {buildFailed && (
+        <div className="canvas-notice" role="status">
+          The last build failed — the canvas shows the previous build.
+          {lastBuild.error ? ` ${lastBuild.error}` : ''}
+          <button type="button" className="canvas-icon-btn" aria-label="Dismiss" onClick={onDismissNotice}>
+            <CloseIcon />
+          </button>
+        </div>
+      )}
+
       {tab === 'preview' ? (
-        <PreviewTab preview={preview} revision={revision} />
+        <PreviewTab previewUrl={previewUrl} revision={revision} localRevision={localRevision} />
       ) : tab === 'changes' ? (
         <ChangesTab diff={diff} loading={diffLoading} selected={diffFile} onSelect={setDiffFile} />
       ) : (
@@ -733,12 +751,12 @@ export function WebpageCanvas({
           menuOpen={menuOpen}
           names={names}
           shownFile={shownFile}
-          shownAsset={shownAsset}
-          shownCode={shownCode}
-          assetNames={assetNames}
-          assets={assets}
-          assetUrls={assetUrls}
+          kind={shownKind}
+          imageUrl={imageUrl}
+          binary={binary}
+          shownCode={code}
           highlighted={highlighted}
+          loading={fileLoading}
           draft={draft}
           draftHighlight={draftHighlight}
           streaming={streaming}

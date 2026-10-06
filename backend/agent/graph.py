@@ -1,3 +1,5 @@
+import logging
+
 from langgraph.graph import END, START, MessagesState, StateGraph
 from langgraph.prebuilt import ToolNode
 
@@ -6,12 +8,28 @@ from agent.model import make_model
 from agent.prompts import build_messages
 from agent.tools import ALL_TOOLS
 
+logger = logging.getLogger(__name__)
+
 
 class AgentState(MessagesState):
     reasoning: str
     mode: str
     subject: str | None
     timezone: str | None
+
+
+def _tool_error_message(error: Exception) -> str:
+    """Hand a tool failure back to the model instead of killing the run.
+
+    LangGraph's default handler re-raises anything that is not a bad-arguments
+    error, so one tool bug used to tear down the whole SSE stream: the reply
+    was lost, nothing was stored, and uvicorn logged an ASGI traceback. Here
+    the model gets the message, can apologize or route around it, and the tool
+    card shows the failure (the stream marks it not-ok from the ToolMessage's
+    status). The traceback still goes to the server log.
+    """
+    logger.exception("tool call failed")
+    return f"Tool error: {type(error).__name__}: {error}"
 
 
 def _trailing_tool_messages(messages) -> list:
@@ -57,7 +75,7 @@ def build_graph(tools=None):
     # pyrefly: ignore [bad-specialization]
     graph = StateGraph(AgentState)
     graph.add_node("call_model", call_model)
-    graph.add_node("tools", ToolNode(tool_list))
+    graph.add_node("tools", ToolNode(tool_list, handle_tool_errors=_tool_error_message))
     graph.add_node("inject_fmhy_note", inject_fmhy_note)
     graph.add_edge(START, "call_model")
     graph.add_conditional_edges("call_model", should_continue, ["tools", END])

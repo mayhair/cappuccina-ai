@@ -25,6 +25,20 @@ const DEFAULT_TITLE = 'New chat'
 const STREAM_FAILED_MESSAGE = 'Oh no, my espresso machine hiccuped. Try again in a moment! 💕'
 export const MAX_ATTACHMENTS = 5
 
+// The canvas state of a chat with no webpage (yet): the same shape the server
+// sends, so the canvas can render it before the first fetch lands.
+const EMPTY_WEBPAGE = {
+  webpageId: null,
+  files: [],
+  previewUrl: null,
+  previewBase: null,
+  activeVersionId: null,
+  versions: [],
+  hasBuild: false,
+  lastBuild: null,
+  updatedAt: null,
+}
+
 export const EFFORTS = [
   { label: 'Low', value: 'low' },
   { label: 'High', value: 'high' },
@@ -125,18 +139,20 @@ export function useChatController(enabled) {
   const [attachments, setAttachments] = useState([])
   const [uploading, setUploading] = useState(false)
   const [attachError, setAttachError] = useState('')
-  // The chat's webpage environment (canvas files), keyed by chat id:
-  // {webpageId, files, assets, activeVersionId, versions}. Only the file map,
-  // the asset metadata ({path: {mime, size}}) and the iteration list live here;
-  // the server is the source of truth and all of them are refetched when the
-  // user switches chats. Asset bytes are never held here — the canvas fetches
-  // the ones the active iteration shows and inlines them into the preview.
+  // The chat's webpage environment, keyed by chat id: {webpageId, files
+  // (names), previewUrl, previewBase, activeVersionId, versions, hasBuild,
+  // lastBuild, updatedAt}. Only names and metadata live here — a file's text is
+  // fetched on demand and never held — and the server is the source of truth,
+  // so all of it is refetched when the user switches chats.
   // `canvasOpen` is the canvas panel's visibility, `canvasNotice` a one-line
-  // failure message shown in the canvas.
+  // failure message shown in the canvas, and `canvasRevision` counts the
+  // changes that must reload the preview iframe (a new iteration, an
+  // activation, a save).
   const [webpages, setWebpages] = useState({})
   const [canvasOpen, setCanvasOpen] = useState(false)
   const [canvasNotice, setCanvasNotice] = useState(null)
   const [canvasBusy, setCanvasBusy] = useState(false)
+  const [canvasRevision, setCanvasRevision] = useState(0)
   const isStreaming = status === 'streaming'
   const inputRef = useRef(null)
   const chatsRef = useRef(chats)
@@ -219,45 +235,53 @@ export function useChatController(enabled) {
 
   const activeChat = chats.find((c) => c.id === activeChatId) ?? chats[0]
 
-  // Load the active chat's webpage files and iteration list from the server
+  // Fold one env response (fetch, activation or save) into the chat's canvas
+  // state: all three return the same shape and all three replace the working
+  // copy, the preview URL and the active iteration from it.
+  const applyWebpageEnv = useCallback((chatId, data) => {
+    setWebpages((prev) => ({
+      ...prev,
+      [chatId]: {
+        ...(prev[chatId] ?? {}),
+        webpageId: data.webpageId ?? null,
+        files: data.files ?? [],
+        previewUrl: data.previewUrl ?? null,
+        previewBase: data.previewBase ?? null,
+        hasBuild: Boolean(data.hasBuild),
+        lastBuild: data.lastBuild ?? null,
+        updatedAt: data.updatedAt ?? prev[chatId]?.updatedAt ?? null,
+        activeVersionId: data.activeVersionId ?? null,
+      },
+    }))
+  }, [])
+
+  // Load the active chat's environment and iteration list from the server
   // (source of truth) so the canvas is correct after a reload or a switch from
-  // another device. Only chats that actually built a page have files worth
-  // fetching.
+  // another device. Unconditional: a chat without a page answers with a null
+  // webpageId, and one small fetch each is cheaper than guessing.
   useEffect(() => {
     if (!enabled || !activeChatId) return
     const chat = chatsRef.current.find((c) => c.id === activeChatId)
     if (!chat || chat.pending) return
-    const built = (chat.messages ?? []).some((m) =>
-      (m.parts ?? []).some((p) => p.type === 'webpage'),
-    )
-    if (!built) return
     let cancelled = false
     Promise.all([getWebpageEnv(activeChatId), getWebpageVersions(activeChatId)])
       .then(([env, list]) => {
         if (cancelled) return
-        setWebpages((prev) => {
-          const existing = prev[activeChatId]
-          // Don't clobber files a live stream already produced for this chat:
-          // the fetch is a restore for reloads and chat switches, and it can
-          // resolve after the first write of a first turn.
-          const keepFiles = Boolean(existing && Object.keys(existing.files ?? {}).length > 0)
-          return {
-            ...prev,
-            [activeChatId]: {
-              webpageId: env.webpageId ?? null,
-              files: keepFiles ? existing.files : env.files ?? {},
-              assets: env.assets ?? {},
-              activeVersionId: env.activeVersionId ?? list.activeVersionId ?? null,
-              versions: list.versions ?? [],
-            },
-          }
-        })
+        applyWebpageEnv(activeChatId, env)
+        setWebpages((prev) => ({
+          ...prev,
+          [activeChatId]: {
+            ...(prev[activeChatId] ?? EMPTY_WEBPAGE),
+            activeVersionId: env.activeVersionId ?? list.activeVersionId ?? null,
+            versions: list.versions ?? [],
+          },
+        }))
       })
       .catch(() => {})
     return () => {
       cancelled = true
     }
-  }, [activeChatId, enabled])
+  }, [activeChatId, enabled, applyWebpageEnv])
 
   // Iterations are refetched whenever a run writes a page and when the canvas
   // opens: a commit appears mid-stream, and pruning can drop old rows.
@@ -267,7 +291,7 @@ export function useChatController(enabled) {
       setWebpages((prev) => ({
         ...prev,
         [chatId]: {
-          ...(prev[chatId] ?? { webpageId: null, files: {} }),
+          ...(prev[chatId] ?? EMPTY_WEBPAGE),
           activeVersionId: data.activeVersionId ?? null,
           versions: data.versions ?? [],
         },
@@ -277,25 +301,8 @@ export function useChatController(enabled) {
     }
   }, [])
 
-  // Fold one env response (fetch, activation or save) into the chat's canvas
-  // state: all three return the same shape and all three replace the working
-  // copy and the active iteration from it.
-  const applyWebpageEnv = useCallback((chatId, data) => {
-    setWebpages((prev) => ({
-      ...prev,
-      [chatId]: {
-        ...(prev[chatId] ?? {}),
-        webpageId: data.webpageId ?? null,
-        files: data.files ?? {},
-        assets: data.assets ?? prev[chatId]?.assets ?? {},
-        activeVersionId: data.activeVersionId ?? null,
-      },
-    }))
-  }, [])
-
-  // Force the files back to the server's copy. Unlike the restore effect this
-  // is unconditional: it runs after a rejected mutation, so the stale local
-  // state must give way even though files are already present.
+  // Fetch the environment again (a run wrote files, or a mutation was
+  // rejected and the stale local state must give way): the server's copy wins.
   const refreshWebpageEnv = useCallback(async (chatId) => {
     try {
       const env = await getWebpageEnv(chatId)
@@ -313,6 +320,8 @@ export function useChatController(enabled) {
       try {
         const data = await activateWebpageVersion(chatId, versionId)
         applyWebpageEnv(chatId, data)
+        // The working copy moved back to that iteration: reload the iframe.
+        setCanvasRevision((r) => r + 1)
         setCanvasNotice(null)
       } catch (err) {
         setCanvasNotice(err.status === 409 ? err.message : 'Could not switch iteration.')
@@ -334,6 +343,9 @@ export function useChatController(enabled) {
       try {
         const data = await saveWebpageFile(chatId, { path, content, baseVersionId })
         applyWebpageEnv(chatId, data)
+        // The file landed in the workspace (and a rebuild may have run): the
+        // served page changed, so reload the iframe and re-read the file list.
+        setCanvasRevision((r) => r + 1)
         refreshWebpageVersions(chatId)
         setCanvasNotice(null)
         return true
@@ -669,19 +681,14 @@ export function useChatController(enabled) {
         onWebpage: (webpage) => {
           flushSpoken()
           // The write is recorded as a small server-side reference; the file
-          // text arrives here for the live canvas but never travels with the
-          // history, so the next full-history sync stays small. A page is
-          // several writes: fold them into one part listing the files. An asset
-          // (a picture copied into the folder) has no text of its own — the
-          // part just marks the environment, and the bytes come from the asset
-          // route when the canvas needs them.
+          // text stays in the workspace and is fetched per file. A page is
+          // several writes: fold them into one part listing the files.
           const part = {
             type: 'webpage',
             webpageId: webpage.webpageId,
             files: webpage.files ?? [],
           }
-          if (webpage.asset) part.asset = true
-          else part.path = webpage.path
+          if (webpage.path) part.path = webpage.path
           patchNode(chatId, replyId, (m) => {
             const parts = [...(m.parts ?? [])]
             const at = parts.findIndex(
@@ -691,29 +698,17 @@ export function useChatController(enabled) {
             else parts[at] = { ...parts[at], ...part }
             return { parts }
           })
-          setWebpages((prev) => {
-            const before = prev[chatId] ?? {}
-            const files = webpage.asset
-              ? before.files ?? {}
-              : { ...(before.files ?? {}), [webpage.path]: webpage.content ?? '' }
-            return {
-              ...prev,
-              [chatId]: {
-                ...before,
-                webpageId: webpage.webpageId,
-                files,
-                assets: webpage.assets ?? before.assets ?? {},
-                activeVersionId: webpage.versionId ?? before.activeVersionId ?? null,
-              },
-            }
-          })
-          // The iteration list is server-side state (pruning included): refetch
-          // it, but only while this stream is still the live one — a newer
-          // stream's write must not resurrect an older list.
-          if (webpage.versionId && streamSeq.current === seq) {
+          // The environment, the iteration list and the build state all live
+          // server-side: refetch them, but only while this stream is still the
+          // live one — a newer stream's write must not resurrect older state.
+          if (streamSeq.current === seq) {
+            refreshWebpageEnv(chatId)
             refreshWebpageVersions(chatId)
           }
-          // A page is appearing: show the canvas without making the user ask.
+          // The page changed under the iframe: load the served version once
+          // more. A page is appearing: show the canvas without making the user
+          // ask.
+          setCanvasRevision((r) => r + 1)
           setCanvasOpen(true)
         },
         onTitle: (title) => applyTitle(chatId, title),
@@ -742,7 +737,7 @@ export function useChatController(enabled) {
     }).finally(() => {
       if (streamSeq.current === seq) setStatus('idle')
     })
-  }, [effort, patchMessages, patchNode, patchChatState, persistChat, applyTitle, refreshWebpageVersions])
+  }, [effort, patchMessages, patchNode, patchChatState, persistChat, applyTitle, refreshWebpageEnv, refreshWebpageVersions])
 
   const setMode = useCallback((chatId, mode, subject) => {
     setChats((all) =>
@@ -909,13 +904,12 @@ export function useChatController(enabled) {
   const openCanvas = useCallback(() => setCanvasOpen(true), [])
   const toggleCanvas = useCallback(() => setCanvasOpen((open) => !open), [])
 
-  const activeWebpage = activeChat
-    ? webpages[activeChat.id] ?? { webpageId: null, files: {}, assets: {} }
-    : { webpageId: null, files: {}, assets: {} }
+  const activeWebpage = activeChat ? webpages[activeChat.id] ?? EMPTY_WEBPAGE : EMPTY_WEBPAGE
   // The toggle matches the message card: a turn that built a page shows both,
-  // even before the file fetch lands (or if it can't).
+  // even before the env fetch lands (or if it can't). A chat whose parts
+  // predate the workspace rewrite has no site id, so the part is the fallback.
   const hasWebpage =
-    Object.keys(activeWebpage.files).length > 0 ||
+    activeWebpage.webpageId != null ||
     Boolean(activeChat?.messages?.some((m) => (m.parts ?? []).some((p) => p.type === 'webpage')))
 
   const q = query.trim().toLowerCase()
@@ -964,6 +958,7 @@ export function useChatController(enabled) {
     removeAttachment,
     webpage: { ...activeWebpage, chatId: activeChat?.id ?? null },
     hasWebpage,
+    canvasRevision,
     canvasOpen,
     canvasNotice,
     clearCanvasNotice,

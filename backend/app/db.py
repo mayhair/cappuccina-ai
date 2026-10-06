@@ -4,13 +4,13 @@ The DB lives in backend/data/cappuccina.db (gitignored). Chat storage is
 server-side only: the client mirrors what is stored here.
 """
 
-import difflib
 import json
 import sqlite3
 import threading
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Any
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 DB_PATH = DATA_DIR / "cappuccina.db"
@@ -45,21 +45,98 @@ def attachment_file_path(attachment_id: str, filename: str) -> Path:
     return attachments_dir() / f"{attachment_id}{Path(filename or '').suffix.lower()}"
 
 
-_session_lock = threading.Lock()
-_conn: sqlite3.Connection | None = None
-
 SESSION_TTL = timedelta(days=30)
 
+# One connection is shared by the event loop and by the worker threads that run
+# sync tools (LangChain runs them in an executor, and the tool node gathers
+# several calls from one model message). CPython's sqlite3 does not support
+# concurrent use of one connection: two threads preparing or stepping at the
+# same time make SQLite answer SQLITE_MISUSE ("bad parameter or other API
+# misuse"), and two threads creating the connection at the same time leave
+# separate handles, one of them without the schema ("no such table", "database
+# is locked"). Every statement therefore runs under this one reentrant lock,
+# and sequences that must not interleave (site get-or-create, the message-tree
+# swap) hold it for their whole length.
+_conn_lock = threading.RLock()
+_conn: _LockedConnection | None = None
 
-def get_conn() -> sqlite3.Connection:
+
+class _StatementResult:
+    """The rows of one finished statement, fetched while the lock was held.
+
+    Callers only ever read rows, ``rowcount`` or ``lastrowid``, so a plain
+    snapshot is enough — and it keeps the live cursor out of other threads'
+    hands.
+    """
+
+    __slots__ = ("_rows", "_index", "rowcount", "lastrowid")
+
+    def __init__(self, cursor: sqlite3.Cursor):
+        self._rows = cursor.fetchall()
+        self._index = 0
+        self.rowcount = cursor.rowcount
+        self.lastrowid = cursor.lastrowid
+
+    def fetchone(self) -> sqlite3.Row | None:
+        if self._index >= len(self._rows):
+            return None
+        row = self._rows[self._index]
+        self._index += 1
+        return row
+
+    def fetchall(self) -> list[sqlite3.Row]:
+        rows = self._rows[self._index :]
+        self._index = len(self._rows)
+        return rows
+
+    def __iter__(self):
+        while (row := self.fetchone()) is not None:
+            yield row
+
+
+class _LockedConnection:
+    """Serializes every use of the shared sqlite connection (see _conn_lock)."""
+
+    def __init__(self, conn: sqlite3.Connection):
+        self._conn = conn
+
+    def execute(self, sql: str, parameters: Any = ()) -> _StatementResult:
+        with _conn_lock:
+            return _StatementResult(self._conn.execute(sql, parameters))
+
+    def executemany(self, sql: str, parameters: Any) -> _StatementResult:
+        with _conn_lock:
+            return _StatementResult(self._conn.executemany(sql, parameters))
+
+    def executescript(self, sql: str) -> _StatementResult:
+        with _conn_lock:
+            return _StatementResult(self._conn.executescript(sql))
+
+    def commit(self) -> None:
+        with _conn_lock:
+            self._conn.commit()
+
+    def rollback(self) -> None:
+        with _conn_lock:
+            self._conn.rollback()
+
+    def close(self) -> None:
+        with _conn_lock:
+            self._conn.close()
+
+
+def get_conn() -> _LockedConnection:
     global _conn
     if _conn is None:
-        DATA_DIR.mkdir(parents=True, exist_ok=True)
-        _conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-        _conn.row_factory = sqlite3.Row
-        _conn.execute("PRAGMA journal_mode=WAL")
-        _conn.execute("PRAGMA foreign_keys=ON")
-        _init_schema(_conn)
+        with _conn_lock:
+            if _conn is None:
+                DATA_DIR.mkdir(parents=True, exist_ok=True)
+                raw = sqlite3.connect(DB_PATH, check_same_thread=False)
+                raw.row_factory = sqlite3.Row
+                raw.execute("PRAGMA journal_mode=WAL")
+                raw.execute("PRAGMA foreign_keys=ON")
+                _init_schema(raw)
+                _conn = _LockedConnection(raw)
     return _conn
 
 
@@ -170,48 +247,15 @@ def _init_schema(conn: sqlite3.Connection) -> None:
             created_at TEXT NOT NULL
         );
 
-        CREATE TABLE IF NOT EXISTS webpage_envs (
+        CREATE TABLE IF NOT EXISTS webpage_sites (
             id TEXT PRIMARY KEY,
             user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
             chat_id TEXT NOT NULL UNIQUE REFERENCES chats(id) ON DELETE CASCADE,
-            files TEXT NOT NULL DEFAULT '{}',
+            preview_key TEXT NOT NULL,
+            active_commit TEXT,
+            created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL
         );
-
-        CREATE TABLE IF NOT EXISTS webpage_versions (
-            id TEXT PRIMARY KEY,
-            env_id TEXT NOT NULL REFERENCES webpage_envs(id) ON DELETE CASCADE,
-            user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-            chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
-            parent_version_id TEXT,
-            seq INTEGER NOT NULL,
-            origin TEXT NOT NULL,
-            message_uid TEXT,
-            label TEXT NOT NULL DEFAULT '',
-            files TEXT NOT NULL DEFAULT '{}',
-            assets TEXT NOT NULL DEFAULT '[]',
-            summary TEXT NOT NULL DEFAULT '{}',
-            created_at TEXT NOT NULL
-        );
-
-        CREATE TABLE IF NOT EXISTS webpage_assets (
-            id TEXT PRIMARY KEY,
-            env_id TEXT NOT NULL REFERENCES webpage_envs(id) ON DELETE CASCADE,
-            user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-            chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
-            path TEXT NOT NULL,
-            mime TEXT NOT NULL,
-            size_bytes INTEGER NOT NULL DEFAULT 0,
-            data BLOB NOT NULL,
-            created_at TEXT NOT NULL
-        );
-
-        CREATE UNIQUE INDEX IF NOT EXISTS idx_webpage_assets_path
-            ON webpage_assets(env_id, path);
-
-        CREATE UNIQUE INDEX IF NOT EXISTS idx_webpage_versions_seq ON webpage_versions(chat_id, seq);
-        CREATE UNIQUE INDEX IF NOT EXISTS idx_webpage_versions_uid ON webpage_versions(chat_id, message_uid) WHERE message_uid IS NOT NULL;
-        CREATE INDEX IF NOT EXISTS idx_webpage_versions_env ON webpage_versions(env_id, seq);
 
         CREATE INDEX IF NOT EXISTS idx_chats_user ON chats(user_id, created_at);
         CREATE INDEX IF NOT EXISTS idx_messages_chat ON messages(chat_id, id);
@@ -240,60 +284,18 @@ def _init_schema(conn: sqlite3.Connection) -> None:
     chat_cols = {row["name"] for row in conn.execute("PRAGMA table_info(chats)").fetchall()}
     if "active_leaf_uid" not in chat_cols:
         conn.execute("ALTER TABLE chats ADD COLUMN active_leaf_uid TEXT")
-    env_cols = {row["name"] for row in conn.execute("PRAGMA table_info(webpage_envs)").fetchall()}
-    if "active_version_id" not in env_cols:
-        conn.execute("ALTER TABLE webpage_envs ADD COLUMN active_version_id TEXT")
-    version_cols = {
-        row["name"] for row in conn.execute("PRAGMA table_info(webpage_versions)").fetchall()
-    }
-    if "assets" not in version_cols:
-        conn.execute("ALTER TABLE webpage_versions ADD COLUMN assets TEXT NOT NULL DEFAULT '[]'")
-    _migrate_webpage_versions(conn)
+    # The webpage canvas moved from JSON/BLOB rows in SQLite to a real folder on
+    # disk (Step 1 of the container remake). Legacy rows describe pages that the
+    # new workspace never reads, so this is an unconditional fresh start rather
+    # than a migration; children first, else the implicit DELETE trips the
+    # foreign keys.
+    conn.execute("DROP TABLE IF EXISTS webpage_versions")
+    conn.execute("DROP TABLE IF EXISTS webpage_assets")
+    conn.execute("DROP TABLE IF EXISTS webpage_envs")
     _migrate_messages_for_branching(conn)
     _migrate_users_for_oauth(conn)
     _migrate_grants_for_services(conn)
     conn.commit()
-
-
-def _migrate_webpage_versions(conn: sqlite3.Connection) -> None:
-    """Give every pre-existing webpage environment a first iteration.
-
-    Chats built before iterations existed have only the working copy in
-    webpage_envs; backfilling it as seq 1 makes the history non-empty and keeps
-    later runs branching from the page the user already had. Idempotent: an
-    environment that already has rows is skipped.
-    """
-    for row in conn.execute(
-        "SELECT id, user_id, chat_id, files, updated_at FROM webpage_envs"
-    ).fetchall():
-        if conn.execute(
-            "SELECT id FROM webpage_versions WHERE env_id = :env LIMIT 1",
-            {"env": row["id"]},
-        ).fetchone() is not None:
-            continue
-        files = _parse_webpage_files(row["files"])
-        if not files:
-            continue
-        version_id = uuid.uuid4().hex
-        conn.execute(
-            "INSERT INTO webpage_versions (id, env_id, user_id, chat_id, parent_version_id,"
-            " seq, origin, message_uid, label, files, summary, created_at)"
-            " VALUES (:id, :env_id, :user_id, :chat_id, NULL, 1, 'ai', NULL, 'Initial page',"
-            " :files, :summary, :created_at)",
-            {
-                "id": version_id,
-                "env_id": row["id"],
-                "user_id": row["user_id"],
-                "chat_id": row["chat_id"],
-                "files": json.dumps(files),
-                "summary": json.dumps(_webpage_diff_summary({}, files, [], [])),
-                "created_at": row["updated_at"],
-            },
-        )
-        conn.execute(
-            "UPDATE webpage_envs SET active_version_id = :version WHERE id = :env",
-            {"version": version_id, "env": row["id"]},
-        )
 
 
 def _migrate_messages_for_branching(conn: sqlite3.Connection) -> None:
@@ -619,20 +621,19 @@ def consume_oauth_state(token: str, purpose: str) -> sqlite3.Row | None:
 
 def create_session(user_id: str) -> str:
     token = uuid.uuid4().hex + uuid.uuid4().hex
-    with _session_lock:
-        conn = get_conn()
-        conn.execute(
-            "INSERT INTO sessions (token, user_id, created_at, expires_at)"
-            " VALUES (:token, :user_id, :created_at, :expires_at)",
-            {
-                "token": token,
-                "user_id": user_id,
-                "created_at": _now(),
-                "expires_at": (datetime.now(timezone.utc) + SESSION_TTL)
-                .isoformat(),
-            },
-        )
-        conn.commit()
+    conn = get_conn()
+    conn.execute(
+        "INSERT INTO sessions (token, user_id, created_at, expires_at)"
+        " VALUES (:token, :user_id, :created_at, :expires_at)",
+        {
+            "token": token,
+            "user_id": user_id,
+            "created_at": _now(),
+            "expires_at": (datetime.now(timezone.utc) + SESSION_TTL)
+            .isoformat(),
+        },
+    )
+    conn.commit()
     return token
 
 
@@ -648,10 +649,9 @@ def get_user_for_session(token: str) -> sqlite3.Row | None:
 
 
 def delete_session(token: str) -> None:
-    with _session_lock:
-        conn = get_conn()
-        conn.execute("DELETE FROM sessions WHERE token = :token", {"token": token})
-        conn.commit()
+    conn = get_conn()
+    conn.execute("DELETE FROM sessions WHERE token = :token", {"token": token})
+    conn.commit()
 
 
 # ---------- chats ----------
@@ -797,37 +797,42 @@ def replace_chat_messages(chat_id: str, messages: list[dict]) -> None:
 
     The client is treated as authoritative for message structure during this
     transition; each node carries its uid, parent link and sibling order. The
-    assistant reply is appended by append_chat_message().
+    assistant reply is appended by append_chat_message(). The swap commits as
+    one transaction under the connection lock, so a concurrent read (the
+    sidebar refreshing, another device syncing) can never catch the tree
+    half-replaced.
     """
-    conn = get_conn()
-    conn.execute("DELETE FROM messages WHERE chat_id = :chat_id", {"chat_id": chat_id})
-    conn.executemany(
-        "INSERT INTO messages (chat_id, uid, parent_uid, branch_index, role, content,"
-        " reasoning, tools, parts, thinking_done, thought_seconds, created_at)"
-        " VALUES (:chat_id, :uid, :parent_uid, :branch_index, :role, :content,"
-        " :reasoning, :tools, :parts, :thinking_done, :thought_seconds, :created_at)",
-        [
-            {
-                "chat_id": chat_id,
-                "uid": m.get("uid"),
-                "parent_uid": m.get("parent_uid"),
-                "branch_index": m.get("branch_index", 0) or 0,
-                "role": m["role"],
-                "content": m["content"],
-                "reasoning": m.get("reasoning", ""),
-                "tools": json.dumps(m.get("tools", [])),
-                "parts": json.dumps(m.get("parts", [])),
-                "thinking_done": 1 if m.get("thinking_done", False) else 0,
-                "thought_seconds": m.get("thought_seconds"),
-                "created_at": _now(),
-            }
-            for m in messages
-        ],
-    )
-    conn.execute(
-        "UPDATE chats SET updated_at = :now WHERE id = :chat_id",
-        {"now": _now(), "chat_id": chat_id},
-    )
+    with _conn_lock:
+        conn = get_conn()
+        conn.execute("DELETE FROM messages WHERE chat_id = :chat_id", {"chat_id": chat_id})
+        conn.executemany(
+            "INSERT INTO messages (chat_id, uid, parent_uid, branch_index, role, content,"
+            " reasoning, tools, parts, thinking_done, thought_seconds, created_at)"
+            " VALUES (:chat_id, :uid, :parent_uid, :branch_index, :role, :content,"
+            " :reasoning, :tools, :parts, :thinking_done, :thought_seconds, :created_at)",
+            [
+                {
+                    "chat_id": chat_id,
+                    "uid": m.get("uid"),
+                    "parent_uid": m.get("parent_uid"),
+                    "branch_index": m.get("branch_index", 0) or 0,
+                    "role": m["role"],
+                    "content": m["content"],
+                    "reasoning": m.get("reasoning", ""),
+                    "tools": json.dumps(m.get("tools", [])),
+                    "parts": json.dumps(m.get("parts", [])),
+                    "thinking_done": 1 if m.get("thinking_done", False) else 0,
+                    "thought_seconds": m.get("thought_seconds"),
+                    "created_at": _now(),
+                }
+                for m in messages
+            ],
+        )
+        conn.execute(
+            "UPDATE chats SET updated_at = :now WHERE id = :chat_id",
+            {"now": _now(), "chat_id": chat_id},
+        )
+        conn.commit()
 
 
 def update_chat_meta(chat_id: str, mode: str | None = None,
@@ -1031,646 +1036,110 @@ def delete_attachment(user_id: str, attachment_id: str) -> bool:
     return True
 
 
-# ---------- webpage environments (the canvas) ----------
+# ---------- webpage sites (the canvas) ----------
 
-# Iterations kept per chat. The active iteration is never pruned; past the cap
-# the oldest rows are deleted, so a pruned parent makes that child's diff fall
-# back to "everything added" while its stored summary counts stay correct.
-WEBPAGE_VERSION_LIMIT = 50
-
-# Diff lines returned by one Changes-tab request, across all files.
-WEBPAGE_DIFF_LINE_LIMIT = 2000
-
-# Binary assets (a picture or file copied into the page's folder) live in the
-# database, once per environment: iterations record only which asset paths they
-# had, so a page that keeps the same picture across many runs stores it once,
-# and deleting the environment takes the bytes with it.
-WEBPAGE_MAX_ASSET_BYTES = 10 * 1024 * 1024
-WEBPAGE_MAX_ASSET_TOTAL_BYTES = 20 * 1024 * 1024
+# The site row is only a registry: the page itself is a folder under
+# backend/data/sites/{id} with a git history, and the container runtime in
+# app/sitebox.py owns both. Keeping just the pointer here means SQLite never
+# holds file bytes, so file size and history length are disk concerns.
 
 
-def _parse_webpage_files(raw: str) -> dict[str, str]:
-    try:
-        data = json.loads(raw) if raw else {}
-    except (ValueError, TypeError):
-        return {}
-    if not isinstance(data, dict):
-        return {}
-    return {str(k): str(v) for k, v in data.items()}
+def get_webpage_site(user_id: str, chat_id: str) -> dict | None:
+    """The chat's website workspace, or None when the chat has none yet.
 
-
-def _parse_webpage_asset_paths(raw: str) -> list[str]:
-    """One iteration's asset path list ([] when the column is unreadable)."""
-    try:
-        data = json.loads(raw) if raw else []
-    except (ValueError, TypeError):
-        return []
-    if not isinstance(data, list):
-        return []
-    return [str(item) for item in data]
-
-
-def _webpage_asset_map(user_id: str, chat_id: str) -> dict[str, dict]:
-    """{path: {mime, size}} for the environment's assets — never the bytes.
-
-    The canvas lists the folder from this and fetches whatever the page shows.
-    """
-    rows = get_conn().execute(
-        "SELECT path, mime, size_bytes FROM webpage_assets"
-        " WHERE chat_id = :chat_id AND user_id = :user_id ORDER BY path",
-        {"chat_id": chat_id, "user_id": user_id},
-    ).fetchall()
-    return {row["path"]: {"mime": row["mime"], "size": row["size_bytes"]} for row in rows}
-
-
-def _webpage_asset_paths_of_env(env_id: str) -> list[str]:
-    rows = get_conn().execute(
-        "SELECT path FROM webpage_assets WHERE env_id = :env_id ORDER BY path",
-        {"env_id": env_id},
-    ).fetchall()
-    return [row["path"] for row in rows]
-
-
-def _asset_line(path: str, info: dict) -> str:
-    """How one asset reads in the Changes tab: "cat.png · image/png · 812 KB"."""
-    parts = [path]
-    if info.get("mime"):
-        parts.append(str(info["mime"]))
-    size = info.get("size")
-    if isinstance(size, int) and size > 0:
-        if size < 1024:
-            parts.append(f"{size} B")
-        elif size < 1024 * 1024:
-            parts.append(f"{round(size / 1024)} KB")
-        else:
-            parts.append(f"{size / (1024 * 1024):.1f} MB")
-    return " · ".join(parts)
-
-
-def _webpage_env_result(
-    env_id: str,
-    user_id: str,
-    chat_id: str,
-    files: dict[str, str],
-    updated_at: str,
-    active_version_id: str | None,
-) -> dict:
-    """The environment shape every read/write path returns.
-
-    Callers add their own extras on top ("version" for the commit paths,
-    "asset" for a folder copy). `assets` is always the folder's metadata map,
-    never the bytes.
-    """
-    return {
-        "id": env_id,
-        "user_id": user_id,
-        "chat_id": chat_id,
-        "files": files,
-        "assets": _webpage_asset_map(user_id, chat_id),
-        "updated_at": updated_at,
-        "active_version_id": active_version_id,
-    }
-
-
-def get_webpage_env(user_id: str, chat_id: str) -> dict | None:
-    """The chat's webpage environment as {id, files, assets, updated_at,
-    active_version_id}.
-
-    User-scoped: another user's chat (or a bogus id) is a miss. The files map
-    is the active iteration's snapshot, and it is the server's source of truth —
-    messages only carry a small {"type": "webpage", "webpageId", ...} part, so
-    file text never flows through the full-history sync payloads. `assets` is
-    the folder's binary side ({path: {mime, size}}), whose bytes only ever leave
-    the server through the asset route.
+    User-scoped: another user's chat (or a bogus id) is a miss. `preview_key`
+    is the capability token in the preview URL, and `active_commit` is the git
+    commit the canvas currently serves (None before the first commit).
     """
     row = get_conn().execute(
-        "SELECT * FROM webpage_envs WHERE chat_id = :chat_id AND user_id = :user_id",
+        "SELECT * FROM webpage_sites WHERE chat_id = :chat_id AND user_id = :user_id",
         {"chat_id": chat_id, "user_id": user_id},
     ).fetchone()
-    if row is None:
-        return None
-    return _webpage_env_result(
-        row["id"],
-        row["user_id"],
-        row["chat_id"],
-        _parse_webpage_files(row["files"]),
-        row["updated_at"],
-        row["active_version_id"],
-    )
+    return dict(row) if row is not None else None
 
 
-def put_webpage_file(
-    user_id: str,
-    chat_id: str,
-    path: str,
-    content: str,
-    *,
-    message_uid: str | None = None,
-    origin: str = "ai",
-    label: str = "",
-) -> dict:
-    """Create or update one file, then commit the result as an iteration.
+def get_webpage_site_by_chat(chat_id: str) -> dict | None:
+    """The chat's website workspace without a user scope, or None.
 
-    The environment is created on the first write and reused after that, so the
-    canvas always reflects the chat's current page. Every write also lands as a
-    webpage_versions row (one per AI run via message_uid, its own row for a
-    manual save). Returns the env as a dict plus "version" and
-    "active_version_id".
+    Only the capability-URL preview route uses this: that route has no session
+    (module scripts inside the sandboxed iframe send cookies at best, and the
+    iframe has an opaque origin), so the unguessable `preview_key` in its path
+    is the authorization. Every user-facing route stays scoped by user_id.
     """
-    conn = get_conn()
-    row = conn.execute(
-        "SELECT * FROM webpage_envs WHERE chat_id = :chat_id AND user_id = :user_id",
-        {"chat_id": chat_id, "user_id": user_id},
-    ).fetchone()
-    now = _now()
-    if row is None:
-        env_id = uuid.uuid4().hex
-        files = {path: content}
-        conn.execute(
-            "INSERT INTO webpage_envs (id, user_id, chat_id, files, updated_at)"
-            " VALUES (:id, :user_id, :chat_id, :files, :updated_at)",
-            {
-                "id": env_id,
-                "user_id": user_id,
-                "chat_id": chat_id,
-                "files": json.dumps(files),
-                "updated_at": now,
-            },
-        )
-    else:
-        env_id = row["id"]
-        files = _parse_webpage_files(row["files"])
-        files[path] = content
-        conn.execute(
-            "UPDATE webpage_envs SET files = :files, updated_at = :updated_at"
-            " WHERE id = :id",
-            {"files": json.dumps(files), "updated_at": now, "id": env_id},
-        )
-    version = commit_webpage_version(
-        user_id,
-        chat_id,
-        files,
-        origin=origin,
-        message_uid=message_uid,
-        label=label,
-    )
-    result = _webpage_env_result(env_id, user_id, chat_id, files, now, version["id"])
-    result["version"] = version
-    return result
-
-
-def _webpage_diff_summary(
-    base: dict[str, str], files: dict[str, str], base_assets: list[str], assets: list[str]
-) -> dict:
-    """Changed-file count plus added/removed counts between two iterations.
-
-    An asset (a picture or other binary in the folder) counts as one line of its
-    own, so adding one reads as "+1" in the history like a line of code would.
-    """
-    added = 0
-    removed = 0
-    changed = 0
-    for path in sorted(set(base) | set(files)):
-        if path not in files:
-            removed += len(base[path].splitlines())
-            changed += 1
-            continue
-        if path not in base:
-            added += len(files[path].splitlines())
-            changed += 1
-            continue
-        opcodes = difflib.SequenceMatcher(
-            None, base[path].splitlines(), files[path].splitlines(), autojunk=False
-        ).get_opcodes()
-        for tag, i1, i2, j1, j2 in opcodes:
-            if tag == "insert":
-                added += j2 - j1
-            elif tag == "delete":
-                removed += i2 - i1
-            elif tag == "replace":
-                removed += i2 - i1
-                added += j2 - j1
-        if any(tag != "equal" for tag, *_ in opcodes):
-            changed += 1
-    changed += len(set(assets) ^ set(base_assets))
-    added += len(set(assets) - set(base_assets))
-    removed += len(set(base_assets) - set(assets))
-    return {"files": changed, "added": added, "removed": removed}
-
-
-def _webpage_version_row(row: sqlite3.Row) -> dict:
-    """The list-item shape for one iteration (no file text)."""
-    try:
-        summary = json.loads(row["summary"]) if row["summary"] else {}
-    except (ValueError, TypeError):
-        summary = {}
-    if not isinstance(summary, dict):
-        summary = {}
-    return {
-        "id": row["id"],
-        "seq": row["seq"],
-        "parentVersionId": row["parent_version_id"],
-        "origin": row["origin"],
-        "label": row["label"],
-        "messageUid": row["message_uid"],
-        "assets": _parse_webpage_asset_paths(row["assets"]),
-        "summary": summary,
-        "createdAt": row["created_at"],
-    }
-
-
-def _webpage_version(chat_id: str, version_id: str | None) -> dict | None:
-    """One iteration's files and asset paths, or None when it is gone (pruned)."""
-    if not version_id:
-        return None
     row = get_conn().execute(
-        "SELECT files, assets FROM webpage_versions WHERE id = :id AND chat_id = :chat_id",
-        {"id": version_id, "chat_id": chat_id},
+        "SELECT * FROM webpage_sites WHERE chat_id = :chat_id",
+        {"chat_id": chat_id},
     ).fetchone()
-    if row is None:
-        return None
-    return {
-        "files": _parse_webpage_files(row["files"]),
-        "assets": _parse_webpage_asset_paths(row["assets"]),
-    }
+    return dict(row) if row is not None else None
 
 
-def commit_webpage_version(
-    user_id: str,
-    chat_id: str,
-    files: dict[str, str],
-    *,
-    assets: list[str] | None = None,
-    origin: str,
-    message_uid: str | None = None,
-    label: str = "",
-) -> dict:
-    """Record one iteration (the single write path) and make it active.
+def create_webpage_site(user_id: str, chat_id: str, preview_key: str) -> dict:
+    """Register the chat's workspace and return the row as a dict.
 
-    With a message_uid, a later write in the same AI run refreshes that run's
-    row — it keeps its id, seq, parent and created_at — so one reply is one
-    iteration no matter how many files it writes. Without one, every call is a
-    new iteration (manual canvas saves). Also writes the working copy, so
-    webpage_envs.files always equals the active iteration's snapshot.
-
-    ``assets`` is the folder's asset path list for this iteration; None means
-    "the ones the environment already has" (an asset write is the only caller
-    that changes it).
+    The workspace folder and its git repo are created by the container layer;
+    this only claims the row, so a crash between the two leaves an empty
+    workspace rather than an unreachable page. `chat_id` is UNIQUE, so the
+    caller checks get_webpage_site first (one workspace per chat).
     """
-    conn = get_conn()
-    env = conn.execute(
-        "SELECT * FROM webpage_envs WHERE chat_id = :chat_id AND user_id = :user_id",
-        {"chat_id": chat_id, "user_id": user_id},
-    ).fetchone()
-    if env is None:
-        raise ValueError("no webpage environment for this chat")
-    if assets is None:
-        assets = _webpage_asset_paths_of_env(env["id"])
+    site_id = uuid.uuid4().hex
     now = _now()
-    hit = None
-    if message_uid:
-        hit = conn.execute(
-            "SELECT * FROM webpage_versions WHERE chat_id = :chat_id AND message_uid = :uid",
-            {"chat_id": chat_id, "uid": message_uid},
-        ).fetchone()
-    if hit is not None:
-        version_id = hit["id"]
-        seq = hit["seq"]
-        parent = hit["parent_version_id"]
-        created_at = hit["created_at"]
-        base = _webpage_version(chat_id, parent) or {"files": {}, "assets": []}
-        conn.execute(
-            "UPDATE webpage_versions SET files = :files, assets = :assets, summary = :summary"
-            " WHERE id = :id",
-            {
-                "files": json.dumps(files),
-                "assets": json.dumps(assets),
-                "summary": json.dumps(
-                    _webpage_diff_summary(base["files"], files, base["assets"], assets)
-                ),
-                "id": version_id,
-            },
-        )
-    else:
-        version_id = uuid.uuid4().hex
-        seq = conn.execute(
-            "SELECT COALESCE(MAX(seq), 0) + 1 AS seq FROM webpage_versions WHERE chat_id = :chat_id",
-            {"chat_id": chat_id},
-        ).fetchone()["seq"]
-        parent = env["active_version_id"]
-        created_at = now
-        base = _webpage_version(chat_id, parent) or {"files": {}, "assets": []}
-        conn.execute(
-            "INSERT INTO webpage_versions (id, env_id, user_id, chat_id, parent_version_id,"
-            " seq, origin, message_uid, label, files, assets, summary, created_at)"
-            " VALUES (:id, :env_id, :user_id, :chat_id, :parent, :seq, :origin, :message_uid,"
-            " :label, :files, :assets, :summary, :created_at)",
-            {
-                "id": version_id,
-                "env_id": env["id"],
-                "user_id": user_id,
-                "chat_id": chat_id,
-                "parent": parent,
-                "seq": seq,
-                "origin": origin,
-                "message_uid": message_uid,
-                "label": label,
-                "files": json.dumps(files),
-                "assets": json.dumps(assets),
-                "summary": json.dumps(
-                    _webpage_diff_summary(base["files"], files, base["assets"], assets)
-                ),
-                "created_at": created_at,
-            },
-        )
-    conn.execute(
-        "UPDATE webpage_envs SET files = :files, updated_at = :now, active_version_id = :version"
-        " WHERE id = :id",
-        {"files": json.dumps(files), "now": now, "version": version_id, "id": env["id"]},
-    )
-    _prune_webpage_versions(conn, chat_id, version_id)
-    conn.commit()
-    row = conn.execute(
-        "SELECT * FROM webpage_versions WHERE id = :id", {"id": version_id}
-    ).fetchone()
-    version = _webpage_version_row(row)
-    version["files"] = files
-    return version
-
-
-def put_webpage_asset(
-    user_id: str,
-    chat_id: str,
-    path: str,
-    data: bytes,
-    mime: str,
-    *,
-    origin: str = "ai",
-    message_uid: str | None = None,
-    label: str = "",
-) -> dict:
-    """Copy one picture or file into the page's folder, then commit an iteration.
-
-    The bytes are stored once for the environment; iterations record the asset
-    paths they had, so an older iteration that never showed the picture does not
-    list it and no iteration stores a second copy. Returns the env dict plus
-    "version" (the iteration that now holds the asset) and "asset".
-    """
     conn = get_conn()
-    row = conn.execute(
-        "SELECT * FROM webpage_envs WHERE chat_id = :chat_id AND user_id = :user_id",
-        {"chat_id": chat_id, "user_id": user_id},
-    ).fetchone()
-    if row is None:
-        raise ValueError("no webpage environment for this chat")
-    now = _now()
     conn.execute(
-        "INSERT INTO webpage_assets (id, env_id, user_id, chat_id, path, mime, size_bytes,"
-        " data, created_at)"
-        " VALUES (:id, :env_id, :user_id, :chat_id, :path, :mime, :size, :data, :created_at)"
-        " ON CONFLICT(env_id, path) DO UPDATE SET mime = :mime, size_bytes = :size,"
-        " data = :data, created_at = :created_at",
+        "INSERT INTO webpage_sites (id, user_id, chat_id, preview_key, active_commit,"
+        " created_at, updated_at)"
+        " VALUES (:id, :user_id, :chat_id, :preview_key, NULL, :created_at, :updated_at)",
         {
-            "id": uuid.uuid4().hex,
-            "env_id": row["id"],
+            "id": site_id,
             "user_id": user_id,
             "chat_id": chat_id,
-            "path": path,
-            "mime": mime,
-            "size": len(data),
-            "data": data,
+            "preview_key": preview_key,
             "created_at": now,
+            "updated_at": now,
         },
     )
-    files = _parse_webpage_files(row["files"])
-    assets = _webpage_asset_paths_of_env(row["id"])
-    version = commit_webpage_version(
-        user_id,
-        chat_id,
-        files,
-        assets=assets,
-        origin=origin,
-        message_uid=message_uid,
-        label=label,
-    )
-    result = _webpage_env_result(row["id"], user_id, chat_id, files, now, version["id"])
-    result["version"] = version
-    result["asset"] = {"path": path, "mime": mime, "size": len(data)}
-    return result
+    conn.commit()
+    created = get_webpage_site(user_id, chat_id)
+    assert created is not None
+    return created
 
 
-def get_webpage_asset(user_id: str, chat_id: str, path: str) -> sqlite3.Row | None:
-    """One asset row including its bytes; user- and chat-scoped.
+def get_or_create_webpage_site(user_id: str, chat_id: str, preview_key: str) -> dict:
+    """The chat's site, created with ``preview_key`` on first use.
 
-    The route serving bytes is the only caller: everything else uses the
-    metadata map from get_webpage_env.
+    Runs as one critical section: several tool calls of a single model message
+    execute in parallel (the tool node gathers them), and every one of them
+    ensures the site before its first write — a plain get-then-create would
+    race two INSERTs into an IntegrityError that kills the whole run.
     """
-    return get_conn().execute(
-        "SELECT * FROM webpage_assets"
-        " WHERE chat_id = :chat_id AND user_id = :user_id AND path = :path",
-        {"chat_id": chat_id, "user_id": user_id, "path": path},
-    ).fetchone()
+    with _conn_lock:
+        site = get_webpage_site(user_id, chat_id)
+        if site is None:
+            site = create_webpage_site(user_id, chat_id, preview_key)
+        return site
 
 
-def _prune_webpage_versions(conn: sqlite3.Connection, chat_id: str, active_version_id: str) -> None:
-    """Drop the oldest iterations past the cap, never the active one.
+def set_webpage_active_commit(user_id: str, chat_id: str, commit: str) -> None:
+    """Point the canvas at one commit's snapshot (a checkout).
 
-    DELETE ... LIMIT is not portable (it needs a compile flag SQLite may not
-    have), so the doomed ids are selected first.
+    Also bumps updated_at: switching what the preview serves is a change to the
+    site, and touch_webpage_site's idle accounting should see it.
     """
-    total = conn.execute(
-        "SELECT COUNT(*) AS n FROM webpage_versions WHERE chat_id = :chat_id",
-        {"chat_id": chat_id},
-    ).fetchone()["n"]
-    excess = total - WEBPAGE_VERSION_LIMIT
-    if excess <= 0:
-        return
-    conn.execute(
-        "DELETE FROM webpage_versions WHERE id IN ("
-        " SELECT id FROM webpage_versions WHERE chat_id = :chat AND id != :active"
-        " ORDER BY seq ASC LIMIT :excess)",
-        {"chat": chat_id, "active": active_version_id, "excess": excess},
-    )
-
-
-def list_webpage_versions(user_id: str, chat_id: str) -> list[dict]:
-    """Every iteration of the chat, oldest first (no file text: the list stays small)."""
-    rows = get_conn().execute(
-        "SELECT * FROM webpage_versions WHERE chat_id = :chat_id AND user_id = :user_id"
-        " ORDER BY seq ASC",
-        {"chat_id": chat_id, "user_id": user_id},
-    ).fetchall()
-    return [_webpage_version_row(row) for row in rows]
-
-
-def get_webpage_active_version(user_id: str, chat_id: str) -> str | None:
-    """The id of the iteration later writes and manual edits apply to."""
-    row = get_conn().execute(
-        "SELECT active_version_id FROM webpage_envs WHERE chat_id = :chat_id AND user_id = :user_id",
-        {"chat_id": chat_id, "user_id": user_id},
-    ).fetchone()
-    return row["active_version_id"] if row is not None else None
-
-
-def get_webpage_version(user_id: str, chat_id: str, version_id: str) -> dict | None:
-    """One iteration with its file snapshot, or None when it is not this user's."""
-    row = get_conn().execute(
-        "SELECT * FROM webpage_versions WHERE id = :id AND chat_id = :chat_id AND user_id = :user_id",
-        {"id": version_id, "chat_id": chat_id, "user_id": user_id},
-    ).fetchone()
-    if row is None:
-        return None
-    version = _webpage_version_row(row)
-    version["files"] = _parse_webpage_files(row["files"])
-    return version
-
-
-def set_webpage_active_version(user_id: str, chat_id: str, version_id: str) -> dict | None:
-    """Activate one iteration: its snapshot becomes the working copy.
-
-    None when the environment or the iteration is not this user's chat's. Later
-    AI runs and manual saves branch from the activated iteration; the ones after
-    it are kept.
-    """
-    row = get_webpage_version(user_id, chat_id, version_id)
-    if row is None:
-        return None
     conn = get_conn()
-    env = conn.execute(
-        "SELECT id FROM webpage_envs WHERE chat_id = :chat_id AND user_id = :user_id",
-        {"chat_id": chat_id, "user_id": user_id},
-    ).fetchone()
-    if env is None:
-        return None
-    now = _now()
-    files = row["files"]
     conn.execute(
-        "UPDATE webpage_envs SET files = :files, active_version_id = :version, updated_at = :now"
-        " WHERE id = :id",
-        {"files": json.dumps(files), "version": version_id, "now": now, "id": env["id"]},
+        "UPDATE webpage_sites SET active_commit = :commit, updated_at = :now"
+        " WHERE chat_id = :chat_id AND user_id = :user_id",
+        {"commit": commit, "now": _now(), "chat_id": chat_id, "user_id": user_id},
     )
     conn.commit()
-    return _webpage_env_result(env["id"], user_id, chat_id, files, now, version_id)
 
 
-def webpage_version_diff(
-    user_id: str, chat_id: str, version_id: str, against: str | None = None
-) -> dict | None:
-    """Unified diff of one iteration against its parent (or an explicit base).
+def touch_webpage_site(user_id: str, chat_id: str) -> None:
+    """Bump updated_at so the site's row tracks the workspace's last change."""
+    conn = get_conn()
+    conn.execute(
+        "UPDATE webpage_sites SET updated_at = :now"
+        " WHERE chat_id = :chat_id AND user_id = :user_id",
+        {"now": _now(), "chat_id": chat_id, "user_id": user_id},
+    )
+    conn.commit()
 
-    None when the iteration is not this user's chat's. A pruned or missing base
-    degrades to "everything added" with baseVersionId None, never an error.
-    `against` lets the UI compare any two iterations.
-    """
-    row = get_webpage_version(user_id, chat_id, version_id)
-    if row is None:
-        return None
-    base_id = against or row["parentVersionId"]
-    base_row = _webpage_version(chat_id, base_id) if base_id else None
-    if base_id and base_row is None:
-        # The parent is gone (pruned) or the id is bogus: show the whole file.
-        base_id = None
-    base = base_row["files"] if base_row else {}
-    base_assets = base_row["assets"] if base_row else []
-    files_out: list[dict] = []
-    budget = WEBPAGE_DIFF_LINE_LIMIT
-    truncated = False
-    for path in sorted(set(base) | set(row["files"])):
-        if budget <= 0:
-            truncated = True
-            break
-        in_base = path in base
-        in_files = path in row["files"]
-        if in_base and not in_files:
-            status = "removed"
-            base_lines: list[str] = base[path].splitlines()
-            file_lines: list[str] = []
-        elif in_files and not in_base:
-            status = "added"
-            base_lines = []
-            file_lines = row["files"][path].splitlines()
-        else:
-            status = "modified"
-            base_lines = base[path].splitlines()
-            file_lines = row["files"][path].splitlines()
-        added = 0
-        removed = 0
-        lines: list[dict] = []
-        if status == "added":
-            lines = [{"kind": "add", "text": text} for text in file_lines]
-            added = len(file_lines)
-        elif status == "removed":
-            lines = [{"kind": "del", "text": text} for text in base_lines]
-            removed = len(base_lines)
-        else:
-            matcher = difflib.SequenceMatcher(None, base_lines, file_lines, autojunk=False)
-            for group in matcher.get_grouped_opcodes(3):
-                head = group[0]
-                tail = group[-1]
-                lines.append(
-                    {
-                        "kind": "hunk",
-                        "text": f"@@ -{head[1] + 1},{tail[2] - head[1]}"
-                        f" +{head[3] + 1},{tail[4] - head[3]} @@",
-                    }
-                )
-                for tag, i1, i2, j1, j2 in group:
-                    if tag == "equal":
-                        lines.extend(
-                            {"kind": "ctx", "text": text} for text in base_lines[i1:i2]
-                        )
-                    else:
-                        lines.extend(
-                            {"kind": "del", "text": text} for text in base_lines[i1:i2]
-                        )
-                        lines.extend(
-                            {"kind": "add", "text": text} for text in file_lines[j1:j2]
-                        )
-                        removed += i2 - i1
-                        added += j2 - j1
-        if not lines:
-            continue
-        if len(lines) > budget:
-            lines = lines[:budget]
-            truncated = True
-        budget -= len(lines)
-        files_out.append(
-            {
-                "path": path,
-                "status": status,
-                "added": added,
-                "removed": removed,
-                "lines": lines,
-            }
-        )
-    # A picture (or other binary) the folder gained or lost: one line describing
-    # it, so the Changes tab accounts for every path the run touched.
-    now_assets = set(row["assets"])
-    was_assets = set(base_assets)
-    asset_info = _webpage_asset_map(user_id, chat_id) if now_assets ^ was_assets else {}
-    for path in sorted(now_assets ^ was_assets):
-        if budget <= 0:
-            truncated = True
-            break
-        added_now = path in now_assets
-        budget -= 1
-        files_out.append(
-            {
-                "path": path,
-                "status": "added" if added_now else "removed",
-                "added": 1 if added_now else 0,
-                "removed": 0 if added_now else 1,
-                "lines": [
-                    {
-                        "kind": "add" if added_now else "del",
-                        "text": _asset_line(path, asset_info.get(path) or {}),
-                    }
-                ],
-            }
-        )
-    return {
-        "versionId": version_id,
-        "baseVersionId": base_id,
-        "files": files_out,
-        "truncated": truncated,
-    }

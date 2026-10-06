@@ -108,7 +108,10 @@ class SetWebpageVersionRequest(BaseModel):
 class SaveWebpageFileRequest(BaseModel):
     path: str
     content: str
-    base_version_id: str = Field(alias="baseVersionId")
+    # The active commit the tab rendered. None is what a site with no commit
+    # yet sends (an interrupted first run); the route then only matches when
+    # the site's active_commit is still None.
+    base_version_id: str | None = Field(default=None, alias="baseVersionId")
 
     model_config = {"populate_by_name": True}
 

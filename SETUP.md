@@ -18,6 +18,10 @@ only talks to the frontend port. Chat history lives in SQLite at
 
 - **Python 3.11+** (the backend uses `X | Y` type syntax)
 - **Node.js 20 LTS or newer** (Vite 5 requirement) + npm
+- **Podman 6+** — each webpage canvas runs in its own site container (from the
+  `node:22-bookworm-slim`-based image). On Windows, run
+  `podman machine init && podman machine start` once. Docker Desktop works too:
+  set `SITE_CONTAINER_CLI=docker` (see §3).
 - A terminal: **PowerShell 5.1+** on Windows, any POSIX shell on macOS/Linux
 - API keys: an **OpenRouter API key** (required, chat model), an **OpenAI API
   key** (required, image generation), a **Parallel Search API key**
@@ -91,8 +95,13 @@ nano .env
 | `TOKEN_ENC_KEY`        | Yes        | Encrypts Gmail tokens at rest; `openssl rand -hex 32`        |
 | `APP_ORIGIN`           | No         | Origin users browse; defaults to `http://localhost:5173`     |
 | `FMHY_MCP_URL`         | No         | FMHY free-media MCP endpoint; blank disables those tools     |
+| `SITE_CONTAINER_CLI`   | Webpages   | Container CLI for the site sandboxes; defaults to `podman`  |
+| `SITE_IDLE_MINUTES`    | No         | Stop a site's container after this many idle minutes (10)   |
+| `SITE_EXEC_TIMEOUT`    | No         | Default `webpage_shell` timeout in seconds (120)            |
+| `SITE_BUILD_TIMEOUT`   | No         | A site's `npm run build` timeout in seconds (300)           |
 
-`.env` is gitignored — never commit it.
+`.env` is gitignored — never commit it. Every variable with its default and a
+one-line explanation is commented in `backend/.env.example`.
 
 ## 4. Google Cloud setup (sign-in + Gmail)
 
@@ -261,8 +270,10 @@ Same URL: **http://localhost:5173**. Drop `--reload` for a calmer backend log.
    Other checks follow the same pattern: `scripts/flow-check.mjs`,
    `scripts/tutor-check.mjs`, `scripts/draft-check.mjs` (email draft → Send
    button), `scripts/measure-font.mjs`, `scripts/emoji-check.mjs`,
-   `scripts/webpage-check.mjs` (webpage canvas: live preview, inlined
-   styles/scripts and folder pictures, Code tab, reload restore),
+   `scripts/webpage-check.mjs` (webpage canvas: the preview iframe's `src` is the
+   served preview URL — no inlining or `srcdoc` — the Code tab fetches file text
+   one file at a time, Save sends `baseVersionId`, and "open in a new tab" loads
+   the preview directly; reload restore),
    `scripts/webpage-versions-check.mjs` (iteration history, activation, Changes
    tab, in-canvas editing), `scripts/capture.mjs`.
 
@@ -299,6 +310,7 @@ Same URL: **http://localhost:5173**. Drop `--reload` for a calmer backend log.
   client (`gmail.py`), schemas, SQLite (`db.py`), config
 - `backend/agent/` — LangGraph (`graph.py`), model factory, tools
 - `backend/tests/` — pytest suite (auth, linking, token refresh, Gmail)
-- `backend/data/` — SQLite file (created at runtime, ignored by git)
+- `backend/data/` — SQLite file + `sites/` webpage workspaces (both created at
+  runtime, ignored by git)
 - `scripts/` — Playwright verification scripts + `dev-all.mjs` (dual runner)
 - `assets/` — static images served as `/plates/...`

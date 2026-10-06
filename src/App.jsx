@@ -155,6 +155,7 @@ export default function App() {
     removeAttachment,
     webpage,
     hasWebpage,
+    canvasRevision,
     canvasOpen,
     canvasNotice,
     clearCanvasNotice,
@@ -271,12 +272,16 @@ export default function App() {
         <WebpageCanvas
           chatId={webpage.chatId}
           files={webpage.files}
-          assets={webpage.assets ?? {}}
+          previewUrl={webpage.previewUrl}
+          previewBase={webpage.previewBase}
           activeVersionId={webpage.activeVersionId ?? null}
           versions={webpage.versions ?? []}
+          hasBuild={Boolean(webpage.hasBuild)}
+          lastBuild={webpage.lastBuild ?? null}
           streaming={isStreaming}
           busy={canvasBusy}
           notice={canvasNotice}
+          revision={canvasRevision}
           onDismissNotice={clearCanvasNotice}
           onActivateVersion={(versionId) => activateVersion(webpage.chatId, versionId)}
           onSaveFile={(path, content, baseVersionId) =>

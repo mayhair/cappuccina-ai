@@ -1,15 +1,24 @@
-// Canvas iteration history: stepping through the runs, the Changes tab, and a
-// manual edit landing as its own iteration (see backend/app/main.py routes).
+// Canvas iteration history on the containerized workspace API (see
+// backend/app/main.py): stepping through the runs (each step activates
+// server-side), the Changes tab, and a hand edit landing as its own iteration
+// against the one the tab rendered.
 // Run against `npm run preview` (port 4173): node scripts/webpage-versions-check.mjs
 import { chromium } from "playwright";
 
 const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 1536, height: 1024 } });
 const errors = [];
-page.on("console", (m) => m.type() === "error" && errors.push(m.text()));
+page.on("console", (m) => {
+  if (m.type() !== "error") return;
+  if (expectConflict && /status of 409/.test(m.text())) return;
+  errors.push(m.text());
+});
 page.on("pageerror", (e) => errors.push(String(e)));
 
 const failures = [];
+// The stale-base probe deliberately provokes one 409: the browser logs every
+// failed response, so that one line is expected rather than a defect.
+let expectConflict = false;
 function check(label, ok, extra = "") {
   console.log(`${ok ? "ok  " : "FAIL"} ${label}${extra ? ` — ${extra}` : ""}`);
   if (!ok) failures.push(label);
@@ -24,12 +33,20 @@ const V2_INDEX = `${PAGE("Hello dogs")}\n`;
 const CSS = "body { background: rgb(1, 2, 3); }";
 const EDITED_INDEX = PAGE("Hello hand-edited");
 
+const CHAT = "chat-check";
+// The preview URL is a capability URL scoped to the chat; it always serves the
+// active iteration's files, so the iframe is the proof the switch landed.
+const PREVIEW_BASE = `/api/v1/webpages/${CHAT}/preview/key-check/`;
+const PREVIEW_URL = `${PREVIEW_BASE}index.html`;
+const PREVIEW_TYPES = { "index.html": "text/html", "styles.css": "text/css" };
+
 // ---------- the server side, as the checks build it up ----------
 const created = "2026-01-0";
 let versions = [];
 let filesByVersion = {};
 let activeVersionId = null;
 let nextId = 1;
+let staleSave = false;
 const activationRequests = [];
 const saveRequests = [];
 
@@ -43,6 +60,7 @@ function addVersion(files, { origin = "ai", label = "", parent = activeVersionId
     origin,
     label,
     messageUid: origin === "ai" ? `reply-${id}` : null,
+    assets: [],
     summary: {
       files: Object.keys(files).length,
       added: Object.keys(files).length,
@@ -56,10 +74,16 @@ function addVersion(files, { origin = "ai", label = "", parent = activeVersionId
 }
 
 const envJson = () => ({
-  webpageId: "env-check",
-  files: filesByVersion[activeVersionId] ?? {},
+  webpageId: "webpage-check",
+  files: Object.keys(filesByVersion[activeVersionId] ?? {}),
   updatedAt: "2026-01-01T00:00:00Z",
   activeVersionId,
+  previewUrl: PREVIEW_URL,
+  previewBase: PREVIEW_BASE,
+  entry: "index.html",
+  serveRoot: "",
+  hasBuild: false,
+  lastBuild: null,
 });
 
 function diffPayload(id) {
@@ -122,18 +146,27 @@ await page.route("**/api/v1/auth/me", async (route) => {
 let savedChats = [];
 await page.route("**/api/v1/chats", async (route) => {
   await route.fulfill(
-    json(route.request().method() === "GET" ? savedChats : { id: "chat-check", title: "New chat" }),
+    json(route.request().method() === "GET" ? savedChats : { id: CHAT, title: "New chat" }),
   );
 });
 
 await page.route("**/api/v1/webpages/**", async (route) => {
   const request = route.request();
   const url = new URL(request.url());
-  const parts = url.pathname.split("/api/v1/webpages/")[1]?.split("/").filter(Boolean) ?? [];
-  const sub = parts[1];
-  if (!sub) return route.fulfill(json(envJson()));
-  if (sub === "versions" && parts[2]) {
-    const payload = diffPayload(parts[2]);
+  const parts = url.pathname.split(`/api/v1/webpages/${CHAT}/`)[1]?.split("/").filter(Boolean) ?? [];
+  const [sub, ...rest] = parts;
+  // The served preview: whatever the active iteration holds, so the iframe the
+  // canvas loads is where the activation becomes visible.
+  if (sub === "preview") {
+    const name = rest.slice(1).join("/") || "index.html";
+    const content = filesByVersion[activeVersionId]?.[name];
+    if (typeof content === "string") {
+      return route.fulfill({ status: 200, contentType: PREVIEW_TYPES[name] ?? "text/plain", body: content });
+    }
+    return route.fulfill(json({ detail: "Not found" }, 404));
+  }
+  if (sub === "versions" && rest[0]) {
+    const payload = diffPayload(rest[0]);
     return route.fulfill(json(payload.body, payload.status));
   }
   if (sub === "versions") return route.fulfill(json({ activeVersionId, versions }));
@@ -146,25 +179,39 @@ await page.route("**/api/v1/webpages/**", async (route) => {
   if (sub === "files" && request.method() === "PUT") {
     const body = JSON.parse(request.postData() ?? "{}");
     saveRequests.push(body);
+    // A tab whose base moved on is refused: the canvas shows the notice and
+    // keeps the user's draft.
+    if (staleSave) {
+      return route.fulfill(
+        json({ detail: "The page changed since you opened it. Reload the canvas and try again." }, 409),
+      );
+    }
     const next = { ...filesByVersion[activeVersionId], [body.path]: body.content };
-    const id = addVersion(next, { origin: "manual", label: `Edited ${body.path}` });
-    return route.fulfill(json({ ...envJson(), webpageId: "env-check", activeVersionId: id }));
+    addVersion(next, { origin: "manual", label: `Edited ${body.path}` });
+    return route.fulfill(json(envJson()));
   }
+  if (sub === "files") {
+    const path = rest.join("/");
+    const content = filesByVersion[activeVersionId]?.[path];
+    if (typeof content === "string") return route.fulfill(json({ path, content }));
+    return route.fulfill(json({ detail: "File not found" }, 404));
+  }
+  if (!sub) return route.fulfill(json(envJson()));
   return route.fulfill(json({ detail: "Not found" }, 404));
 });
 
 // The stream: turn one builds two files, turn two rewrites index.html. Both
-// mutate the server state first, so the versions GET that the canvas fires on
-// each webpage event already sees the committed iteration.
+// mutate the server state first, so the env/versions GETs the canvas fires on
+// each webpage event already see the committed iteration.
 let streamTurn = 0;
 let hangStream = false;
-function sseTurn(versionId, writes, heading) {
+function sseTurn(writes, heading) {
   return [
     "event: start\ndata: {}\n\n",
     ...writes.flatMap(([path, content], i) => [
       `event: tool_call\ndata: ${JSON.stringify({ id: `t${i}`, name: "write_webpage_file", display: "Building Webpage", args: { path, bytes: content.length }, label: `write_webpage_file(path='${path}')` })}\n\n`,
-      `event: tool_result\ndata: ${JSON.stringify({ id: `t${i}`, name: "write_webpage_file", content: JSON.stringify({ status: "webpage_file_written", webpage_id: "env-check", version_id: versionId, path, bytes: content.length, files: writes.map(([p]) => p).slice(0, i + 1) }), ok: true })}\n\n`,
-      `event: webpage\ndata: ${JSON.stringify({ webpageId: "env-check", path, files: writes.map(([p]) => p).slice(0, i + 1), content, versionId })}\n\n`,
+      `event: tool_result\ndata: ${JSON.stringify({ id: `t${i}`, name: "write_webpage_file", content: JSON.stringify({ status: "webpage_file_written", webpage_id: "webpage-check", version_id: null, path, bytes: content.length, files: writes.map(([p]) => p).slice(0, i + 1) }), ok: true })}\n\n`,
+      `event: webpage\ndata: ${JSON.stringify({ webpageId: "webpage-check", path, files: writes.map(([p]) => p).slice(0, i + 1), versionId: null, build: null, previewBase: PREVIEW_BASE, previewUrl: PREVIEW_URL })}\n\n`,
     ]),
     `event: token\ndata: ${JSON.stringify({ content: `The page now says ${heading}.` })}\n\n`,
     "event: done\ndata: {}\n\n",
@@ -176,9 +223,8 @@ await page.route("**/api/v1/chat/stream", async (route) => {
   streamTurn += 1;
   let body;
   if (streamTurn === 1) {
-    const id = addVersion({ "index.html": V1_INDEX, "styles.css": CSS });
+    addVersion({ "index.html": V1_INDEX, "styles.css": CSS });
     body = sseTurn(
-      id,
       [
         ["index.html", V1_INDEX],
         ["styles.css", CSS],
@@ -186,8 +232,8 @@ await page.route("**/api/v1/chat/stream", async (route) => {
       "Hello cats",
     );
   } else {
-    const id = addVersion({ ...filesByVersion[activeVersionId], "index.html": V2_INDEX });
-    body = sseTurn(id, [["index.html", V2_INDEX]], "Hello dogs");
+    addVersion({ ...filesByVersion[activeVersionId], "index.html": V2_INDEX });
+    body = sseTurn([["index.html", V2_INDEX]], "Hello dogs");
   }
   await route.fulfill({ status: 200, contentType: "text/event-stream", body });
 });
@@ -208,35 +254,38 @@ const send = async (text) => {
 
 await page.goto("http://localhost:4173/", { waitUntil: "networkidle" });
 
-// 1. the first run is iteration 1 of 1 and the preview shows the built page
+// 1. the first run is iteration 1 of 1 and the served preview shows it
 await send("make me a webpage about cats");
 await page.waitForSelector(".canvas-frame", { timeout: 8000 });
 const bar = () => page.locator(".canvas-history-count").textContent();
+const frameHeading = () => page.frameLocator(".canvas-frame").locator("h1").textContent();
 check("history bar appears for the first run", await page.locator(".canvas-history").first().isVisible());
 check("iteration 1 of 1", await waitFor(async () => (await bar()) === "Iteration 1 of 1"), await bar());
-const frame = page.frameLocator(".canvas-frame");
+check("preview URL is the frame's src", (await page.locator(".canvas-frame").getAttribute("src")) === PREVIEW_URL);
 check(
-  "preview shows the first page",
-  (await frame.locator("h1").textContent({ timeout: 3000 })) === "Hello cats",
+  "preview serves the first page",
+  await waitFor(async () => (await frameHeading().catch(() => null)) === "Hello cats"),
 );
 
 // 2. a second run is its own iteration, and the preview follows it
 await send("now change the heading");
 check("iteration 2 of 2", await waitFor(async () => (await bar()) === "Iteration 2 of 2"), await bar());
 check(
-  "preview shows the second page",
-  await waitFor(async () =>
-    (await page.locator(".canvas-frame").getAttribute("srcdoc")).includes("<h1>Hello dogs</h1>"),
-  ),
+  "preview serves the second page",
+  await waitFor(async () => (await frameHeading().catch(() => null)) === "Hello dogs"),
 );
 
-// 3. stepping back activates the older iteration (server round-trip) and the
-//    Code pane shows that iteration's text
+// 3. stepping back activates the older iteration (server round-trip); the
+//    preview reloads onto it and the Code pane shows that iteration's text
 await page.click('.canvas-history-step[aria-label="Previous iteration"]');
 const activated = await waitFor(() => activationRequests.length > 0);
 check("previous iteration activates v1", activated, JSON.stringify(activationRequests));
 check("activation body carries versionId", activationRequests[0]?.versionId === "v1");
 check("bar back to iteration 1 of 2", await waitFor(async () => (await bar()) === "Iteration 1 of 2"), await bar());
+check(
+  "preview follows the activation",
+  await waitFor(async () => (await frameHeading().catch(() => null)) === "Hello cats"),
+);
 await page.click('.canvas-tabs button:has-text("Code")');
 await page.waitForSelector(".canvas-file-row", { timeout: 3000 });
 await page.click('.canvas-file-row:has-text("index.html")');
@@ -380,6 +429,24 @@ await page.waitForSelector(".canvas-history-panel", { timeout: 3000 });
 const editedRow = await page.locator('.canvas-history-panel .canvas-file-row .canvas-file-name', { hasText: "Edited index.html" }).count();
 check("history shows the manual edit", editedRow === 1);
 await page.click('.canvas-history-btn[aria-label="All iterations"]');
+
+// 6b. a stale base is refused with a 409 and the canvas says why, keeping the
+//     draft instead of silently reloading over the user's text
+staleSave = true;
+expectConflict = true;
+await page.click('.canvas-icon-btn[aria-label="Edit index.html"]');
+await page.waitForSelector("textarea.canvas-code-edit", { timeout: 3000 });
+await page.fill("textarea.canvas-code-edit", `${EDITED_INDEX}<!-- again -->`);
+await page.click(".canvas-edit-save");
+const notice = await waitFor(async () => {
+  const text = await page.locator(".canvas-notice").first().textContent().catch(() => "");
+  return (text ?? "").includes("The page changed since you opened it");
+});
+check("stale save shows the 409 notice", notice, await page.locator(".canvas-notice").first().textContent().catch(() => ""));
+check("the draft survives the refusal", (await page.locator("textarea.canvas-code-edit").count()) === 1);
+await page.click(".canvas-edit-cancel");
+staleSave = false;
+expectConflict = false;
 
 // 7. while a reply is being written nothing can be switched or edited
 hangStream = true;
