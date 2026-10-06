@@ -2,6 +2,7 @@ import base64
 import json
 import time
 from contextlib import asynccontextmanager
+from uuid import uuid4
 from zoneinfo import ZoneInfo
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, Response, UploadFile
@@ -109,6 +110,47 @@ def _message_reasoning(msg, content) -> str:
 def _tool_label(name: str, args: dict) -> str:
     rendered = ", ".join(f"{k}={v!r}" for k, v in args.items())
     return f"{name}({rendered})"
+
+
+def _tool_call_event(tool_id: str, name: str, args: dict) -> dict:
+    """The SSE payload for one tool call (early or at execution start)."""
+    return {
+        "event": "tool_call",
+        "data": json.dumps(
+            {
+                "id": tool_id,
+                "name": name,
+                "display": TOOL_DISPLAY_NAMES.get(name, name),
+                "args": args,
+                "label": _tool_label(name, args),
+            }
+        ),
+    }
+
+
+def _tool_result_event(tool_id: str, name: str, content: str, ok: bool) -> dict:
+    """The SSE payload for one tool result."""
+    return {
+        "event": "tool_result",
+        "data": json.dumps(
+            {"id": tool_id, "name": name, "content": content, "ok": ok}
+        ),
+    }
+
+
+def _claim_streamed_call(streamed_calls: dict, name: str) -> str | None:
+    """The UI id of the streamed model tool call that is now executing.
+
+    The model streams a tool call's name and arguments before the graph runs it,
+    so the card is shown early (see _stream_chat_events). When the run starts we
+    claim the matching streamed call so the same card carries the result. Falls
+    back to None for tools the model never streamed (e.g. a nested internal run).
+    """
+    for info in streamed_calls.values():
+        if not info.get("bound") and info.get("name") == name and info.get("ui_id"):
+            info["bound"] = True
+            return info["ui_id"]
+    return None
 
 
 def _tool_result_text(output) -> str:
@@ -1204,6 +1246,16 @@ async def _stream_chat_events(req: ChatRequest, user: dict):
     # Every tool run we have seen, so a tool that calls another tool (an
     # internal, nested run) is not mistaken for a second model tool call.
     tool_run_ids: set[str] = set()
+    # The model streams a tool call's name and arguments before the graph runs
+    # it; on_tool_start only fires once the arguments are complete. We show the
+    # card as soon as the name arrives so a big webpage write is visible while
+    # its text streams, then claim it when the run starts. Keyed by the chunk's
+    # tool-call index, reset each model turn.
+    streamed_calls: dict[object, dict] = {}
+    run_to_tool_id: dict[str, str] = {}
+    # UI ids already handed out in this reply, so a provider that reuses a
+    # tool-call id (or omits one) can't fold two cards together.
+    used_tool_ids: set[str] = set()
     blocks = _ThinkingBlockTimer(parts)
 
     async for event in GRAPH.astream_events(
@@ -1213,7 +1265,22 @@ async def _stream_chat_events(req: ChatRequest, user: dict):
     ):
         kind = event["event"]
         if kind == "on_chat_model_start":
+            # A streamed call the graph never ran (an unknown tool name) would
+            # otherwise leave its card spinning: close it as failed.
+            for info in streamed_calls.values():
+                if not info.get("emitted") or info.get("bound"):
+                    continue
+                stalled_id = info["ui_id"]
+                stalled_text = "This tool didn't run."
+                tools_by_id[stalled_id]["ok"] = False
+                tools_by_id[stalled_id]["result"] = stalled_text
+                part = parts_by_tool_id.get(stalled_id)
+                if part is not None:
+                    part["ok"] = False
+                    part["result"] = stalled_text
+                yield _tool_result_event(stalled_id, info["name"], stalled_text, False)
             final_text = ""
+            streamed_calls.clear()
         elif kind == "on_chat_model_stream":
             chunk = event["data"]["chunk"]
             content = getattr(chunk, "content", "")
@@ -1241,6 +1308,51 @@ async def _stream_chat_events(req: ChatRequest, user: dict):
                     "event": "reasoning",
                     "data": json.dumps({"content": reasoning}),
                 }
+            for tc in getattr(chunk, "tool_call_chunks", None) or []:
+                index = tc.get("index")
+                if index is None:
+                    index = len(streamed_calls)
+                info = streamed_calls.setdefault(
+                    index,
+                    {"id": None, "name": "", "emitted": False, "bound": False},
+                )
+                if tc.get("id"):
+                    info["id"] = tc["id"]
+                if tc.get("name"):
+                    info["name"] += tc["name"]
+                name = info["name"]
+                if not name or info["emitted"]:
+                    continue
+                # The card appears now, while the arguments are still streaming.
+                # Its args are filled in when the run actually starts.
+                info["emitted"] = True
+                ui_id = str(info["id"] or "")
+                if not ui_id or ui_id in used_tool_ids:
+                    ui_id = f"tool-call-{uuid4().hex}"
+                used_tool_ids.add(ui_id)
+                info["ui_id"] = ui_id
+                args = _webpage_tool_args(name, {})
+                blocks.open()
+                tools_by_id[ui_id] = {
+                    "id": ui_id,
+                    "name": name,
+                    "display": TOOL_DISPLAY_NAMES.get(name, name),
+                    "args": args,
+                    "result": "",
+                    "ok": True,
+                }
+                part = {
+                    "type": "tool",
+                    "id": ui_id,
+                    "name": name,
+                    "display": TOOL_DISPLAY_NAMES.get(name, name),
+                    "args": args,
+                    "result": None,
+                    "ok": None,
+                }
+                parts.append(part)
+                parts_by_tool_id[ui_id] = part
+                yield _tool_call_event(ui_id, name, args)
         elif kind == "on_tool_start":
             call_id = event.get("run_id", "")
             # A run whose parent is another tool run is the tool calling
@@ -1254,60 +1366,50 @@ async def _stream_chat_events(req: ChatRequest, user: dict):
                 raw_args = {"input": raw_args}
             name = event.get("name", "")
             args = _webpage_tool_args(name, raw_args)
+            # Reuse the card already shown while the arguments streamed; fall
+            # back to the run id for tools the model never streamed.
+            ui_id = _claim_streamed_call(streamed_calls, name) or str(call_id)
+            run_to_tool_id[call_id] = ui_id
             blocks.open()
-            tools_by_id[call_id] = {
-                "id": call_id,
+            tools_by_id[ui_id] = {
+                "id": ui_id,
                 "name": name,
                 "display": TOOL_DISPLAY_NAMES.get(name, name),
                 "args": args,
                 "result": "",
                 "ok": True,
             }
-            part = {
-                "type": "tool",
-                "id": str(call_id),
-                "name": name,
-                "display": TOOL_DISPLAY_NAMES.get(name, name),
-                "args": args,
-                "result": None,
-                "ok": None,
-            }
-            parts.append(part)
-            parts_by_tool_id[str(call_id)] = part
-            yield {
-                "event": "tool_call",
-                "data": json.dumps(
-                    {
-                        "id": str(call_id),
-                        "name": name,
-                        "display": TOOL_DISPLAY_NAMES.get(name, name),
-                        "args": args,
-                        "label": _tool_label(name, args),
-                    }
-                ),
-            }
+            part = parts_by_tool_id.get(ui_id)
+            if part is None:
+                part = {
+                    "type": "tool",
+                    "id": ui_id,
+                    "name": name,
+                    "display": TOOL_DISPLAY_NAMES.get(name, name),
+                    "args": args,
+                    "result": None,
+                    "ok": None,
+                }
+                parts.append(part)
+                parts_by_tool_id[ui_id] = part
+            else:
+                part["name"] = name
+                part["display"] = TOOL_DISPLAY_NAMES.get(name, name)
+                part["args"] = args
+            yield _tool_call_event(ui_id, name, args)
         elif kind == "on_tool_end":
             call_id = event.get("run_id", "")
-            if call_id not in tools_by_id:
+            tool_id = run_to_tool_id.get(call_id, call_id)
+            if tool_id not in tools_by_id:
                 # A nested internal run we deliberately did not surface.
                 continue
             output_text = _tool_result_text(event["data"].get("output", ""))
-            tools_by_id[call_id]["result"] = output_text
-            tool_part = parts_by_tool_id.get(str(call_id))
+            tools_by_id[tool_id]["result"] = output_text
+            tool_part = parts_by_tool_id.get(tool_id)
             if tool_part is not None:
                 tool_part["result"] = output_text
                 tool_part["ok"] = True
-            yield {
-                "event": "tool_result",
-                "data": json.dumps(
-                    {
-                        "id": str(call_id),
-                        "name": event.get("name", ""),
-                        "content": output_text,
-                        "ok": True,
-                    }
-                ),
-            }
+            yield _tool_result_event(tool_id, event.get("name", ""), output_text, True)
             image_part = _image_part_from_result(
                 event.get("name", ""), output_text
             )
@@ -1336,26 +1438,17 @@ async def _stream_chat_events(req: ChatRequest, user: dict):
                 }
         elif kind == "on_tool_error":
             call_id = event.get("run_id", "")
-            if call_id not in tools_by_id:
+            tool_id = run_to_tool_id.get(call_id, call_id)
+            if tool_id not in tools_by_id:
                 continue
             error_text = str(event["data"].get("error", ""))
-            tools_by_id[call_id]["result"] = error_text
-            tools_by_id[call_id]["ok"] = False
-            tool_part = parts_by_tool_id.get(str(call_id))
+            tools_by_id[tool_id]["result"] = error_text
+            tools_by_id[tool_id]["ok"] = False
+            tool_part = parts_by_tool_id.get(tool_id)
             if tool_part is not None:
                 tool_part["result"] = error_text
                 tool_part["ok"] = False
-            yield {
-                "event": "tool_result",
-                "data": json.dumps(
-                    {
-                        "id": str(call_id),
-                        "name": event.get("name", ""),
-                        "content": error_text,
-                        "ok": False,
-                    }
-                ),
-            }
+            yield _tool_result_event(tool_id, event.get("name", ""), error_text, False)
     yield {"event": "done", "data": "{}"}
     blocks.close()
     if req.generate_title and req.messages:

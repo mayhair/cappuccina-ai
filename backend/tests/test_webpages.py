@@ -458,6 +458,146 @@ def test_stream_emits_webpage_event_and_persists_part(signed_in, monkeypatch):
     assert tool_parts[0]["args"] == {"path": "index.html", "bytes": len(PAGE.encode())}
 
 
+def test_stream_shows_tool_call_before_arguments_finish(signed_in, monkeypatch):
+    """The card is announced while the model streams the tool arguments.
+
+    A webpage write carries the whole page in its arguments, so waiting for
+    on_tool_start would hide the call until generation is nearly done.
+    """
+    import app.main as main
+    from types import SimpleNamespace
+
+    chat = signed_in.post("/api/v1/chats", json={"mode": "chat"}).json()
+    user = db.get_user_by_email("kid@example.com")
+    assert user is not None
+    env = db.put_webpage_file(user["id"], chat["id"], "index.html", PAGE)
+    marker = _marker(env["id"], "index.html", ["index.html"])
+
+    def chunk(name, args, call_id):
+        return SimpleNamespace(
+            content="",
+            additional_kwargs={},
+            tool_call_chunks=[
+                {
+                    "name": name,
+                    "args": args,
+                    "id": call_id,
+                    "index": 0,
+                    "type": "tool_call_chunk",
+                }
+            ],
+        )
+
+    class FakeGraph:
+        async def astream_events(self, state, config=None, version=None):
+            yield {"event": "on_chat_model_start", "data": {}}
+            # The model announces the tool, then streams the page content.
+            yield {
+                "event": "on_chat_model_stream",
+                "data": {"chunk": chunk("write_webpage_file", "", "call_1")},
+            }
+            yield {
+                "event": "on_chat_model_stream",
+                "data": {
+                    "chunk": chunk(None, '{"path": "index.html", "content": "', None)
+                },
+            }
+            yield {
+                "event": "on_chat_model_stream",
+                "data": {"chunk": chunk(None, PAGE + '"}', None)},
+            }
+            yield {
+                "event": "on_tool_start",
+                "run_id": "r1",
+                "name": "write_webpage_file",
+                "data": {"input": {"path": "index.html", "content": PAGE}},
+            }
+            yield {
+                "event": "on_tool_end",
+                "run_id": "r1",
+                "name": "write_webpage_file",
+                "data": {"output": marker},
+            }
+
+    monkeypatch.setattr(main, "GRAPH", FakeGraph())
+    res = signed_in.post(
+        "/api/v1/chat/stream",
+        json={
+            "chatId": chat["id"],
+            "messages": [{"role": "user", "content": "make me a page"}],
+            "generateTitle": False,
+        },
+    )
+    assert res.status_code == 200
+    events = _sse_events(res.text)
+    # Announced before the arguments finished, then again with the real args.
+    assert len(events["tool_call"]) == 2
+    assert events["tool_call"][0]["id"] == "call_1"
+    assert events["tool_call"][0]["display"] == "Building Webpage"
+    assert events["tool_call"][1]["id"] == "call_1"
+    assert events["tool_call"][1]["args"] == {
+        "path": "index.html",
+        "bytes": len(PAGE.encode()),
+    }
+    # The result lands on the same card.
+    assert events["tool_result"][0]["id"] == "call_1"
+
+    stored = signed_in.get("/api/v1/chats").json()
+    assistant = stored[0]["messages"][-1]
+    tool_parts = [p for p in assistant["parts"] if p.get("type") == "tool"]
+    assert len(tool_parts) == 1
+    assert tool_parts[0]["id"] == "call_1"
+    assert tool_parts[0]["result"] == marker
+
+
+def test_stream_closes_a_tool_call_that_never_runs(signed_in, monkeypatch):
+    """A streamed call the graph never runs must not spin forever."""
+    import app.main as main
+    from types import SimpleNamespace
+
+    chat = signed_in.post("/api/v1/chats", json={"mode": "chat"}).json()
+
+    def chunk(name, args, call_id):
+        return SimpleNamespace(
+            content="",
+            additional_kwargs={},
+            tool_call_chunks=[
+                {
+                    "name": name,
+                    "args": args,
+                    "id": call_id,
+                    "index": 0,
+                    "type": "tool_call_chunk",
+                }
+            ],
+        )
+
+    class FakeGraph:
+        async def astream_events(self, state, config=None, version=None):
+            yield {"event": "on_chat_model_start", "data": {}}
+            yield {
+                "event": "on_chat_model_stream",
+                "data": {"chunk": chunk("made_up_tool", "", "call_x")},
+            }
+            # The graph rejected the call; the next turn starts without a run.
+            yield {"event": "on_chat_model_start", "data": {}}
+
+    monkeypatch.setattr(main, "GRAPH", FakeGraph())
+    res = signed_in.post(
+        "/api/v1/chat/stream",
+        json={
+            "chatId": chat["id"],
+            "messages": [{"role": "user", "content": "hi"}],
+            "generateTitle": False,
+        },
+    )
+    assert res.status_code == 200
+    events = _sse_events(res.text)
+    assert events["tool_call"][0]["id"] == "call_x"
+    assert events["tool_result"][0]["id"] == "call_x"
+    assert events["tool_result"][0]["ok"] is False
+
+
 def test_nonstream_chat_persists_webpage_part(signed_in, monkeypatch):
     import app.main as main
     from langchain_core.messages import AIMessage, ToolMessage

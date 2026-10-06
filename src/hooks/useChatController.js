@@ -623,10 +623,22 @@ export function useChatController(enabled) {
             result: null,
             ok: null,
           }
-          patchNode(chatId, replyId, (m) => ({
-            parts: [...(m.parts ?? []), tool],
-            tools: [...(m.tools ?? []), { ...tool }],
-          }))
+          // A tool call is announced twice: once while the model streams its
+          // name (so the card shows during a long argument, like a webpage
+          // write) and again when it starts running with the real args. Upsert
+          // by id so both land on one card.
+          patchNode(chatId, replyId, (m) => {
+            const update = { name: tool.name, display: tool.display, args: tool.args, label: tool.label }
+            const parts = [...(m.parts ?? [])]
+            const at = parts.findIndex((p) => p.type === 'tool' && p.id === call.id)
+            if (at === -1) parts.push(tool)
+            else parts[at] = { ...parts[at], ...update }
+            const tools = [...(m.tools ?? [])]
+            const toolAt = tools.findIndex((t) => t.id === call.id)
+            if (toolAt === -1) tools.push({ ...tool })
+            else tools[toolAt] = { ...tools[toolAt], ...update }
+            return { parts, tools }
+          })
         },
         onToolResult: (result) => {
           patchNode(chatId, replyId, (m) => ({
