@@ -2559,13 +2559,15 @@ a.settings-save { text-decoration: none; display: inline-flex; align-items: cent
 }
 
 /* ---------- webpage canvas ---------- */
-/* The chat and the canvas share the row; the chat keeps its minimum width and
-   the canvas takes the rest. Same glass language as the sidebar. */
+/* The chat and the canvas share the row. The canvas keeps a width of its own
+   (driven by the viewport, never by the length of the chat's messages), so the
+   page does not resize as the conversation grows; the chat takes the rest.
+   With the sidebar out of the way there is more room, so the canvas grows. */
 .webpage-canvas {
   position: relative;
   z-index: 2;
-  flex: 1 1 46%;
-  min-width: 320px;
+  flex: 0 0 auto;
+  width: clamp(340px, 30vw, 600px);
   margin-left: clamp(14px, 1.6vw, 28px);
   display: flex;
   flex-direction: column;
@@ -2577,7 +2579,12 @@ a.settings-save { text-decoration: none; display: inline-flex; align-items: cent
   box-shadow: var(--shadow);
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
+  transition: width 280ms cubic-bezier(0.4, 0, 0.2, 1);
   animation: pop 240ms cubic-bezier(0.2, 0.9, 0.3, 1.15) both;
+}
+
+.app.is-collapsed .webpage-canvas {
+  width: clamp(400px, 38vw, 780px);
 }
 
 /* Fullscreen: the canvas covers the whole browser window, whatever size the
@@ -2588,6 +2595,7 @@ a.settings-save { text-decoration: none; display: inline-flex; align-items: cent
   inset: 0;
   z-index: 80;
   flex: none;
+  width: auto;
   margin: 0;
   min-width: 0;
   border: none;
@@ -3032,10 +3040,12 @@ a.settings-save { text-decoration: none; display: inline-flex; align-items: cent
 
 /* Below this width the chat needs the room: the canvas overlays it instead. */
 @media (max-width: 1100px) {
-  .webpage-canvas {
+  .webpage-canvas,
+  .app.is-collapsed .webpage-canvas {
     position: fixed;
     inset: 3vh 2.3vw 2.6vh 2.3vw;
     z-index: 40;
+    width: auto;
     margin: 0;
     min-width: 0;
   }
