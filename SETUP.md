@@ -299,7 +299,7 @@ Same URL: **http://localhost:5173**. Drop `--reload` for a calmer backend log.
 | Search tool fails, chat is fine | Missing/invalid `PARALLEL_API_KEY` in `backend/.env` |
 | Model errors on startup | Missing `OPENROUTER_API_KEY`, or `MODEL_ID` your key can't access |
 | Thinking blocks always say "Thinking..." | Stale DB from before durations were stored — fixed going forward; old rows show "Thought" |
-| Weird local state | Delete `backend/data/cappuccina.db` to reset all chats (fresh `CREATE TABLE`s + migrations re-run on next start) |
+| Weird local state | Delete `backend/data/` to reset all chats and stored files (fresh `CREATE TABLE`s + migrations re-run on next start) |
 | `pip install` fails on Windows | Use a matching Python 3.11+ from python.org; avoid the Store shim (`py -m pip install -r requirements.txt`) |
 | Playwright `Executable doesn't exist` | Run `npx playwright install chromium` |
 
@@ -310,7 +310,7 @@ Same URL: **http://localhost:5173**. Drop `--reload` for a calmer backend log.
   client (`gmail.py`), schemas, SQLite (`db.py`), config
 - `backend/agent/` — LangGraph (`graph.py`), model factory, tools
 - `backend/tests/` — pytest suite (auth, linking, token refresh, Gmail)
-- `backend/data/` — SQLite file + `sites/` webpage workspaces (both created at
-  runtime, ignored by git)
+- `backend/data/` — SQLite file + sharded `attachments/`, `images/` and
+  `sites/` trees (all created at runtime, ignored by git)
 - `scripts/` — Playwright verification scripts + `dev-all.mjs` (dual runner)
 - `assets/` — static images served as `/plates/...`

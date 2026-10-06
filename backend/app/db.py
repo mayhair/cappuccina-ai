@@ -15,8 +15,14 @@ from typing import Any
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 DB_PATH = DATA_DIR / "cappuccina.db"
 
-# Generated image bytes live here as {image_id}.{ext}; the images table holds
-# the metadata. Derived from DATA_DIR at call time so tests that repoint
+# Files are fanned out into 256 buckets named by the first two hex characters
+# of their UUID, so no single directory accumulates an unbounded file count.
+def _shard(file_id: str) -> Path:
+    return Path(file_id[:2])
+
+
+# Generated image bytes live here as {shard}/{image_id}.{ext}; the images table
+# holds the metadata. Derived from DATA_DIR at call time so tests that repoint
 # DATA_DIR get an isolated images directory too.
 def images_dir() -> Path:
     return DATA_DIR / "images"
@@ -31,18 +37,24 @@ _IMAGE_EXTENSIONS = {
 
 
 def image_file_path(image_id: str, mime: str) -> Path:
-    return images_dir() / f"{image_id}.{_IMAGE_EXTENSIONS.get(mime, 'png')}"
+    return images_dir() / _shard(image_id) / f"{image_id}.{_IMAGE_EXTENSIONS.get(mime, 'png')}"
 
 
-# Uploaded attachments (user files) live here as {attachment_id}.{ext}. The
-# original filename is kept in the attachments table for display only — it is
-# never used to build a path, so it can't escape this directory.
+# Uploaded attachments (user files) live here as {shard}/{attachment_id}.{ext}.
+# The original filename is kept in the attachments table for display only — it
+# is never used to build a path, so it can't escape this directory.
 def attachments_dir() -> Path:
     return DATA_DIR / "attachments"
 
 
 def attachment_file_path(attachment_id: str, filename: str) -> Path:
-    return attachments_dir() / f"{attachment_id}{Path(filename or '').suffix.lower()}"
+    return attachments_dir() / _shard(attachment_id) / f"{attachment_id}{Path(filename or '').suffix.lower()}"
+
+
+# Write bytes, creating the shard directory on first use.
+def _write_sharded(path: Path, data: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(data)
 
 
 SESSION_TTL = timedelta(days=30)
@@ -932,8 +944,7 @@ def create_image(
     full-history sync payloads.
     """
     image_id = uuid.uuid4().hex
-    images_dir().mkdir(parents=True, exist_ok=True)
-    image_file_path(image_id, mime).write_bytes(data)
+    _write_sharded(image_file_path(image_id, mime), data)
     conn = get_conn()
     conn.execute(
         "INSERT INTO images (id, user_id, chat_id, mime, size_bytes, width,"
@@ -984,8 +995,7 @@ def create_attachment(
     neither bytes nor extracted text flow through full-history sync payloads.
     """
     attachment_id = uuid.uuid4().hex
-    attachments_dir().mkdir(parents=True, exist_ok=True)
-    attachment_file_path(attachment_id, filename).write_bytes(data)
+    _write_sharded(attachment_file_path(attachment_id, filename), data)
     conn = get_conn()
     conn.execute(
         "INSERT INTO attachments (id, user_id, chat_id, filename, mime, kind,"

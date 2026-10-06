@@ -75,7 +75,9 @@ last_used: dict[str, float] = {}
 def sites_root() -> Path:
     """Host directory holding one workspace per site.
 
-    Resolved on every call (never at import) so tests that repoint
+    Workspaces are fanned out into 256 buckets named by the first two hex
+    characters of the site id, so no single directory accumulates unbounded
+    entries. Resolved on every call (never at import) so tests that repoint
     db.DATA_DIR get an isolated site root for free.
     """
     return db.DATA_DIR / "sites"
@@ -93,11 +95,13 @@ def _preview_base(site: dict) -> str:
 def workspace_dir(site_id: str) -> Path:
     """Return (creating if needed) the host directory bound to /workspace.
 
-    The container runs as the unprivileged `node` user, so the directory has
-    to be world-writable; chmod is best-effort because it is a no-op-ish on
-    Windows and can be refused on some mounts.
+    The workspace lives at sites/<site_id[:2]>/<site_id> so the sites tree does
+    not grow one flat directory per site. The container runs as the
+    unprivileged `node` user, so the directory has to be world-writable; chmod
+    is best-effort because it is a no-op-ish on Windows and can be refused on
+    some mounts.
     """
-    path = sites_root() / site_id
+    path = sites_root() / site_id[:2] / site_id
     os.makedirs(path, exist_ok=True)
     try:
         os.chmod(path, 0o777)
