@@ -118,6 +118,22 @@ def test_is_image_and_is_document():
     assert not documents.is_document("song.mp3")
 
 
+def test_is_asset():
+    assert documents.is_asset("song.MP3")
+    assert documents.is_asset("clip.mp4")
+    assert documents.is_asset("fonts/app.woff2")
+    assert not documents.is_asset("notes.txt")
+    assert not documents.is_asset("photo.jpg")
+    assert documents.mime_for("song.mp3") == "audio/mpeg"
+    assert documents.mime_for("fonts/app.woff2") == "font/woff2"
+
+
+def test_human_size():
+    assert documents.human_size(512) == "512 B"
+    assert documents.human_size(2048) == "2 KB"
+    assert documents.human_size(3 * 1024 * 1024) == "3.0 MB"
+
+
 # ---------- image downscaling ----------
 
 def _png_bytes(width: int, height: int, mode: str = "RGB") -> bytes:
@@ -228,11 +244,44 @@ def test_upload_downscales_oversized_image(signed_in):
         assert image.size[0] * image.size[1] <= documents.MAX_IMAGE_PIXELS
 
 
+def test_upload_asset_keeps_bytes_no_text(signed_in):
+    chat = _chat(signed_in)
+    res = signed_in.post(
+        "/api/v1/attachments",
+        files={"file": ("song.mp3", b"ID3\x00fake-audio", "audio/mpeg")},
+        data={"chatId": chat["id"]},
+    )
+    assert res.status_code == 200
+    body = res.json()
+    assert body["kind"] == "asset"
+    assert body["mime"] == "audio/mpeg"
+    assert body["charCount"] == 0
+
+    user = db.get_user_by_email("kid@example.com")
+    row = db.get_attachment(user["id"], body["id"])
+    assert row["text"] == ""
+    path = db.attachment_file_path(row["id"], row["filename"])
+    assert path.read_bytes() == b"ID3\x00fake-audio"
+
+
+def test_upload_rejects_oversized_asset(signed_in, monkeypatch):
+    import app.main as main
+
+    monkeypatch.setattr(main, "MAX_ASSET_BYTES", 4)
+    chat = _chat(signed_in)
+    res = signed_in.post(
+        "/api/v1/attachments",
+        files={"file": ("song.mp3", b"12345", "audio/mpeg")},
+        data={"chatId": chat["id"]},
+    )
+    assert res.status_code == 413
+
+
 def test_upload_rejects_unsupported_type(signed_in):
     chat = _chat(signed_in)
     res = signed_in.post(
         "/api/v1/attachments",
-        files={"file": ("clip.mp3", b"\x00\x01", "audio/mpeg")},
+        files={"file": ("archive.zip", b"PK\x03\x04", "application/zip")},
         data={"chatId": chat["id"]},
     )
     assert res.status_code == 415
@@ -375,6 +424,25 @@ def test_read_attachment_tool_rejects_image(signed_in):
     assert "image" in out.lower()
 
 
+def test_read_attachment_tool_points_asset_at_add_webpage_asset(signed_in):
+    from agent import tools
+
+    chat = _chat(signed_in)
+    user = db.get_user_by_email("kid@example.com")
+    row = db.create_attachment(
+        user["id"], chat["id"], "song.mp3", b"ID3\x00fake", kind="asset",
+        mime="audio/mpeg",
+    )
+    out = tools.read_attachment.invoke(
+        {"attachment_id": row["id"]},
+        config={"configurable": {"user_id": user["id"]}},
+    )
+    assert "song.mp3" in out
+    assert "add_webpage_asset" in out
+    assert row["id"] in out
+    assert "can't be read" in out
+
+
 # ---------- prompt-state expansion ----------
 
 def _chat_request(chat_id, parts):
@@ -426,6 +494,28 @@ def test_state_points_to_document_for_tool(signed_in):
     assert "notes.txt" in pointer
     assert row["id"] in pointer
     assert pointer == f'[Attached file "notes.txt" (id={row["id"]})]'
+
+
+def test_state_points_to_asset_binary_for_webpage(signed_in):
+    import app.main as main
+
+    chat = _chat(signed_in)
+    user = db.get_user_by_email("kid@example.com")
+    row = db.create_attachment(
+        user["id"], chat["id"], "song.mp3", b"ID3\x00fake", kind="asset",
+        mime="audio/mpeg",
+    )
+    req = _chat_request(
+        chat["id"],
+        [{"type": "attachment", "attachmentId": row["id"], "kind": "asset"}],
+    )
+    state = main._state(req, user)
+    content = state["messages"][0].content
+    pointer = content[1]["text"]
+    assert "song.mp3" in pointer
+    assert row["id"] in pointer
+    assert "add_webpage_asset" in pointer
+    assert "no readable text" in pointer
 
 
 def test_state_without_attachments_is_plain_text(signed_in):

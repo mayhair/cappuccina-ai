@@ -118,6 +118,21 @@ def test_attachments_keep_their_own_extension_and_mime(isolated_db):
     ]
 
 
+def test_an_unreadable_media_attachment_is_copied(isolated_db):
+    user, chat = _user_and_chat()
+    _write(user, chat, "index.html", INDEX)
+    song = _attachment(
+        user, chat, "song.mp3", b"ID3\x00fake-audio",
+        kind="asset", mime="audio/mpeg",
+    )
+
+    added = json.loads(_add(user, chat, "audio/song.mp3", attachment_id=song["id"]))
+    assert added["path"] == "audio/song.mp3"
+    assert added["mime"] == "audio/mpeg"
+    assert added["bytes"] == len(b"ID3\x00fake-audio")
+    assert (_workspace(user, chat) / "audio" / "song.mp3").read_bytes() == b"ID3\x00fake-audio"
+
+
 def test_sources_are_checked(isolated_db):
     user, chat = _user_and_chat()
     image = _image(user, chat)
@@ -177,7 +192,7 @@ def test_asset_size_cap(isolated_db, monkeypatch):
 
     monkeypatch.setattr(tools, "_WEBPAGE_ASSET_LIMIT", 400)
     out = _add(user, chat, "cat.png", image_id=image["id"])
-    assert out == "That file is too big for the page folder (10 MB max)."
+    assert out == "That file is too big for the page folder (20 MB max)."
 
 
 def test_a_copied_picture_reads_back_as_a_picture(isolated_db):

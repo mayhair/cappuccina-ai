@@ -21,7 +21,7 @@ from sympy.parsing.sympy_parser import (
 )
 
 from agent import lorebook
-from app import calendar, db, gmail, sitebox, webpage_git
+from app import calendar, db, documents, gmail, sitebox, webpage_git
 from app.config import (
     CHARACTER_REF_IMAGES,
     IMAGE_MODEL_ID,
@@ -487,15 +487,22 @@ ATTACHMENT_CHUNK = 20_000
 
 @tool
 def read_attachment(attachment_id: str, config: RunnableConfig, offset: int = 0) -> str:
-    """Read the text of a file the user attached to this chat. Use the id shown in the message (for example, call this with the id from 'Attached file "report.pdf" (id=...)'). Long files come back in chunks: if the result says more remains, call again with offset set to where the previous read stopped."""
+    """Read the text of a file the user attached to this chat. Use the id shown in the message (for example, call this with the id from 'Attached file "report.pdf" (id=...)'). Long files come back in chunks: if the result says more remains, call again with offset set to where the previous read stopped. Only documents and text files have text; an image can be seen directly, and a media or font file (audio, video, woff2) is binary — put that on a webpage with add_webpage_asset instead."""
     user_id = _user_id(config)
     if not user_id:
         return "That file isn't available right now."
     row = db.get_attachment(user_id, attachment_id)
     if row is None:
         return "I couldn't find that attachment."
-    if row["kind"] != "document":
+    if row["kind"] == "image":
         return f"{row['filename']} is an image — you can see it directly."
+    if row["kind"] == "asset":
+        return (
+            f"{row['filename']} is a binary file ({row['mime']}, "
+            f"{documents.human_size(row['size_bytes'])}) — its contents can't be "
+            "read. To use it on the website, call add_webpage_asset with "
+            f"attachment_id={row['id']}."
+        )
     text = row["text"] or ""
     if not text:
         return f"{row['filename']} has no readable text."
@@ -743,7 +750,7 @@ _WEBPAGE_PATH_SEGMENTS = 10
 _WEBPAGE_FILE_LIMIT = 1_000_000
 _WEBPAGE_READ_LIMIT = 200_000
 _WEBPAGE_LIST_LIMIT = 200
-_WEBPAGE_ASSET_LIMIT = 10_000_000
+_WEBPAGE_ASSET_LIMIT = 20_000_000
 
 _WEBPAGE_TIMEOUT_MAX = 600
 
@@ -873,7 +880,7 @@ def read_webpage_file(path: str, config: RunnableConfig) -> str:
 def add_webpage_asset(
     path: str, config: RunnableConfig, image_id: str = "", attachment_id: str = ""
 ) -> str:
-    """Put a picture or file into the website's folder so the page can show or link it. Pass exactly one source: `image_id` for a picture you drew in this chat (the id from a generate_image or image_edit result), or `attachment_id` for a file the user attached. `path` is the name the page uses — keep the file's own extension, for example "cat.png", "photo.jpg" or "report.pdf", in whatever folder you like — and reference it from the page with that same name: `<img src="cat.png">`, `background-image: url(img/cat.png)` or `<a href="report.pdf">`. Use this whenever the user wants a picture or a file of theirs on the website; write the page with write_webpage_file first, then add the pictures it shows."""
+    """Put a picture or file into the website's folder so the page can show or link it. Pass exactly one source: `image_id` for a picture you drew in this chat (the id from a generate_image or image_edit result), or `attachment_id` for a file the user attached — including media and font attachments you can't read, such as a song or a clip. `path` is the name the page uses — keep the file's own extension, for example "cat.png", "photo.jpg", "report.pdf", "song.mp3", "clip.mp4" or "fonts/app.woff2", in whatever folder you like — and reference it from the page with that same name: `<img src="cat.png">`, `background-image: url(img/cat.png)`, `<a href="report.pdf">`, `<audio controls src="song.mp3">`, `<video controls src="clip.mp4">` or `@font-face { src: url(fonts/app.woff2) }`. Use this whenever the user wants a picture or a file of theirs on the website; write the page with write_webpage_file first, then add the pictures and files it uses."""
     user_id = _user_id(config)
     chat_id = _chat_id(config)
     if not user_id or not chat_id:
@@ -894,7 +901,7 @@ def add_webpage_asset(
             f"like cat{suffix}."
         )
     if len(data) > _WEBPAGE_ASSET_LIMIT:
-        return "That file is too big for the page folder (10 MB max)."
+        return "That file is too big for the page folder (20 MB max)."
     site = db.get_webpage_site(user_id, chat_id)
     if site is None:
         return "There's no webpage yet — write index.html with write_webpage_file first."

@@ -225,6 +225,9 @@ const ATTACH_ACCEPT = [
   '.py', '.js', '.jsx', '.ts', '.tsx', '.html', '.htm', '.css', '.xml',
   '.yaml', '.yml', '.ini', '.cfg', '.toml', '.sql', '.sh', '.java', '.c',
   '.h', '.cpp', '.go', '.rs', '.rb', '.php', '.tex',
+  '.mp3', '.wav', '.ogg', '.m4a', '.aac', '.flac', '.opus',
+  '.mp4', '.webm', '.mov',
+  '.woff', '.woff2', '.ttf', '.otf', '.ico',
 ].join(',')
 
 function formatSize(bytes) {

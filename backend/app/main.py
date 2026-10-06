@@ -424,7 +424,9 @@ def _attachment_blocks(parts, user_id: str) -> list[dict]:
     Images become vision (`image_url`) blocks read from disk. Documents become
     a text pointer naming the file and its id â€” the model calls read_attachment
     to pull the extracted text on demand, so document bodies never sit in the
-    prompt or in the stored history.
+    prompt or in the stored history. Assets (audio, video, fonts) become a
+    pointer saying they are binary and can be placed on a webpage with
+    add_webpage_asset.
     """
     blocks: list[dict] = []
     for part in parts or []:
@@ -453,6 +455,18 @@ def _attachment_blocks(parts, user_id: str) -> list[dict]:
                 {
                     "type": "text",
                     "text": f'[Attached image "{row["filename"]}" (id={row['id']})]',
+                }
+            )
+        elif row["kind"] == "asset":
+            blocks.append(
+                {
+                    "type": "text",
+                    "text": (
+                        f'[Attached file "{row["filename"]}" (id={row["id"]}, '
+                        f'{row["mime"]}, {documents.human_size(row["size_bytes"])}) '
+                        "- binary file with no readable text; to use it on a webpage "
+                        f'call add_webpage_asset with attachment_id={row["id"]}]'
+                    ),
                 }
             )
         else:
@@ -1234,6 +1248,7 @@ async def webpage_preview(chat_id: str, key: str, path: str) -> Response:
 
 MAX_IMAGE_BYTES = 20 * 1024 * 1024
 MAX_DOCUMENT_BYTES = 10 * 1024 * 1024
+MAX_ASSET_BYTES = 20 * 1024 * 1024
 
 
 def _attachment_response(row) -> dict:
@@ -1254,7 +1269,9 @@ async def upload_attachment(
     user=Depends(current_user),
 ) -> dict:
     """Store one uploaded file. Images keep their bytes; documents are parsed
-    to text here so read_attachment can serve it without re-parsing."""
+    to text here so read_attachment can serve it without re-parsing. Assets
+    (audio, video, fonts) keep their bytes with no text — the model places them
+    on a webpage with add_webpage_asset."""
     if db.get_chat(user["id"], chat_id) is None:
         raise HTTPException(status_code=404, detail="Chat not found")
     filename = (file.filename or "file").strip() or "file"
@@ -1276,11 +1293,16 @@ async def upload_attachment(
         except documents.UnsupportedDocument as exc:
             raise HTTPException(status_code=415, detail=str(exc))
         kind, mime = "document", documents.mime_for(filename)
+    elif documents.is_asset(filename):
+        if len(data) > MAX_ASSET_BYTES:
+            raise HTTPException(status_code=413, detail="That file is too large (20MB max)")
+        kind, text, mime = "asset", "", documents.mime_for(filename)
     else:
         raise HTTPException(
             status_code=415,
             detail="That file type isn't supported. Try an image, PDF, Word, "
-            "PowerPoint, Excel, or a text file.",
+            "PowerPoint, Excel, a text file, or a media/font file (audio, "
+            "video, woff2).",
         )
     if not data:
         raise HTTPException(status_code=400, detail="That file is empty")

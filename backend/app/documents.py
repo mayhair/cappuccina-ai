@@ -1,9 +1,12 @@
-"""Extract plain text from uploaded documents for the read_attachment tool.
+"""Classify uploaded files for the read_attachment tool.
 
-Only a small allowlist of formats is parsed. The upload endpoint rejects
-anything else before it reaches storage, so a document attachment always has
-text behind it. Parsing is best-effort: a file that looks right but cannot be
-read raises UnsupportedDocument with a message the API can return.
+Three kinds of attachment exist. Images travel to the model as vision blocks and
+are never "read". Documents are parsed to text here. Assets (audio, video,
+fonts) are binary and have no readable text — they are stored raw so the model
+can place them on a webpage with add_webpage_asset. The upload endpoint rejects
+anything outside these allowlists before it reaches storage. Document parsing is
+best-effort: a file that looks right but cannot be read raises
+UnsupportedDocument with a message the API can return.
 """
 
 from __future__ import annotations
@@ -37,6 +40,27 @@ _TEXT_EXTENSIONS = {
 
 DOCUMENT_EXTENSIONS = set(_DOCUMENT_MIMES) | _TEXT_EXTENSIONS
 
+# Binary files a webpage can use (audio/video players, embedded fonts, favicon).
+# They hold no text to read; the model copies them into the site folder with
+# add_webpage_asset. Kept next to the other allowlists so the upload endpoint,
+# the picker and the tools agree on what counts as an asset.
+ASSET_MIMES = {
+    ".mp3": "audio/mpeg",
+    ".wav": "audio/wav",
+    ".ogg": "audio/ogg",
+    ".m4a": "audio/mp4",
+    ".aac": "audio/aac",
+    ".flac": "audio/flac",
+    ".mp4": "video/mp4",
+    ".webm": "video/webm",
+    ".mov": "video/quicktime",
+    ".woff": "font/woff",
+    ".woff2": "font/woff2",
+    ".ttf": "font/ttf",
+    ".otf": "font/otf",
+    ".ico": "image/x-icon",
+}
+
 # Cap the stored text so an enormous document can't fill the DB or the model's
 # context. read_attachment pages through whatever is under this limit.
 MAX_EXTRACTED_CHARS = 200_000
@@ -58,12 +82,27 @@ def is_document(filename: str) -> bool:
     return extension_of(filename) in DOCUMENT_EXTENSIONS
 
 
+def is_asset(filename: str) -> bool:
+    return extension_of(filename) in ASSET_MIMES
+
+
+def human_size(num_bytes: int) -> str:
+    """A short, human-readable size like "3.2 MB" for pointers and tool output."""
+    if num_bytes < 1024:
+        return f"{num_bytes} B"
+    if num_bytes < 1024 * 1024:
+        return f"{round(num_bytes / 1024)} KB"
+    return f"{num_bytes / (1024 * 1024):.1f} MB"
+
+
 def mime_for(filename: str) -> str:
     ext = extension_of(filename)
     if ext in IMAGE_MIMES:
         return IMAGE_MIMES[ext]
     if ext in _DOCUMENT_MIMES:
         return _DOCUMENT_MIMES[ext]
+    if ext in ASSET_MIMES:
+        return ASSET_MIMES[ext]
     guessed, _ = mimetypes.guess_type(filename)
     return guessed or "application/octet-stream"
 
