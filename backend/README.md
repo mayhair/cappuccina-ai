@@ -50,11 +50,15 @@ Chat:
 
 Webpage environments (the canvas a built page renders in):
 
-- `GET /api/v1/webpages/{chat_id}` — `{webpageId, files, updatedAt, activeVersionId}`
+- `GET /api/v1/webpages/{chat_id}` — `{webpageId, files, assets, updatedAt, activeVersionId}`
   for the chat's page (empty `files` before anything is written). File text lives
   only here; messages carry a small `{type: "webpage", webpageId, files}` part and
   the `webpage` SSE event carries each write's text (plus its `versionId`) for the
-  live preview.
+  live preview. `assets` is the folder's binary side, metadata only
+  (`{path: {mime, size}}`).
+- `GET /api/v1/webpages/{chat_id}/assets/{path}` — one asset's bytes, user- and
+  chat-scoped. The canvas fetches these itself and inlines them into the preview
+  as data URIs, because the preview iframe is sandboxed without same-origin.
 - `GET /api/v1/webpages/{chat_id}/versions` — `{activeVersionId, versions}`: every
   iteration (one per AI run, or one per manual save) with its changed-file and
   ±line counts, oldest first. Capped at `db.WEBPAGE_VERSION_LIMIT` (50) per chat;
@@ -92,10 +96,10 @@ the connected calendar's zone, then UTC), so long chats always read the live dat
 - `app/google_oauth.py` — OAuth code flow, token encryption, refresh
 - `app/gmail.py` — Gmail REST client (search/read/draft/send) over httpx
 - `app/calendar.py` — Calendar REST client (list/read/create/update/delete) over httpx
-- `app/db.py` — SQLite (users, sessions, chats, messages, google_grants, oauth_states, images, attachments, webpage_envs, webpage_versions)
+- `app/db.py` — SQLite (users, sessions, chats, messages, google_grants, oauth_states, images, attachments, webpage_envs, webpage_versions, webpage_assets)
 - `app/tts.py` — Fish Audio TTS proxy: pending jobs + MP3 streaming
 - `agent/graph.py` — LangGraph: `call_model -> (tool?) -> tools -> call_model ... -> END`; appends the FMHY ad-blocker safety note as a system message after FMHY tools run
-- `agent/tools.py` — `solve_equation`, `web_search`, `read_webpage`, `lore_lookup`, `generate_image`/`image_edit` (accept a `characters` argument to attach lore reference looks), `read_attachment`, `write_webpage_file`/`read_webpage_file` (build and edit the chat's webpage canvas), `search_emails`, `read_email`, `draft_email`, `list_events`, `read_event`, `create_event`, `update_event`, `propose_event_deletion`
+- `agent/tools.py` — `solve_equation`, `web_search`, `read_webpage`, `lore_lookup`, `generate_image`/`image_edit` (accept a `characters` argument to attach lore reference looks), `read_attachment`, `write_webpage_file`/`add_webpage_asset`/`read_webpage_file` (build and edit the chat's webpage canvas; the asset tool copies a generated picture or a user attachment into the page's folder), `search_emails`, `read_email`, `draft_email`, `list_events`, `read_event`, `create_event`, `update_event`, `propose_event_deletion`
 - `agent/fmhy.py` — FMHY free-media tools (`fmhy_media_sites`, `fmhy_search`, `fmhy_get_links`, `fmhy_get_section`, `fmhy_list_sections`) discovered over MCP at startup (the server cache is force-refreshed once at startup); filters NSFW-tagged entries and gates use until the user insists. `fmhy_media_sites` is the recommended path for "where can I watch X" — FMHY lists sites, not titles, so a title is looked up by reading the guide's full sections (Stream Aggregators, Download Games, Ebooks, …) rather than searching for it; results are starred-first and capped
 - `agent/lorebook.py` — Cappuccina's lore book: `lore/characters/*.md` parsed into the system-prompt catalog + `lore_lookup` fuzzy name matching. An optional official look per character lives in `lore/characters/refs/{id}.{png,jpg,jpeg,webp}` (the assistant's own look is `refs/ballerina-cappuccina.*`) and is attached by the image tools (env `CHARACTER_REF_IMAGES`, on by default)
 - `agent/model.py` — model factory (OpenRouter, `MODEL_ID` env, `glm-5.3-flash` default)

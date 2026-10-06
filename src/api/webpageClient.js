@@ -59,3 +59,21 @@ export function getWebpageVersionDiff(chatId, versionId, against) {
   const query = against ? `?against=${encodeURIComponent(against)}` : ''
   return requestJson(`/api/v1/webpages/${chatId}/versions/${versionId}/diff${query}`)
 }
+
+// One folder asset's bytes as a data URL, for inlining into the preview: the
+// sandboxed iframe has no session, so it cannot fetch the asset route itself.
+// Asset paths may be nested, so each segment is encoded on its own.
+export async function getWebpageAssetDataUrl(chatId, path) {
+  const encoded = String(path).split('/').map(encodeURIComponent).join('/')
+  const res = await fetch(`/api/v1/webpages/${chatId}/assets/${encoded}`, {
+    credentials: 'include',
+  })
+  if (!res.ok) throw new Error(`asset failed: ${res.status}`)
+  const blob = await res.blob()
+  return await new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(String(reader.result))
+    reader.onerror = () => reject(reader.error ?? new Error('asset read failed'))
+    reader.readAsDataURL(blob)
+  })
+}

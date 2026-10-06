@@ -12,21 +12,12 @@ import {
 } from './Icons'
 import { assemblePreview, hasFiles, pickEntryFile } from '../lib/webpagePreview'
 import { highlightCode } from '../lib/highlightCode'
-import { getWebpageVersionDiff } from '../api/webpageClient'
-
-function fileList(files) {
-  return Object.keys(files).sort((a, b) => {
-    const entry = pickEntryFile(files)
-    if (a === entry) return -1
-    if (b === entry) return 1
-    return a.localeCompare(b)
-  })
-}
+import { getWebpageAssetDataUrl, getWebpageVersionDiff } from '../api/webpageClient'
 
 // One download: the same assembled document the preview shows, so a saved page
-// works on its own (linked styles/scripts are inlined).
-function downloadPage(files) {
-  const html = assemblePreview(files)
+// works on its own (linked styles/scripts and folder pictures are inlined).
+function downloadPage(files, assetUrls) {
+  const html = assemblePreview(files, assetUrls)
   if (!html) return
   const blob = new Blob([html], { type: 'text/html' })
   const url = URL.createObjectURL(blob)
@@ -37,6 +28,46 @@ function downloadPage(files) {
   a.click()
   a.remove()
   URL.revokeObjectURL(url)
+}
+
+// Assets never change once added, so their data URLs are fetched once per
+// session and kept here (a page's pictures are a handful, and this survives
+// switching iterations and tabs).
+const assetUrlCache = new Map()
+
+function cachedAssetUrl(chatId, path) {
+  return assetUrlCache.get(`${chatId}:${path}`)
+}
+
+async function loadAssetUrl(chatId, path) {
+  const key = `${chatId}:${path}`
+  if (assetUrlCache.has(key)) return assetUrlCache.get(key)
+  const url = await getWebpageAssetDataUrl(chatId, path)
+  assetUrlCache.set(key, url)
+  return url
+}
+
+// The page's text files first (the entry file on top), then the folder's
+// pictures, alphabetically — the order the canvas has always used for files.
+function fileList(files, assetNames) {
+  const entry = pickEntryFile(files)
+  return [...Object.keys(files), ...assetNames].sort((a, b) => {
+    const aAsset = assetNames.includes(a)
+    const bAsset = assetNames.includes(b)
+    if (aAsset !== bAsset) return aAsset ? 1 : -1
+    if (a === entry) return -1
+    if (b === entry) return 1
+    return a.localeCompare(b)
+  })
+}
+
+// How a folder picture reads in the file list: "812 KB".
+function assetSize(info) {
+  const size = info?.size ?? 0
+  if (size <= 0) return ''
+  if (size < 1024) return `${size} B`
+  if (size < 1024 * 1024) return `${Math.round(size / 1024)} KB`
+  return `${(size / (1024 * 1024)).toFixed(1)} MB`
 }
 
 // "AI run · 2 files · +8 −1" (or the edit's own label): what one iteration did.
@@ -70,6 +101,7 @@ function historyMeta(version) {
 export function WebpageCanvas({
   chatId,
   files,
+  assets,
   activeVersionId,
   versions,
   streaming,
@@ -91,13 +123,32 @@ export function WebpageCanvas({
   const [diff, setDiff] = useState({ files: [], truncated: false })
   const [diffFile, setDiffFile] = useState(null)
   const [diffLoading, setDiffLoading] = useState(false)
+  // {path: dataUrl} for the pictures the page folder shows, plus the ones still
+  // loading (the preview redraws as each arrives).
+  const [assetUrls, setAssetUrls] = useState({})
   const highlightRef = useRef(null)
   const editRef = useRef(null)
 
-  const names = useMemo(() => fileList(files ?? {}), [files])
-  const preview = useMemo(() => assemblePreview(files ?? {}), [files])
-  const shownFile = activeFile && activeFile in files ? activeFile : names[0] ?? null
+  const index = versions.findIndex((v) => v.id === activeVersionId)
+  const current = index >= 0 ? versions[index] : null
+  // The folder holds the pictures the active iteration had; without an
+  // iteration list (a page built before this change) it falls back to all of
+  // the environment's assets.
+  const assetNames = useMemo(() => {
+    const known = Object.keys(assets ?? {})
+    const shown = current ? current.assets ?? [] : known
+    return shown.filter((name) => known.includes(name)).sort()
+  }, [assets, current])
+  const names = useMemo(() => fileList(files ?? {}, assetNames), [files, assetNames])
+  const shownFile = activeFile && names.includes(activeFile) ? activeFile : names[0] ?? null
+  // A picture (or other binary) has no text to show or edit: the Code tab
+  // renders it, and the pencil stays away.
+  const shownAsset = Boolean(shownFile && assetNames.includes(shownFile))
   const shownCode = files?.[shownFile] ?? ''
+  const preview = useMemo(
+    () => assemblePreview(files ?? {}, assetUrls),
+    [files, assetUrls],
+  )
   const highlighted = useMemo(() => highlightCode(shownCode, shownFile), [shownCode, shownFile])
   // The same highlighting for the text being edited, rendered behind the
   // textarea. A trailing newline is padded so the pre keeps exactly as many
@@ -119,12 +170,9 @@ export function WebpageCanvas({
     pre.scrollLeft = area.scrollLeft
   }
 
-  const index = versions.findIndex((v) => v.id === activeVersionId)
-  const current = index >= 0 ? versions[index] : null
   // Switching mid-run would race the agent's own writes; the server refuses it
   // too, so the controls go quiet instead of throwing errors at the user.
   const canSwitch = !streaming && !busy && versions.length > 0
-
   // Nothing to show means the picker is the only useful view.
   useEffect(() => {
     if (!shownFile) setMenuOpen(true)
@@ -174,6 +222,26 @@ export function WebpageCanvas({
       cancelled = true
     }
   }, [tab, activeVersionId, chatId])
+
+  // The pictures the active iteration shows are fetched once (the module cache
+  // keeps them for the session) and inlined into the preview and the Code tab.
+  useEffect(() => {
+    if (!chatId || assetNames.length === 0) return
+    let cancelled = false
+    Promise.all(
+      assetNames.map((name) =>
+        loadAssetUrl(chatId, name)
+          .then((url) => [name, url])
+          .catch(() => [name, null]),
+      ),
+    ).then((entries) => {
+      if (cancelled) return
+      setAssetUrls(Object.fromEntries(entries.filter(([, url]) => url)))
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [chatId, assetNames])
 
   const refresh = () => setRevision((r) => r + 1)
   const pick = (name) => {
@@ -266,7 +334,7 @@ export function WebpageCanvas({
           <button type="button" className="canvas-icon-btn has-tip" data-tip="Refresh" aria-label="Refresh preview" onClick={refresh}>
             <RefreshIcon />
           </button>
-          <button type="button" className="canvas-icon-btn has-tip" data-tip="Download" aria-label="Download the page" onClick={() => downloadPage(files)}>
+          <button type="button" className="canvas-icon-btn has-tip" data-tip="Download" aria-label="Download the page" onClick={() => downloadPage(files, assetUrls)}>
             <DownloadIcon />
           </button>
           <button type="button" className="canvas-icon-btn has-tip" data-tip="Close" aria-label="Close canvas" onClick={onClose}>
@@ -418,6 +486,9 @@ export function WebpageCanvas({
                   >
                     <FileIcon />
                     <span className="canvas-file-name">{name}</span>
+                    {assetNames.includes(name) && (
+                      <span className="canvas-history-meta">{assetSize(assets?.[name])}</span>
+                    )}
                   </button>
                 ))}
               </div>
@@ -435,17 +506,34 @@ export function WebpageCanvas({
                 </button>
                 <FileIcon />
                 <span className="canvas-file-name">{shownFile}</span>
-                <button
-                  type="button"
-                  className="canvas-icon-btn canvas-edit-btn"
-                  aria-label={`Edit ${shownFile}`}
-                  disabled={streaming || busy || !onSaveFile}
-                  onClick={startEdit}
-                >
-                  <PencilIcon />
-                </button>
+                {!shownAsset && (
+                  <button
+                    type="button"
+                    className="canvas-icon-btn canvas-edit-btn"
+                    aria-label={`Edit ${shownFile}`}
+                    disabled={streaming || busy || !onSaveFile}
+                    onClick={startEdit}
+                  >
+                    <PencilIcon />
+                  </button>
+                )}
               </div>
-              {draft ? (
+              {shownAsset ? (
+                // A picture in the folder: show it, with its size. There is no
+                // text to edit — the page references it by name.
+                <div className="canvas-asset">
+                  {assetUrls[shownFile] ? (
+                    <img className="canvas-asset-preview" src={assetUrls[shownFile]} alt={shownFile} />
+                  ) : (
+                    <p className="canvas-empty-hint">Loading {shownFile}…</p>
+                  )}
+                  <p className="canvas-empty-hint">
+                    {shownFile}
+                    {assetSize(assets?.[shownFile]) ? ` · ${assetSize(assets?.[shownFile])}` : ''}
+                    {assets?.[shownFile]?.mime ? ` · ${assets[shownFile].mime}` : ''}
+                  </p>
+                </div>
+              ) : draft ? (
                 <>
                   {/* The highlighted copy stays in place behind a transparent
                       textarea, so the text keeps its colors while editing. */}

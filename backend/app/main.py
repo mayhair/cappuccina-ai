@@ -172,11 +172,13 @@ def _webpage_tool_args(name: str, args: dict) -> dict:
 
 
 def _webpage_part_from_result(output_text: str) -> dict | None:
-    """A {"type": "webpage"} part for a successful write_webpage_file result.
+    """A {"type": "webpage"} part for a successful webpage write or asset add.
 
     The part only references the saved environment by id and names its files, so
-    the page text never flows through the full-history sync payloads. Returns
-    None for any other tool or a failed/malformed result.
+    the page text never flows through the full-history sync payloads. An asset
+    (a picture copied into the folder) has no file text and no path of its own to
+    show, so the part only marks the environment as touched. Returns None for any
+    other tool or a failed/malformed result.
     """
     if not output_text:
         return None
@@ -184,9 +186,17 @@ def _webpage_part_from_result(output_text: str) -> dict | None:
         data = json.loads(output_text)
     except (ValueError, TypeError):
         return None
-    if not isinstance(data, dict) or data.get("status") != "webpage_file_written":
+    if not isinstance(data, dict) or not data.get("webpage_id"):
         return None
-    if not data.get("webpage_id") or not data.get("path"):
+    status = data.get("status")
+    if status == "webpage_asset_added":
+        return {
+            "type": "webpage",
+            "webpageId": data["webpage_id"],
+            "files": data.get("files") or [],
+            "asset": True,
+        }
+    if status != "webpage_file_written" or not data.get("path"):
         return None
     return {
         "type": "webpage",
@@ -197,7 +207,7 @@ def _webpage_part_from_result(output_text: str) -> dict | None:
 
 
 def _webpage_version_id(output_text: str) -> str | None:
-    """The iteration id from a write_webpage_file marker, or None.
+    """The iteration id from a webpage write or asset add marker, or None.
 
     Only the live SSE payload carries it (via _webpage_part_from_result the
     stored part stays as it was, so history sync payloads do not change).
@@ -208,7 +218,10 @@ def _webpage_version_id(output_text: str) -> str | None:
         data = json.loads(output_text)
     except (ValueError, TypeError):
         return None
-    if not isinstance(data, dict) or data.get("status") != "webpage_file_written":
+    if not isinstance(data, dict) or data.get("status") not in (
+        "webpage_file_written",
+        "webpage_asset_added",
+    ):
         return None
     return str(data["version_id"]) if data.get("version_id") else None
 
@@ -227,7 +240,8 @@ def _merge_webpage_part(parts: list[dict], part: dict) -> None:
             and existing.get("webpageId") == part["webpageId"]
         ):
             existing["files"] = part["files"]
-            existing["path"] = part["path"]
+            if part.get("path"):
+                existing["path"] = part["path"]
             return
     parts.append(part)
 
@@ -806,19 +820,27 @@ async def get_image(image_id: str, user=Depends(current_user)):
 async def get_webpage(chat_id: str, user=Depends(current_user)) -> dict:
     """The chat's webpage environment for the canvas.
 
-    Returns {webpageId, files, updatedAt, activeVersionId}; a chat without a
-    page yet returns an empty files map so the canvas can show its empty state.
-    User-scoped, and the file text lives only here — never in the full-history
-    sync payloads.
+    Returns {webpageId, files, assets, updatedAt, activeVersionId}; a chat
+    without a page yet returns an empty files map so the canvas can show its
+    empty state. User-scoped, and the file text lives only here — never in the
+    full-history sync payloads. `assets` is the folder's binary side, metadata
+    only ({path: {mime, size}}); its bytes come from the asset route.
     """
     if db.get_chat(user["id"], chat_id) is None:
         raise HTTPException(status_code=404, detail="Chat not found")
     env = db.get_webpage_env(user["id"], chat_id)
     if env is None:
-        return {"webpageId": None, "files": {}, "updatedAt": None, "activeVersionId": None}
+        return {
+            "webpageId": None,
+            "files": {},
+            "assets": {},
+            "updatedAt": None,
+            "activeVersionId": None,
+        }
     return {
         "webpageId": env["id"],
         "files": env["files"],
+        "assets": env["assets"],
         "updatedAt": env["updated_at"],
         "activeVersionId": env["active_version_id"],
     }
@@ -854,6 +876,7 @@ async def set_webpage_active_version(
     return {
         "webpageId": env["id"],
         "files": env["files"],
+        "assets": env["assets"],
         "updatedAt": env["updated_at"],
         "activeVersionId": env["active_version_id"],
     }
@@ -915,9 +938,30 @@ async def save_webpage_file(
     return {
         "webpageId": saved["id"],
         "files": saved["files"],
+        "assets": saved["assets"],
         "updatedAt": saved["updated_at"],
         "activeVersionId": saved["active_version_id"],
     }
+
+
+@app.get("/api/v1/webpages/{chat_id}/assets/{asset_path:path}")
+async def get_webpage_asset(chat_id: str, asset_path: str, user=Depends(current_user)):
+    """Serve one binary asset of the page's folder, user- and chat-scoped.
+
+    The canvas fetches these itself and inlines them into the preview as data
+    URIs: the preview iframe is sandboxed without same-origin, so it has no
+    session and cannot load an authenticated URL on its own. Assets never
+    change once added, but the row is cheap, so the response is not cached
+    beyond the request (the canvas keeps its own copy).
+    """
+    row = db.get_webpage_asset(user["id"], chat_id, asset_path)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Asset not found")
+    return Response(
+        content=row["data"],
+        media_type=row["mime"],
+        headers={"Cache-Control": "private, no-cache"},
+    )
 
 
 @app.get("/api/v1/webpages/{chat_id}/versions/{version_id}/diff")
@@ -1313,16 +1357,19 @@ async def _stream_chat_events(req: ChatRequest, user: dict):
             if webpage_part is not None:
                 _merge_webpage_part(parts, webpage_part)
                 env = db.get_webpage_env(user["id"], req.chat_id)
-                content = (env["files"] if env else {}).get(webpage_part["path"], "")
+                path = webpage_part.get("path", "")
+                content = (env["files"] if env else {}).get(path, "")
                 yield {
                     "event": "webpage",
                     "data": json.dumps(
                         {
                             "webpageId": webpage_part["webpageId"],
-                            "path": webpage_part["path"],
+                            "path": path,
                             "files": webpage_part["files"],
                             "content": content,
                             "versionId": _webpage_version_id(output_text),
+                            "asset": bool(webpage_part.get("asset")),
+                            "assets": (env["assets"] if env else {}),
                         }
                     ),
                 }

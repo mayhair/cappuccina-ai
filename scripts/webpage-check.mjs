@@ -6,10 +6,17 @@ const errors = [];
 page.on("console", (m) => m.type() === "error" && errors.push(m.text()));
 page.on("pageerror", (e) => errors.push(String(e)));
 
-const INDEX = "<!doctype html><html><head><title>Cat zone</title><link rel=\"stylesheet\" href=\"styles.css\"></head><body><h1>Hello cats</h1><script src=\"script.js\"></script></body></html>";
+const INDEX = "<!doctype html><html><head><title>Cat zone</title><link rel=\"stylesheet\" href=\"styles.css\"></head><body><h1>Hello cats</h1><img src=\"cat.png\" alt=\"a cat\"><script src=\"script.js\"></script></body></html>";
 const CSS = "body { background: rgb(1, 2, 3); }";
 const JS =
   "const heading = 'from script';\nfunction label(text) {\n  return text;\n}\ndocument.querySelector('h1').textContent = label(heading);";
+
+// A real 1x1 PNG: the canvas fetches folder assets itself and inlines them as
+// data URLs, so this is what proves the picture reaches the sandboxed iframe.
+const PNG = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg==",
+  "base64",
+);
 
 // unauthenticated preview: mock the session + chat list
 await page.route("**/api/v1/auth/me", async (route) => {
@@ -28,21 +35,36 @@ await page.route("**/api/v1/chats", async (route) => {
       : JSON.stringify({ id: "chat-check", title: "New chat" });
   await route.fulfill({ status: 200, contentType: "application/json", body });
 });
-// The canvas fetches the environment; start empty, then serve the built page.
-let env = { webpageId: null, files: {}, updatedAt: null };
+// The canvas fetches the environment, the iteration list and any folder
+// picture's bytes; all three live behind /api/v1/webpages/.
+const ASSET = { path: "cat.png", mime: "image/png", size: PNG.length };
+let env = { webpageId: null, files: {}, assets: {}, updatedAt: null };
+let versions = [];
 await page.route("**/api/v1/webpages/**", async (route) => {
-  await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(env) });
+  const url = new URL(route.request().url());
+  if (url.pathname.includes("/assets/")) {
+    await route.fulfill({ status: 200, contentType: "image/png", body: PNG });
+    return;
+  }
+  const body = url.pathname.endsWith("/versions")
+    ? { activeVersionId: versions.at(-1)?.id ?? null, versions }
+    : env;
+  await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) });
 });
 
-// One page built as three file writes, each announced with a webpage event.
+// One page built as three file writes, each announced with a webpage event,
+// then a picture added to the folder (announced without file text).
 const files = { "index.html": INDEX, "styles.css": CSS, "script.js": JS };
 const sse = [
   "event: start\ndata: {}\n\n",
   ...Object.entries(files).flatMap(([path, content], i) => [
     `event: tool_call\ndata: ${JSON.stringify({ id: `t${i}`, name: "write_webpage_file", display: "Building Webpage", args: { path, bytes: content.length }, label: `write_webpage_file(path='${path}')` })}\n\n`,
     `event: tool_result\ndata: ${JSON.stringify({ id: `t${i}`, name: "write_webpage_file", content: JSON.stringify({ status: "webpage_file_written", webpage_id: "env-check", path, bytes: content.length, files: Object.keys(files).slice(0, i + 1) }), ok: true })}\n\n`,
-    `event: webpage\ndata: ${JSON.stringify({ webpageId: "env-check", path, files: Object.keys(files).slice(0, i + 1), content })}\n\n`,
+    `event: webpage\ndata: ${JSON.stringify({ webpageId: "env-check", path, files: Object.keys(files).slice(0, i + 1), content, versionId: "v-page", asset: false, assets: {} })}\n\n`,
   ]),
+  `event: tool_call\ndata: ${JSON.stringify({ id: "t9", name: "add_webpage_asset", display: "Adding to Webpage", args: { path: ASSET.path, image_id: "img-1" }, label: `add_webpage_asset(path='${ASSET.path}')` })}\n\n`,
+  `event: tool_result\ndata: ${JSON.stringify({ id: "t9", name: "add_webpage_asset", content: JSON.stringify({ status: "webpage_asset_added", webpage_id: "env-check", version_id: "v-asset", path: ASSET.path, mime: ASSET.mime, bytes: ASSET.size, files: Object.keys(files), assets: [ASSET.path] }), ok: true })}\n\n`,
+  `event: webpage\ndata: ${JSON.stringify({ webpageId: "env-check", path: "", files: Object.keys(files), content: "", versionId: "v-asset", asset: true, assets: { [ASSET.path]: { mime: ASSET.mime, size: ASSET.size } } })}\n\n`,
   'event: token\ndata: {"content":"Your page is ready!"}\n\n',
   "event: done\ndata: {}\n\n",
 ].join("");
@@ -132,11 +154,40 @@ await page.click('.canvas-back-btn');
 await page.waitForSelector(".canvas-file-row", { timeout: 3000 });
 console.log("back returns to the file menu:", await page.locator(".canvas-file-row").count() >= 3);
 
-// 6. the message carries a card to reopen the canvas
+// 6. the folder picture: listed with its size, inlined into the preview as a
+//    data URL, decoded by the sandboxed iframe, and shown (not edited) in the
+//    Code tab.
+await page.click('.canvas-tabs button:has-text("Code")');
+await page.waitForSelector(".canvas-file-row", { timeout: 3000 });
+const assetRow = await page.locator('.canvas-file-row:has-text("cat.png")').count();
+const assetChip = await page
+  .locator('.canvas-file-row:has-text("cat.png") .canvas-history-meta')
+  .textContent();
+console.log("folder picture listed with its size:", assetRow === 1 && /B|KB/.test(assetChip ?? ""));
+await page.click('.canvas-file-row:has-text("cat.png")');
+await page.waitForSelector(".canvas-asset-preview", { timeout: 3000 });
+const assetDecoded = await page
+  .locator(".canvas-asset-preview")
+  .evaluate((el) => el.naturalWidth > 0);
+const noEditForAsset = (await page.locator(".canvas-edit-btn").count()) === 0;
+console.log("picture shown in the code tab (decoded, not editable):", assetDecoded && noEditForAsset);
+await page.click('.canvas-back-btn');
+await page.waitForSelector(".canvas-file-row", { timeout: 3000 });
+await page.click('.canvas-tabs button:has-text("Preview")');
+await page.waitForSelector(".canvas-frame", { timeout: 3000 });
+const withAsset = await page.locator(".canvas-frame").getAttribute("srcdoc");
+const assetInlined = withAsset.includes("data:image/png;base64,") && !withAsset.includes('src="cat.png"');
+console.log("preview inlines the picture as a data URL:", assetInlined);
+const frameImage = await frame
+  .locator("img")
+  .evaluate((el) => ({ w: el.naturalWidth, src: el.getAttribute("src") }));
+console.log("sandboxed iframe decoded the picture:", frameImage.w > 0 && frameImage.src.startsWith("data:image/png"));
+
+// 7. the message carries a card to reopen the canvas
 const card = await page.locator(".webpage-card").count();
 console.log("message webpage card:", card === 1);
 
-// 7. closing hides it; the top-bar toggle appears and reopens it
+// 8. closing hides it; the top-bar toggle appears and reopens it
 await page.click('.canvas-icon-btn[aria-label="Close canvas"]');
 await page.waitForTimeout(150);
 console.log("canvas closed:", (await page.locator(".webpage-canvas").count()) === 0);
@@ -144,9 +195,29 @@ await page.click('.ctrl-btn[aria-label="Show the webpage"]');
 await page.waitForSelector(".webpage-canvas", { timeout: 3000 });
 console.log("canvas reopened:", await page.locator(".webpage-canvas").isVisible());
 
-// 8. reload: the canvas restores from the fetched environment. The server now
-// has the persisted turn (with its small webpage part) and the environment.
-env = { webpageId: "env-check", files, updatedAt: "2026-01-01T00:00:00Z" };
+// 9. reload: the canvas restores from the fetched environment. The server now
+// has the persisted turn (with its small webpage part) and the environment,
+// including the folder picture's metadata and its iteration.
+env = {
+  webpageId: "env-check",
+  files,
+  assets: { [ASSET.path]: { mime: ASSET.mime, size: ASSET.size } },
+  updatedAt: "2026-01-01T00:00:00Z",
+  activeVersionId: "v-asset",
+};
+versions = [
+  {
+    id: "v-asset",
+    seq: 1,
+    parentVersionId: null,
+    origin: "ai",
+    label: "",
+    messageUid: "reply-1",
+    assets: [ASSET.path],
+    summary: { files: 4, added: 4, removed: 0 },
+    createdAt: "2026-01-01T00:00:00Z",
+  },
+];
 savedChats = [
   {
     id: "chat-check",
@@ -163,6 +234,7 @@ savedChats = [
         parts: [
           { type: "text", text: "Your page is ready!" },
           { type: "webpage", webpageId: "env-check", path: "script.js", files: Object.keys(files) },
+          { type: "webpage", webpageId: "env-check", files: Object.keys(files), asset: true },
         ],
       },
     ],
@@ -174,6 +246,10 @@ await page.click('.ctrl-btn[aria-label="Show the webpage"]');
 await page.waitForSelector(".canvas-frame", { timeout: 5000 });
 const restored = (await page.locator(".canvas-frame").getAttribute("srcdoc")).includes("Hello cats");
 console.log("canvas restored after reload:", restored);
+const reloadedImage = await frame.locator("img").evaluate((el) => el.getAttribute("src") ?? "");
+console.log("picture still inlined after reload:", reloadedImage.startsWith("data:image/png"));
+const iterationLabel = await page.locator(".canvas-history-count").textContent();
+console.log("iteration bar shows the run:", iterationLabel === "Iteration 1 of 1", iterationLabel);
 
 console.log("console errors:", errors.length ? errors : "none");
 await browser.close();
@@ -187,6 +263,11 @@ if (
   renderedHeading !== "from script" ||
   !listsAll ||
   !highlightOk ||
+  !assetInlined ||
+  !assetDecoded ||
+  !noEditForAsset ||
+  !reloadedImage.startsWith("data:image/png") ||
+  iterationLabel !== "Iteration 1 of 1" ||
   card !== 1 ||
   !restored
 ) {

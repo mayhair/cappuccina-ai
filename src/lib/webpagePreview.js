@@ -13,6 +13,25 @@ function isExternal(url) {
   return /^(https?:)?\/\//i.test(url) || /^(data:|blob:|#|mailto:)/i.test(url)
 }
 
+function escapeRegExp(text) {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+// A picture (or other asset) in the folder is fetched by the canvas as a data
+// URL and swapped in wherever the page names it, because the preview iframe has
+// nothing to resolve a relative URL against. Covers `src="cat.png"`,
+// `url("cat.png")` and the bare `url(cat.png)` form CSS uses.
+function inlineAssets(html, assetUrls) {
+  let out = html
+  for (const [name, url] of Object.entries(assetUrls ?? {})) {
+    if (!url) continue
+    const escaped = escapeRegExp(name)
+    out = out.replace(new RegExp(`(["'])${escaped}\\1`, 'g'), `$1${url}$1`)
+    out = out.replace(new RegExp(`url\\(\\s*${escaped}\\s*\\)`, 'gi'), `url(${url})`)
+  }
+  return out
+}
+
 function localName(url) {
   if (isExternal(url)) return null
   try {
@@ -56,8 +75,9 @@ export function hasFiles(files) {
 }
 
 // The preview document, ready for iframe srcDoc. Returns '' when there is
-// nothing to show; callers render an empty state instead.
-export function assemblePreview(files) {
+// nothing to show; callers render an empty state instead. `assetUrls` maps a
+// folder asset's name to its data URL (see inlineAssets).
+export function assemblePreview(files, assetUrls = {}) {
   if (!hasFiles(files)) return ''
   const entry = pickEntryFile(files)
   if (!entry) {
@@ -67,7 +87,7 @@ export function assemblePreview(files) {
       .map((n) => `<li>${n.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c])}</li>`)
       .join('')}</ul></body>`
   }
-  const html = inlineScripts(inlineLinks(files[entry] ?? '', files), files)
+  const html = inlineAssets(inlineScripts(inlineLinks(files[entry] ?? '', files), files), assetUrls)
   // A filename the model chose won't match a regex; guard against an empty doc.
   return html.trim() ? html : ''
 }

@@ -2900,6 +2900,27 @@ a.settings-save { text-decoration: none; display: inline-flex; align-items: cent
 }
 /* The selection tints the highlighted text instead of repainting it. */
 .canvas-code-edit::selection { background: var(--pink-soak); color: transparent; }
+/* A picture in the folder: shown as-is, since there is no text to read or edit.
+   The canvas scrolls it like the code pane does. */
+.canvas-asset {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.8rem;
+  text-align: center;
+}
+.canvas-asset-preview {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  border-radius: 10px;
+  background: var(--code-bg);
+}
 .canvas-edit-bar {
   display: flex;
   align-items: center;

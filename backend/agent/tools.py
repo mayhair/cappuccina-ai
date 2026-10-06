@@ -268,13 +268,14 @@ def _openai_edit_image(
     return _image_bytes_from_response(data)
 
 
-def _load_edit_source(
-    user_id: str, image_id: str, attachment_id: str
+def _stored_source(
+    user_id: str, image_id: str, attachment_id: str, *, image_only: bool = False
 ) -> tuple[bytes, str, str] | None:
-    """Bytes, mime and filename for an image_edit source, or None.
+    """Bytes, mime and filename for a stored picture or attachment, or None.
 
     Prefers a previously generated image (`image_id`); otherwise an uploaded
-    image attachment (`attachment_id`). Both lookups are user-scoped.
+    attachment (`attachment_id`). With ``image_only`` a document attachment is
+    a miss (the image tools can't edit one). Both lookups are user-scoped.
     """
     try:
         if image_id:
@@ -285,7 +286,7 @@ def _load_edit_source(
             return path.read_bytes(), row["mime"], f"{row['id']}{path.suffix}"
         if attachment_id:
             row = db.get_attachment(user_id, attachment_id)
-            if row is None or row["kind"] != "image":
+            if row is None or (image_only and row["kind"] != "image"):
                 return None
             path = db.attachment_file_path(row["id"], row["filename"])
             return path.read_bytes(), row["mime"], row["filename"]
@@ -449,7 +450,7 @@ def image_edit(
         return "Editing pictures isn't set up yet."
     if not image_id and not attachment_id:
         return "I need to know which picture to edit."
-    source = _load_edit_source(user_id, image_id, attachment_id)
+    source = _stored_source(user_id, image_id, attachment_id, image_only=True)
     if source is None:
         return "I couldn't find that picture to edit."
     raw_source, mime, filename = source
@@ -742,30 +743,34 @@ def propose_event_deletion(event_id: str, config: RunnableConfig) -> str:
 # and can't climb out of the environment.
 _WEBPAGE_SEGMENT = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 
-# Text files the canvas can show. Anything else (binaries, images) must be a
-# CDN URL or data URI inside the page instead of a local file.
+# Text files the canvas can show and edit. Anything else (a picture or other
+# binary) belongs in the folder as an asset: add_webpage_asset copies it in.
 WEBPAGE_EXTENSIONS = (".html", ".htm", ".css", ".js", ".mjs", ".json", ".svg", ".txt", ".md")
 
 WEBPAGE_MAX_FILE_BYTES = 100_000
 WEBPAGE_MAX_TOTAL_BYTES = 300_000
 
 
-def _webpage_path(path: str) -> str | None:
-    """A safe relative path inside the environment, or None when rejected."""
+def _webpage_path(path: str, extensions: tuple[str, ...] = WEBPAGE_EXTENSIONS) -> str | None:
+    """A safe relative path inside the environment, or None when rejected.
+
+    ``extensions`` is what the name may end in: the text files above, or — for
+    an asset — the one extension its source file actually has.
+    """
     clean = (path or "").strip().replace("\\", "/")
     segments = clean.split("/")
     if not clean or len(segments) > 4:
         return None
     if not all(_WEBPAGE_SEGMENT.fullmatch(segment) for segment in segments):
         return None
-    if PurePosixPath(clean).suffix.lower() not in WEBPAGE_EXTENSIONS:
+    if PurePosixPath(clean).suffix.lower() not in extensions:
         return None
     return clean
 
 
 @tool
 def write_webpage_file(path: str, content: str, config: RunnableConfig) -> str:
-    """Build or update a webpage in the user's live canvas. Use this whenever the user asks you to make a webpage, website, landing page, game, quiz, or anything else that runs in a browser. Write one file per call: start with `index.html`, and add `styles.css` and `script.js` when they help. The canvas shows `index.html` and loads the others by the exact relative names you give — link them like `<link rel="stylesheet" href="styles.css">` and `<script src="script.js"></script>`. Keep it a single static page with no build step and nothing a browser can't load directly; load pictures and fonts from https URLs or data URIs, never from local files. To change a page you already made, call read_webpage_file first to see the current text, then write the whole file back. The page appears live in the canvas as you write, so when you're finished tell the user it's ready. Never invent a webpage_id; the returned JSON describes what was written."""
+    """Build or update a webpage in the user's live canvas. Use this whenever the user asks you to make a webpage, website, landing page, game, quiz, or anything else that runs in a browser. Write one file per call: start with `index.html`, and add `styles.css` and `script.js` when they help. The canvas shows `index.html` and loads the others by the exact relative names you give — link them like `<link rel="stylesheet" href="styles.css">` and `<script src="script.js"></script>`. Keep it a single static page with no build step and nothing a browser can't load directly; load fonts from https URLs, and put a picture the user attached or you drew into the page with add_webpage_asset, then reference it by the name you gave it there. To change a page you already made, call read_webpage_file first to see the current text, then write the whole file back. The page appears live in the canvas as you write, so when you're finished tell the user it's ready. Never invent a webpage_id; the returned JSON describes what was written."""
     user_id = _user_id(config)
     chat_id = _chat_id(config)
     if not user_id or not chat_id:
@@ -783,6 +788,11 @@ def write_webpage_file(path: str, content: str, config: RunnableConfig) -> str:
         return "That file is too big for the canvas. Keep each file under about 100 KB."
     existing = db.get_webpage_env(user_id, chat_id)
     others = existing["files"] if existing else {}
+    if existing and clean in existing["assets"]:
+        return (
+            f"The page folder already has {clean} as a picture — pick a "
+            "different name for this file."
+        )
     total = sum(len(v.encode("utf-8")) for k, v in others.items() if k != clean) + size
     if total > WEBPAGE_MAX_TOTAL_BYTES:
         return "The webpage is getting too big for the canvas. Try making it smaller."
@@ -810,15 +820,81 @@ def read_webpage_file(path: str, config: RunnableConfig) -> str:
         return "The webpage isn't available right now."
     env = db.get_webpage_env(user_id, chat_id)
     files = env["files"] if env else {}
+    assets = env["assets"] if env else {}
     if not files:
         return "There's no webpage yet — build one with write_webpage_file first."
     clean = _webpage_path(path)
     if clean is None or clean not in files:
-        return "No file named that. The webpage has: " + ", ".join(sorted(files)) + "."
+        raw = (path or "").strip().replace("\\", "/")
+        if raw and raw in assets:
+            return (
+                f"{raw} is a picture in the page folder — reference it by name "
+                "from the page instead of reading it. Files: "
+                + ", ".join(sorted(files))
+                + "."
+            )
+        named = ", ".join(sorted(files)) + ("; pictures: " + ", ".join(sorted(assets)) if assets else "")
+        return "No file named that. The webpage has: " + named + "."
     return files[clean]
 
 
-ALL_TOOLS = [solve_equation, web_search, read_webpage, lore_lookup, generate_image, image_edit, read_attachment, write_webpage_file, read_webpage_file, search_emails, read_email, draft_email, list_events, read_event, create_event, update_event, propose_event_deletion]
+@tool
+def add_webpage_asset(
+    path: str, config: RunnableConfig, image_id: str = "", attachment_id: str = ""
+) -> str:
+    """Put a picture or file into the webpage's folder so the page can show or link it. Pass exactly one source: `image_id` for a picture you drew in this chat (the id from a generate_image or image_edit result), or `attachment_id` for a file the user attached. `path` is the name the page uses — keep the file's own extension, for example "cat.png", "photo.jpg" or "report.pdf" — and reference it from the page with that same name: `<img src="cat.png">`, `background-image: url(cat.png)` or `<a href="report.pdf">`. Use this whenever the user wants a picture or a file of theirs on the webpage; write the page with write_webpage_file first, then add the pictures it shows."""
+    user_id = _user_id(config)
+    chat_id = _chat_id(config)
+    if not user_id or not chat_id:
+        return "Webpage pictures aren't available right now."
+    if not image_id and not attachment_id:
+        return "I need to know which picture or file to add."
+    if image_id and attachment_id:
+        return "Pass either image_id or attachment_id, not both."
+    source = _stored_source(user_id, image_id, attachment_id)
+    if source is None:
+        return "I couldn't find that picture or file."
+    data, mime, filename = source
+    suffix = PurePosixPath(filename).suffix.lower()
+    clean = _webpage_path(path, (suffix,))
+    if clean is None:
+        return (
+            f"That name isn't allowed. Use a simple relative name ending in {suffix}, "
+            f"like cat{suffix} (letters, numbers, dot, dash)."
+        )
+    env = db.get_webpage_env(user_id, chat_id)
+    if env is None:
+        return "There's no webpage yet — write index.html with write_webpage_file first."
+    if clean in env["files"]:
+        return (
+            f"The page already has a file called {clean}. Pick a different name "
+            "for the picture."
+        )
+    if clean in env["assets"]:
+        return f"The page folder already has {clean}. Pick a different name."
+    if len(data) > db.WEBPAGE_MAX_ASSET_BYTES:
+        return "That file is too big for the page folder (10 MB max)."
+    total = sum(int(info.get("size") or 0) for info in env["assets"].values())
+    if total + len(data) > db.WEBPAGE_MAX_ASSET_TOTAL_BYTES:
+        return "The page folder is full (20 MB of pictures and files max)."
+    env = db.put_webpage_asset(
+        user_id, chat_id, clean, data, mime, message_uid=_reply_id(config)
+    )
+    return json.dumps(
+        {
+            "status": "webpage_asset_added",
+            "webpage_id": env["id"],
+            "version_id": env["version"]["id"],
+            "path": clean,
+            "mime": mime,
+            "bytes": len(data),
+            "files": sorted(env["files"]),
+            "assets": sorted(env["assets"]),
+        }
+    )
+
+
+ALL_TOOLS = [solve_equation, web_search, read_webpage, lore_lookup, generate_image, image_edit, read_attachment, write_webpage_file, add_webpage_asset, read_webpage_file, search_emails, read_email, draft_email, list_events, read_event, create_event, update_event, propose_event_deletion]
 
 # Human-friendly names for UI display ("Called Tool: ...").
 TOOL_DISPLAY_NAMES = {
@@ -830,6 +906,7 @@ TOOL_DISPLAY_NAMES = {
     "image_edit": "Edit Picture",
     "read_attachment": "Read File",
     "write_webpage_file": "Building Webpage",
+    "add_webpage_asset": "Adding to Webpage",
     "read_webpage_file": "Reading Webpage",
     "search_emails": "Inbox Search",
     "read_email": "Read Email",

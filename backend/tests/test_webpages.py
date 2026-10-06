@@ -333,6 +333,7 @@ def test_get_webpage_round_trip(signed_in):
     assert empty.json() == {
         "webpageId": None,
         "files": {},
+        "assets": {},
         "updatedAt": None,
         "activeVersionId": None,
     }

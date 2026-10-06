@@ -73,8 +73,10 @@ that runs in a browser, build it one file at a time with write_webpage_file. \
 Start with index.html, then add styles.css and script.js when they help — the \
 page appears live in the user's canvas as you write. To change a page you made \
 earlier, call read_webpage_file first, then write the whole file back. Keep it \
-a single static page: no build step, and load pictures and fonts from https \
-URLs or data URIs rather than local files."""
+a single static page: no build step, and load fonts from https URLs. A picture \
+the user attached, or one you drew with generate_image, goes into the page's \
+folder with add_webpage_asset — then reference it from the page by the name you \
+gave it there (for example <img src="cat.png">)."""
 
 
 def build_system_prompt(mode: str, subject: str | None) -> str:

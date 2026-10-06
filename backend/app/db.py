@@ -189,9 +189,25 @@ def _init_schema(conn: sqlite3.Connection) -> None:
             message_uid TEXT,
             label TEXT NOT NULL DEFAULT '',
             files TEXT NOT NULL DEFAULT '{}',
+            assets TEXT NOT NULL DEFAULT '[]',
             summary TEXT NOT NULL DEFAULT '{}',
             created_at TEXT NOT NULL
         );
+
+        CREATE TABLE IF NOT EXISTS webpage_assets (
+            id TEXT PRIMARY KEY,
+            env_id TEXT NOT NULL REFERENCES webpage_envs(id) ON DELETE CASCADE,
+            user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+            path TEXT NOT NULL,
+            mime TEXT NOT NULL,
+            size_bytes INTEGER NOT NULL DEFAULT 0,
+            data BLOB NOT NULL,
+            created_at TEXT NOT NULL
+        );
+
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_webpage_assets_path
+            ON webpage_assets(env_id, path);
 
         CREATE UNIQUE INDEX IF NOT EXISTS idx_webpage_versions_seq ON webpage_versions(chat_id, seq);
         CREATE UNIQUE INDEX IF NOT EXISTS idx_webpage_versions_uid ON webpage_versions(chat_id, message_uid) WHERE message_uid IS NOT NULL;
@@ -227,6 +243,11 @@ def _init_schema(conn: sqlite3.Connection) -> None:
     env_cols = {row["name"] for row in conn.execute("PRAGMA table_info(webpage_envs)").fetchall()}
     if "active_version_id" not in env_cols:
         conn.execute("ALTER TABLE webpage_envs ADD COLUMN active_version_id TEXT")
+    version_cols = {
+        row["name"] for row in conn.execute("PRAGMA table_info(webpage_versions)").fetchall()
+    }
+    if "assets" not in version_cols:
+        conn.execute("ALTER TABLE webpage_versions ADD COLUMN assets TEXT NOT NULL DEFAULT '[]'")
     _migrate_webpage_versions(conn)
     _migrate_messages_for_branching(conn)
     _migrate_users_for_oauth(conn)
@@ -265,7 +286,7 @@ def _migrate_webpage_versions(conn: sqlite3.Connection) -> None:
                 "user_id": row["user_id"],
                 "chat_id": row["chat_id"],
                 "files": json.dumps(files),
-                "summary": json.dumps(_webpage_diff_summary({}, files)),
+                "summary": json.dumps(_webpage_diff_summary({}, files, [], [])),
                 "created_at": row["updated_at"],
             },
         )
@@ -1020,6 +1041,13 @@ WEBPAGE_VERSION_LIMIT = 50
 # Diff lines returned by one Changes-tab request, across all files.
 WEBPAGE_DIFF_LINE_LIMIT = 2000
 
+# Binary assets (a picture or file copied into the page's folder) live in the
+# database, once per environment: iterations record only which asset paths they
+# had, so a page that keeps the same picture across many runs stores it once,
+# and deleting the environment takes the bytes with it.
+WEBPAGE_MAX_ASSET_BYTES = 10 * 1024 * 1024
+WEBPAGE_MAX_ASSET_TOTAL_BYTES = 20 * 1024 * 1024
+
 
 def _parse_webpage_files(raw: str) -> dict[str, str]:
     try:
@@ -1031,13 +1059,64 @@ def _parse_webpage_files(raw: str) -> dict[str, str]:
     return {str(k): str(v) for k, v in data.items()}
 
 
+def _parse_webpage_asset_paths(raw: str) -> list[str]:
+    """One iteration's asset path list ([] when the column is unreadable)."""
+    try:
+        data = json.loads(raw) if raw else []
+    except (ValueError, TypeError):
+        return []
+    if not isinstance(data, list):
+        return []
+    return [str(item) for item in data]
+
+
+def _webpage_asset_map(user_id: str, chat_id: str) -> dict[str, dict]:
+    """{path: {mime, size}} for the environment's assets — never the bytes.
+
+    The canvas lists the folder from this and fetches whatever the page shows.
+    """
+    rows = get_conn().execute(
+        "SELECT path, mime, size_bytes FROM webpage_assets"
+        " WHERE chat_id = :chat_id AND user_id = :user_id ORDER BY path",
+        {"chat_id": chat_id, "user_id": user_id},
+    ).fetchall()
+    return {row["path"]: {"mime": row["mime"], "size": row["size_bytes"]} for row in rows}
+
+
+def _webpage_asset_paths_of_env(env_id: str) -> list[str]:
+    rows = get_conn().execute(
+        "SELECT path FROM webpage_assets WHERE env_id = :env_id ORDER BY path",
+        {"env_id": env_id},
+    ).fetchall()
+    return [row["path"] for row in rows]
+
+
+def _asset_line(path: str, info: dict) -> str:
+    """How one asset reads in the Changes tab: "cat.png · image/png · 812 KB"."""
+    parts = [path]
+    if info.get("mime"):
+        parts.append(str(info["mime"]))
+    size = info.get("size")
+    if isinstance(size, int) and size > 0:
+        if size < 1024:
+            parts.append(f"{size} B")
+        elif size < 1024 * 1024:
+            parts.append(f"{round(size / 1024)} KB")
+        else:
+            parts.append(f"{size / (1024 * 1024):.1f} MB")
+    return " · ".join(parts)
+
+
 def get_webpage_env(user_id: str, chat_id: str) -> dict | None:
-    """The chat's webpage environment as {id, files, updated_at, active_version_id}.
+    """The chat's webpage environment as {id, files, assets, updated_at,
+    active_version_id}.
 
     User-scoped: another user's chat (or a bogus id) is a miss. The files map
     is the active iteration's snapshot, and it is the server's source of truth —
     messages only carry a small {"type": "webpage", "webpageId", ...} part, so
-    file text never flows through the full-history sync payloads.
+    file text never flows through the full-history sync payloads. `assets` is
+    the folder's binary side ({path: {mime, size}}), whose bytes only ever leave
+    the server through the asset route.
     """
     row = get_conn().execute(
         "SELECT * FROM webpage_envs WHERE chat_id = :chat_id AND user_id = :user_id",
@@ -1050,6 +1129,7 @@ def get_webpage_env(user_id: str, chat_id: str) -> dict | None:
         "user_id": row["user_id"],
         "chat_id": row["chat_id"],
         "files": _parse_webpage_files(row["files"]),
+        "assets": _webpage_asset_map(user_id, chat_id),
         "updated_at": row["updated_at"],
         "active_version_id": row["active_version_id"],
     }
@@ -1115,14 +1195,21 @@ def put_webpage_file(
         "user_id": user_id,
         "chat_id": chat_id,
         "files": files,
+        "assets": _webpage_asset_map(user_id, chat_id),
         "updated_at": now,
         "active_version_id": version["id"],
         "version": version,
     }
 
 
-def _webpage_diff_summary(base: dict[str, str], files: dict[str, str]) -> dict:
-    """Changed-file count plus added/removed line counts between two snapshots."""
+def _webpage_diff_summary(
+    base: dict[str, str], files: dict[str, str], base_assets: list[str], assets: list[str]
+) -> dict:
+    """Changed-file count plus added/removed counts between two iterations.
+
+    An asset (a picture or other binary in the folder) counts as one line of its
+    own, so adding one reads as "+1" in the history like a line of code would.
+    """
     added = 0
     removed = 0
     changed = 0
@@ -1148,6 +1235,9 @@ def _webpage_diff_summary(base: dict[str, str], files: dict[str, str]) -> dict:
                 added += j2 - j1
         if any(tag != "equal" for tag, *_ in opcodes):
             changed += 1
+    changed += len(set(assets) ^ set(base_assets))
+    added += len(set(assets) - set(base_assets))
+    removed += len(set(base_assets) - set(assets))
     return {"files": changed, "added": added, "removed": removed}
 
 
@@ -1166,20 +1256,26 @@ def _webpage_version_row(row: sqlite3.Row) -> dict:
         "origin": row["origin"],
         "label": row["label"],
         "messageUid": row["message_uid"],
+        "assets": _parse_webpage_asset_paths(row["assets"]),
         "summary": summary,
         "createdAt": row["created_at"],
     }
 
 
-def _webpage_snapshot(chat_id: str, version_id: str | None) -> dict[str, str]:
-    """One iteration's files, or {} when the id is missing or pruned away."""
+def _webpage_version(chat_id: str, version_id: str | None) -> dict | None:
+    """One iteration's files and asset paths, or None when it is gone (pruned)."""
     if not version_id:
-        return {}
+        return None
     row = get_conn().execute(
-        "SELECT files FROM webpage_versions WHERE id = :id AND chat_id = :chat_id",
+        "SELECT files, assets FROM webpage_versions WHERE id = :id AND chat_id = :chat_id",
         {"id": version_id, "chat_id": chat_id},
     ).fetchone()
-    return _parse_webpage_files(row["files"]) if row is not None else {}
+    if row is None:
+        return None
+    return {
+        "files": _parse_webpage_files(row["files"]),
+        "assets": _parse_webpage_asset_paths(row["assets"]),
+    }
 
 
 def commit_webpage_version(
@@ -1187,6 +1283,7 @@ def commit_webpage_version(
     chat_id: str,
     files: dict[str, str],
     *,
+    assets: list[str] | None = None,
     origin: str,
     message_uid: str | None = None,
     label: str = "",
@@ -1198,6 +1295,10 @@ def commit_webpage_version(
     iteration no matter how many files it writes. Without one, every call is a
     new iteration (manual canvas saves). Also writes the working copy, so
     webpage_envs.files always equals the active iteration's snapshot.
+
+    ``assets`` is the folder's asset path list for this iteration; None means
+    "the ones the environment already has" (an asset write is the only caller
+    that changes it).
     """
     conn = get_conn()
     env = conn.execute(
@@ -1206,6 +1307,8 @@ def commit_webpage_version(
     ).fetchone()
     if env is None:
         raise ValueError("no webpage environment for this chat")
+    if assets is None:
+        assets = _webpage_asset_paths_of_env(env["id"])
     now = _now()
     hit = None
     if message_uid:
@@ -1218,12 +1321,16 @@ def commit_webpage_version(
         seq = hit["seq"]
         parent = hit["parent_version_id"]
         created_at = hit["created_at"]
-        base = _webpage_snapshot(chat_id, parent)
+        base = _webpage_version(chat_id, parent) or {"files": {}, "assets": []}
         conn.execute(
-            "UPDATE webpage_versions SET files = :files, summary = :summary WHERE id = :id",
+            "UPDATE webpage_versions SET files = :files, assets = :assets, summary = :summary"
+            " WHERE id = :id",
             {
                 "files": json.dumps(files),
-                "summary": json.dumps(_webpage_diff_summary(base, files)),
+                "assets": json.dumps(assets),
+                "summary": json.dumps(
+                    _webpage_diff_summary(base["files"], files, base["assets"], assets)
+                ),
                 "id": version_id,
             },
         )
@@ -1235,12 +1342,12 @@ def commit_webpage_version(
         ).fetchone()["seq"]
         parent = env["active_version_id"]
         created_at = now
-        base = _webpage_snapshot(chat_id, parent)
+        base = _webpage_version(chat_id, parent) or {"files": {}, "assets": []}
         conn.execute(
             "INSERT INTO webpage_versions (id, env_id, user_id, chat_id, parent_version_id,"
-            " seq, origin, message_uid, label, files, summary, created_at)"
+            " seq, origin, message_uid, label, files, assets, summary, created_at)"
             " VALUES (:id, :env_id, :user_id, :chat_id, :parent, :seq, :origin, :message_uid,"
-            " :label, :files, :summary, :created_at)",
+            " :label, :files, :assets, :summary, :created_at)",
             {
                 "id": version_id,
                 "env_id": env["id"],
@@ -1252,7 +1359,10 @@ def commit_webpage_version(
                 "message_uid": message_uid,
                 "label": label,
                 "files": json.dumps(files),
-                "summary": json.dumps(_webpage_diff_summary(base, files)),
+                "assets": json.dumps(assets),
+                "summary": json.dumps(
+                    _webpage_diff_summary(base["files"], files, base["assets"], assets)
+                ),
                 "created_at": created_at,
             },
         )
@@ -1269,6 +1379,87 @@ def commit_webpage_version(
     version = _webpage_version_row(row)
     version["files"] = files
     return version
+
+
+def put_webpage_asset(
+    user_id: str,
+    chat_id: str,
+    path: str,
+    data: bytes,
+    mime: str,
+    *,
+    origin: str = "ai",
+    message_uid: str | None = None,
+    label: str = "",
+) -> dict:
+    """Copy one picture or file into the page's folder, then commit an iteration.
+
+    The bytes are stored once for the environment; iterations record the asset
+    paths they had, so an older iteration that never showed the picture does not
+    list it and no iteration stores a second copy. Returns the env dict plus
+    "version" (the iteration that now holds the asset) and "asset".
+    """
+    conn = get_conn()
+    row = conn.execute(
+        "SELECT * FROM webpage_envs WHERE chat_id = :chat_id AND user_id = :user_id",
+        {"chat_id": chat_id, "user_id": user_id},
+    ).fetchone()
+    if row is None:
+        raise ValueError("no webpage environment for this chat")
+    now = _now()
+    conn.execute(
+        "INSERT INTO webpage_assets (id, env_id, user_id, chat_id, path, mime, size_bytes,"
+        " data, created_at)"
+        " VALUES (:id, :env_id, :user_id, :chat_id, :path, :mime, :size, :data, :created_at)"
+        " ON CONFLICT(env_id, path) DO UPDATE SET mime = :mime, size_bytes = :size,"
+        " data = :data, created_at = :created_at",
+        {
+            "id": uuid.uuid4().hex,
+            "env_id": row["id"],
+            "user_id": user_id,
+            "chat_id": chat_id,
+            "path": path,
+            "mime": mime,
+            "size": len(data),
+            "data": data,
+            "created_at": now,
+        },
+    )
+    files = _parse_webpage_files(row["files"])
+    assets = _webpage_asset_paths_of_env(row["id"])
+    version = commit_webpage_version(
+        user_id,
+        chat_id,
+        files,
+        assets=assets,
+        origin=origin,
+        message_uid=message_uid,
+        label=label,
+    )
+    return {
+        "id": row["id"],
+        "user_id": user_id,
+        "chat_id": chat_id,
+        "files": files,
+        "assets": _webpage_asset_map(user_id, chat_id),
+        "updated_at": now,
+        "active_version_id": version["id"],
+        "version": version,
+        "asset": {"path": path, "mime": mime, "size": len(data)},
+    }
+
+
+def get_webpage_asset(user_id: str, chat_id: str, path: str) -> sqlite3.Row | None:
+    """One asset row including its bytes; user- and chat-scoped.
+
+    The route serving bytes is the only caller: everything else uses the
+    metadata map from get_webpage_env.
+    """
+    return get_conn().execute(
+        "SELECT * FROM webpage_assets"
+        " WHERE chat_id = :chat_id AND user_id = :user_id AND path = :path",
+        {"chat_id": chat_id, "user_id": user_id, "path": path},
+    ).fetchone()
 
 
 def _prune_webpage_versions(conn: sqlite3.Connection, chat_id: str, active_version_id: str) -> None:
@@ -1352,6 +1543,7 @@ def set_webpage_active_version(user_id: str, chat_id: str, version_id: str) -> d
     return {
         "id": env["id"],
         "files": files,
+        "assets": _webpage_asset_map(user_id, chat_id),
         "updated_at": now,
         "active_version_id": version_id,
     }
@@ -1370,10 +1562,12 @@ def webpage_version_diff(
     if row is None:
         return None
     base_id = against or row["parentVersionId"]
-    base = _webpage_snapshot(chat_id, base_id) if base_id else {}
-    if base_id and not base:
+    base_row = _webpage_version(chat_id, base_id) if base_id else None
+    if base_id and base_row is None:
         # The parent is gone (pruned) or the id is bogus: show the whole file.
         base_id = None
+    base = base_row["files"] if base_row else {}
+    base_assets = base_row["assets"] if base_row else []
     files_out: list[dict] = []
     budget = WEBPAGE_DIFF_LINE_LIMIT
     truncated = False
@@ -1443,6 +1637,31 @@ def webpage_version_diff(
                 "added": added,
                 "removed": removed,
                 "lines": lines,
+            }
+        )
+    # A picture (or other binary) the folder gained or lost: one line describing
+    # it, so the Changes tab accounts for every path the run touched.
+    now_assets = set(row["assets"])
+    was_assets = set(base_assets)
+    asset_info = _webpage_asset_map(user_id, chat_id) if now_assets ^ was_assets else {}
+    for path in sorted(now_assets ^ was_assets):
+        if budget <= 0:
+            truncated = True
+            break
+        added_now = path in now_assets
+        budget -= 1
+        files_out.append(
+            {
+                "path": path,
+                "status": "added" if added_now else "removed",
+                "added": 1 if added_now else 0,
+                "removed": 0 if added_now else 1,
+                "lines": [
+                    {
+                        "kind": "add" if added_now else "del",
+                        "text": _asset_line(path, asset_info.get(path) or {}),
+                    }
+                ],
             }
         )
     return {

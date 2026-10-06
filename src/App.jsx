@@ -271,6 +271,7 @@ export default function App() {
         <WebpageCanvas
           chatId={webpage.chatId}
           files={webpage.files}
+          assets={webpage.assets ?? {}}
           activeVersionId={webpage.activeVersionId ?? null}
           versions={webpage.versions ?? []}
           streaming={isStreaming}
