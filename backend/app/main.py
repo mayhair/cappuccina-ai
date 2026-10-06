@@ -169,23 +169,27 @@ def _webpage_tool_args(name: str, args: dict) -> dict:
     return redacted
 
 
-def _webpage_part_from_result(output_text: str) -> dict | None:
-    """A {"type": "webpage"} part for a successful webpage write or asset add.
+def _webpage_result(output_text: str) -> tuple[dict | None, str | None]:
+    """One parse of a webpage tool result: its {"type": "webpage"} part and the
+    iteration id the write landed as.
 
     The part only references the saved environment by id and names its files, so
     the page text never flows through the full-history sync payloads. An asset
     (a picture copied into the folder) has no file text and no path of its own to
-    show, so the part only marks the environment as touched. Returns None for any
-    other tool or a failed/malformed result.
+    show, so the part only marks the environment as touched. The iteration id
+    rides only the live SSE payload — the stored part stays as it was, so history
+    sync payloads do not change. (None, None) for any other tool or a
+    failed/malformed result.
     """
     if not output_text:
-        return None
+        return None, None
     try:
         data = json.loads(output_text)
     except (ValueError, TypeError):
-        return None
+        return None, None
     if not isinstance(data, dict) or not data.get("webpage_id"):
-        return None
+        return None, None
+    version_id = str(data["version_id"]) if data.get("version_id") else None
     status = data.get("status")
     if status == "webpage_asset_added":
         return {
@@ -193,35 +197,20 @@ def _webpage_part_from_result(output_text: str) -> dict | None:
             "webpageId": data["webpage_id"],
             "files": data.get("files") or [],
             "asset": True,
-        }
+        }, version_id
     if status != "webpage_file_written" or not data.get("path"):
-        return None
+        return None, None
     return {
         "type": "webpage",
         "webpageId": data["webpage_id"],
         "path": data["path"],
         "files": data.get("files") or [],
-    }
+    }, version_id
 
 
-def _webpage_version_id(output_text: str) -> str | None:
-    """The iteration id from a webpage write or asset add marker, or None.
-
-    Only the live SSE payload carries it (via _webpage_part_from_result the
-    stored part stays as it was, so history sync payloads do not change).
-    """
-    if not output_text:
-        return None
-    try:
-        data = json.loads(output_text)
-    except (ValueError, TypeError):
-        return None
-    if not isinstance(data, dict) or data.get("status") not in (
-        "webpage_file_written",
-        "webpage_asset_added",
-    ):
-        return None
-    return str(data["version_id"]) if data.get("version_id") else None
+def _webpage_part_from_result(output_text: str) -> dict | None:
+    """Just the part (the non-streaming path has no iteration to announce)."""
+    return _webpage_result(output_text)[0]
 
 
 def _merge_webpage_part(parts: list[dict], part: dict) -> None:
@@ -1325,7 +1314,7 @@ async def _stream_chat_events(req: ChatRequest, user: dict):
             if image_part is not None:
                 parts.append(image_part)
                 yield {"event": "image", "data": json.dumps(image_part)}
-            webpage_part = _webpage_part_from_result(output_text)
+            webpage_part, version_id = _webpage_result(output_text)
             if webpage_part is not None:
                 _merge_webpage_part(parts, webpage_part)
                 env = db.get_webpage_env(user["id"], req.chat_id)
@@ -1339,7 +1328,7 @@ async def _stream_chat_events(req: ChatRequest, user: dict):
                             "path": path,
                             "files": webpage_part["files"],
                             "content": content,
-                            "versionId": _webpage_version_id(output_text),
+                            "versionId": version_id,
                             "asset": bool(webpage_part.get("asset")),
                             "assets": (env["assets"] if env else {}),
                         }
