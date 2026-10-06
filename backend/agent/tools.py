@@ -1,6 +1,7 @@
 import base64
 import json
 import re
+from collections.abc import Iterable
 from datetime import datetime
 from pathlib import PurePosixPath
 from zoneinfo import ZoneInfo
@@ -768,6 +769,40 @@ def _webpage_path(path: str, extensions: tuple[str, ...] = WEBPAGE_EXTENSIONS) -
     return clean
 
 
+def validate_webpage_write(
+    files: dict[str, str], path: str, content: str, *, asset_names: Iterable[str] = ()
+) -> tuple[str | None, str | None]:
+    """Check one webpage file write; shared by the tool and the canvas save route.
+
+    Returns ``(clean_path, error)`` with ``error`` None when the write is
+    allowed. ``files`` is the environment's current text files (the size budget
+    is for all of them together) and ``asset_names`` are folder pictures the
+    write must not shadow — the tool checks those, the save route passes none,
+    matching what each has always accepted. The messages are what the tool
+    returns and the route shows verbatim, so they live here only.
+    """
+    clean = _webpage_path(path)
+    if clean is None:
+        return None, (
+            "That file name isn't allowed. Use a simple relative name like "
+            "index.html, styles.css or script.js (letters, numbers, dot, dash)."
+        )
+    if not content:
+        return None, "That file is empty — write something into it."
+    size = len(content.encode("utf-8"))
+    if size > WEBPAGE_MAX_FILE_BYTES:
+        return None, "That file is too big for the canvas. Keep each file under about 100 KB."
+    if clean in asset_names:
+        return None, (
+            f"The page folder already has {clean} as a picture — pick a "
+            "different name for this file."
+        )
+    total = sum(len(v.encode("utf-8")) for k, v in files.items() if k != clean) + size
+    if total > WEBPAGE_MAX_TOTAL_BYTES:
+        return None, "The webpage is getting too big for the canvas. Try making it smaller."
+    return clean, None
+
+
 @tool
 def write_webpage_file(path: str, content: str, config: RunnableConfig) -> str:
     """Build or update a webpage in the user's live canvas. Use this whenever the user asks you to make a webpage, website, landing page, game, quiz, or anything else that runs in a browser. Write one file per call: start with `index.html`, and add `styles.css` and `script.js` when they help. The canvas shows `index.html` and loads the others by the exact relative names you give — link them like `<link rel="stylesheet" href="styles.css">` and `<script src="script.js"></script>`. Keep it a single static page with no build step and nothing a browser can't load directly; load fonts from https URLs, and put a picture the user attached or you drew into the page with add_webpage_asset, then reference it by the name you gave it there. To change a page you already made, call read_webpage_file first to see the current text, then write the whole file back. The page appears live in the canvas as you write, so when you're finished tell the user it's ready. Never invent a webpage_id; the returned JSON describes what was written."""
@@ -775,27 +810,16 @@ def write_webpage_file(path: str, content: str, config: RunnableConfig) -> str:
     chat_id = _chat_id(config)
     if not user_id or not chat_id:
         return "Building webpages isn't available right now."
-    clean = _webpage_path(path)
-    if clean is None:
-        return (
-            "That file name isn't allowed. Use a simple relative name like "
-            "index.html, styles.css or script.js (letters, numbers, dot, dash)."
-        )
-    if not content:
-        return "That file is empty — write something into it."
-    size = len(content.encode("utf-8"))
-    if size > WEBPAGE_MAX_FILE_BYTES:
-        return "That file is too big for the canvas. Keep each file under about 100 KB."
     existing = db.get_webpage_env(user_id, chat_id)
-    others = existing["files"] if existing else {}
-    if existing and clean in existing["assets"]:
-        return (
-            f"The page folder already has {clean} as a picture — pick a "
-            "different name for this file."
-        )
-    total = sum(len(v.encode("utf-8")) for k, v in others.items() if k != clean) + size
-    if total > WEBPAGE_MAX_TOTAL_BYTES:
-        return "The webpage is getting too big for the canvas. Try making it smaller."
+    clean, problem = validate_webpage_write(
+        existing["files"] if existing else {},
+        path,
+        content,
+        asset_names=existing["assets"] if existing else (),
+    )
+    if problem:
+        return problem
+    size = len(content.encode("utf-8"))
     env = db.put_webpage_file(
         user_id, chat_id, clean, content, message_uid=_reply_id(config)
     )

@@ -18,9 +18,7 @@ from agent.title import generate_title
 from agent.tools import (
     ALL_TOOLS,
     TOOL_DISPLAY_NAMES,
-    WEBPAGE_MAX_FILE_BYTES,
-    WEBPAGE_MAX_TOTAL_BYTES,
-    _webpage_path,
+    validate_webpage_write,
 )
 from app import calendar, db, documents, gmail, google_oauth, tts
 from app.auth import (
@@ -888,10 +886,10 @@ async def save_webpage_file(
 ) -> dict:
     """Save one hand-edited file as its own iteration.
 
-    Same path/size rules as the write_webpage_file tool; the messages are
-    identical so the canvas can show them verbatim. `baseVersionId` is the
-    iteration the tab rendered — a stale value is refused (409) instead of
-    silently overwriting a newer iteration.
+    Same rules as the write_webpage_file tool (both call
+    validate_webpage_write), so the messages match what the tool returns.
+    `baseVersionId` is the iteration the tab rendered — a stale value is
+    refused (409) instead of silently overwriting a newer iteration.
     """
     _webpage_idle_or_409(chat_id)
     if db.get_chat(user["id"], chat_id) is None:
@@ -899,28 +897,9 @@ async def save_webpage_file(
     env = db.get_webpage_env(user["id"], chat_id)
     if env is None:
         raise HTTPException(status_code=404, detail="No webpage yet")
-    clean = _webpage_path(req.path)
-    if clean is None:
-        raise HTTPException(
-            status_code=400,
-            detail="That file name isn't allowed. Use a simple relative name like "
-            "index.html, styles.css or script.js (letters, numbers, dot, dash).",
-        )
-    if not req.content:
-        raise HTTPException(status_code=400, detail="That file is empty — write something into it.")
-    size = len(req.content.encode("utf-8"))
-    if size > WEBPAGE_MAX_FILE_BYTES:
-        raise HTTPException(
-            status_code=400,
-            detail="That file is too big for the canvas. Keep each file under about 100 KB.",
-        )
-    others = env["files"]
-    total = sum(len(v.encode("utf-8")) for k, v in others.items() if k != clean) + size
-    if total > WEBPAGE_MAX_TOTAL_BYTES:
-        raise HTTPException(
-            status_code=400,
-            detail="The webpage is getting too big for the canvas. Try making it smaller.",
-        )
+    clean, problem = validate_webpage_write(env["files"], req.path, req.content)
+    if problem:
+        raise HTTPException(status_code=400, detail=problem)
     if req.base_version_id != env["active_version_id"]:
         raise HTTPException(
             status_code=409,
