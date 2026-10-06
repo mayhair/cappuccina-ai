@@ -1596,7 +1596,6 @@ def webpage_version_diff(
         added = 0
         removed = 0
         lines: list[dict] = []
-        matcher = difflib.SequenceMatcher(None, base_lines, file_lines, autojunk=False)
         if status == "added":
             lines = [{"kind": "add", "text": text} for text in file_lines]
             added = len(file_lines)
@@ -1604,6 +1603,7 @@ def webpage_version_diff(
             lines = [{"kind": "del", "text": text} for text in base_lines]
             removed = len(base_lines)
         else:
+            matcher = difflib.SequenceMatcher(None, base_lines, file_lines, autojunk=False)
             for group in matcher.get_grouped_opcodes(3):
                 head = group[0]
                 tail = group[-1]
