@@ -277,26 +277,33 @@ export function useChatController(enabled) {
     }
   }, [])
 
+  // Fold one env response (fetch, activation or save) into the chat's canvas
+  // state: all three return the same shape and all three replace the working
+  // copy and the active iteration from it.
+  const applyWebpageEnv = useCallback((chatId, data) => {
+    setWebpages((prev) => ({
+      ...prev,
+      [chatId]: {
+        ...(prev[chatId] ?? {}),
+        webpageId: data.webpageId ?? null,
+        files: data.files ?? {},
+        assets: data.assets ?? prev[chatId]?.assets ?? {},
+        activeVersionId: data.activeVersionId ?? null,
+      },
+    }))
+  }, [])
+
   // Force the files back to the server's copy. Unlike the restore effect this
   // is unconditional: it runs after a rejected mutation, so the stale local
   // state must give way even though files are already present.
   const refreshWebpageEnv = useCallback(async (chatId) => {
     try {
       const env = await getWebpageEnv(chatId)
-      setWebpages((prev) => ({
-        ...prev,
-        [chatId]: {
-          ...(prev[chatId] ?? {}),
-          webpageId: env.webpageId ?? null,
-          files: env.files ?? {},
-          assets: env.assets ?? {},
-          activeVersionId: env.activeVersionId ?? null,
-        },
-      }))
+      applyWebpageEnv(chatId, env)
     } catch {
       // The canvas keeps showing what it has.
     }
-  }, [])
+  }, [applyWebpageEnv])
 
   // Clicking an iteration activates it immediately: the canvas always renders
   // the active one, so there is no separate browse state.
@@ -305,16 +312,7 @@ export function useChatController(enabled) {
       setCanvasBusy(true)
       try {
         const data = await activateWebpageVersion(chatId, versionId)
-        setWebpages((prev) => ({
-          ...prev,
-          [chatId]: {
-            ...(prev[chatId] ?? {}),
-            webpageId: data.webpageId,
-            files: data.files ?? {},
-            assets: data.assets ?? prev[chatId]?.assets ?? {},
-            activeVersionId: data.activeVersionId,
-          },
-        }))
+        applyWebpageEnv(chatId, data)
         setCanvasNotice(null)
       } catch (err) {
         setCanvasNotice(err.status === 409 ? err.message : 'Could not switch iteration.')
@@ -324,7 +322,7 @@ export function useChatController(enabled) {
         setCanvasBusy(false)
       }
     },
-    [refreshWebpageEnv, refreshWebpageVersions],
+    [applyWebpageEnv, refreshWebpageEnv, refreshWebpageVersions],
   )
 
   // A manual edit lands as its own iteration. Returns false when the save was
@@ -335,16 +333,7 @@ export function useChatController(enabled) {
       setCanvasBusy(true)
       try {
         const data = await saveWebpageFile(chatId, { path, content, baseVersionId })
-        setWebpages((prev) => ({
-          ...prev,
-          [chatId]: {
-            ...(prev[chatId] ?? {}),
-            webpageId: data.webpageId,
-            files: data.files ?? {},
-            assets: data.assets ?? prev[chatId]?.assets ?? {},
-            activeVersionId: data.activeVersionId,
-          },
-        }))
+        applyWebpageEnv(chatId, data)
         refreshWebpageVersions(chatId)
         setCanvasNotice(null)
         return true
@@ -357,7 +346,7 @@ export function useChatController(enabled) {
         setCanvasBusy(false)
       }
     },
-    [refreshWebpageEnv, refreshWebpageVersions],
+    [applyWebpageEnv, refreshWebpageEnv, refreshWebpageVersions],
   )
 
   // Upload picked files to the server and stage them for the next message.
