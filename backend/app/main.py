@@ -184,7 +184,7 @@ def _tool_result_text(output) -> str:
 def _image_part_from_result(name: str, output_text: str) -> dict | None:
     """An {"type": "image"} part for a successful generate_image/image_edit result.
 
-    The part only references the saved image by id â€” the bytes live in
+    The part only references the saved image by id — the bytes live in
     backend/data/images and are served by GET /api/v1/images/{id}, so they
     never flow through the full-history sync payloads. Returns None for any
     other tool or a failed/malformed result.
@@ -422,7 +422,7 @@ def _attachment_blocks(parts, user_id: str) -> list[dict]:
     """LLM content blocks for a user turn's attachment parts.
 
     Images become vision (`image_url`) blocks read from disk. Documents become
-    a text pointer naming the file and its id â€” the model calls read_attachment
+    a text pointer naming the file and its id — the model calls read_attachment
     to pull the extracted text on demand, so document bodies never sit in the
     prompt or in the stored history. Assets (audio, video, fonts) become a
     pointer saying they are binary and can be placed on a webpage with
@@ -711,7 +711,7 @@ async def gmail_update_draft(
     except gmail.DraftGone:
         raise HTTPException(
             status_code=409,
-            detail="That draft no longer exists â€” it may already have been sent",
+            detail="That draft no longer exists — it may already have been sent",
         )
     except gmail.GmailApiError as exc:
         raise HTTPException(status_code=502, detail=f"Gmail: {exc}")
@@ -720,7 +720,7 @@ async def gmail_update_draft(
 
 @app.post("/api/v1/gmail/drafts/{draft_id}/send")
 async def gmail_send_draft(draft_id: str, user=Depends(current_user)) -> dict:
-    """The only path that actually sends mail â€” driven by the user's button."""
+    """The only path that actually sends mail — driven by the user's button."""
     try:
         sent = gmail.send_draft(user["id"], draft_id)
     except ServiceNotConnected as exc:
@@ -728,7 +728,7 @@ async def gmail_send_draft(draft_id: str, user=Depends(current_user)) -> dict:
     except gmail.DraftGone:
         raise HTTPException(
             status_code=409,
-            detail="That draft no longer exists â€” it may already have been sent",
+            detail="That draft no longer exists — it may already have been sent",
         )
     except gmail.GmailApiError as exc:
         raise HTTPException(status_code=502, detail=f"Gmail: {exc}")
@@ -789,7 +789,7 @@ async def calendar_disconnect(user=Depends(current_user)) -> dict:
 
 @app.post("/api/v1/calendar/events/{event_id}/delete")
 async def calendar_delete_event(event_id: str, user=Depends(current_user)) -> dict:
-    """The only path that deletes an event â€” driven by the user's button.
+    """The only path that deletes an event — driven by the user's button.
 
     The assistant proposes the deletion in chat; nothing is removed until the
     user confirms here.
@@ -801,7 +801,7 @@ async def calendar_delete_event(event_id: str, user=Depends(current_user)) -> di
     except calendar.EventGone:
         raise HTTPException(
             status_code=409,
-            detail="That event is already gone â€” it may have been deleted already",
+            detail="That event is already gone — it may have been deleted already",
         )
     except calendar.CalendarApiError as exc:
         raise HTTPException(status_code=502, detail=f"Calendar: {exc}")
@@ -1635,7 +1635,7 @@ async def _stream_chat_events(req: ChatRequest, user: dict):
         elif kind == "on_tool_start":
             call_id = event.get("run_id", "")
             # A run whose parent is another tool run is the tool calling
-            # itself internally â€” surface it once, as the outer call.
+            # itself internally — surface it once, as the outer call.
             nested = bool(set(event.get("parent_ids") or ()) & tool_run_ids)
             tool_run_ids.add(call_id)
             if nested:
