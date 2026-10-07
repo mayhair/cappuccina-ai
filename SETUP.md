@@ -18,10 +18,10 @@ only talks to the frontend port. Chat history lives in SQLite at
 
 - **Python 3.11+** (the backend uses `X | Y` type syntax)
 - **Node.js 20 LTS or newer** (Vite 5 requirement) + npm
-- **Podman 6+** — each webpage canvas runs in its own site container (from the
-  `node:22-bookworm-slim`-based image). On Windows, run
-  `podman machine init && podman machine start` once. Docker Desktop works too:
-  set `SITE_CONTAINER_CLI=docker` (see §3).
+- **Podman** (rootless) — each webpage canvas runs in its own site container
+  (from the `node:22-bookworm-slim`-based image). Verified on 5.7 under Ubuntu
+  26.04 (§7); on Windows, run `podman machine init && podman machine start`
+  once. Docker Desktop works too: set `SITE_CONTAINER_CLI=docker` (see §3).
 - A terminal: **PowerShell 5.1+** on Windows, any POSIX shell on macOS/Linux
 - API keys: an **OpenRouter API key** (required, chat model), an **OpenAI API
   key** (required, image generation), a **Parallel Search API key**
@@ -127,6 +127,10 @@ Gmail connection. In [Google Cloud Console](https://console.cloud.google.com/):
    http://localhost:5173/api/v1/calendar/callback
    ```
 
+   Deploying to a server means adding the same three paths on the public origin
+   you browse, as `https://<frontend-origin>/api/v1/...` — Google requires
+   HTTPS for anything that isn't localhost (§7.5).
+
 5. Copy the **client ID** and **client secret** into `backend/.env` as
    `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`, and generate the token key:
 
@@ -213,6 +217,120 @@ Same URL: **http://localhost:5173**. Drop `--reload` for a calmer backend log.
 
 ### Option C — Linux VPS as a systemd service (rootless Podman)
 
+That is a deployment, not a dev run: host preparation, the unit, the public
+entry points and the update flow are all in **§7 — Deploy on a Linux VPS**. The
+short version is that the backend runs as its own unprivileged user with
+linger, subordinate ID ranges and delegated cgroup controllers, and rootless
+Podman is driven by the app itself.
+
+## 7. Deploy on a Linux VPS
+
+The live deployment is three pieces — the first two run on the box, the third
+is Cloudflare's:
+
+| Piece | What it is |
+|---|---|
+| Backend (§3) | `uvicorn` on `127.0.0.1:8000`, started by a **system** systemd unit as an unprivileged user |
+| Site containers | rootless Podman, same user, driven by the backend through the podman CLI |
+| Public entry | a Cloudflare **Tunnel** for `/api/*` and the built frontend as a Cloudflare **Worker** |
+
+Nothing on the host listens on a public port — the tunnel dials out. Worked
+example throughout, from the live box: Ubuntu 26.04, deploy user `cappuccina`
+(uid 1001), checkout `/srv/cappuccina`, public API `cappuccina-api.mayhair.net`,
+public frontend `cappuccina.mayhair.net`.
+
+### 7.1 Host preparation (as root)
+
+The deploy user gets **no login shell and no sudo**: the app never needs host
+root, and every container runs rootless inside that user's own namespace.
+
+```bash
+sudo useradd --create-home --shell /usr/sbin/nologin cappuccina
+```
+
+Rootless Podman needs its packages, subordinate ID ranges, a lingering user
+manager, delegated cgroup controllers and unprivileged user namespaces:
+
+```bash
+sudo apt update
+sudo apt install -y podman uidmap slirp4netns fuse-overlayfs crun dbus-user-session
+podman --version                                  # live box: 5.7.0
+
+grep '^cappuccina:' /etc/subuid /etc/subgid       # ranges must exist
+sudo usermod --add-subuids 100000-165535 --add-subgids 100000-165535 cappuccina
+
+sudo loginctl enable-linger cappuccina            # /run/user/<uid> and the user manager at boot
+loginctl show-user cappuccina -p Linger           # Linger=yes
+
+sudo mkdir -p /etc/systemd/system/user@.service.d
+sudo tee /etc/systemd/system/user@.service.d/delegate.conf >/dev/null <<'EOF'
+[Service]
+Delegate=cpu cpuset io memory pids
+EOF
+sudo systemctl daemon-reload
+sudo systemctl restart user@$(id -u cappuccina).service
+
+sudo tee /etc/sysctl.d/99-podman-rootless.conf >/dev/null <<'EOF'
+kernel.unprivileged_userns_clone = 1
+kernel.apparmor_restrict_unprivileged_userns = 0
+EOF
+sudo sysctl --system                              # drop any key your kernel doesn't know
+
+sudo ufw allow OpenSSH
+```
+
+`kernel.apparmor_restrict_unprivileged_userns=0` is the one Ubuntu 24.04+
+addition: with AppArmor's userns restriction on, the user namespace is refused
+and every `podman run` fails. Live box: that sysctl is `0`,
+`user.max_user_namespaces` is `27245`.
+
+Prove the environment before building on it. Two quirks of testing as this
+user, both of which apply to every `sudo -u cappuccina` command in this
+section: `sudo -u` inherits root's working directory (so `cd /` first, else
+`cannot chdir to /home/…`), and the `nologin` shell rules out `sudo -i` and
+`su -`.
+
+```bash
+cd / && sudo -u cappuccina env -i \
+  PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+  HOME=/home/cappuccina \
+  sh -c 'podman info | grep -E "rootless|cgroupVersion|cgroupManager" && podman run --rm docker.io/library/alpine echo hello'
+```
+
+Expect `rootless: true`, `cgroupVersion: v2`, `cgroupManager: systemd`, then
+`hello`. `sudo -l -U cappuccina` should report that the user is **not allowed**
+to run sudo — that is the intended state, not a problem to fix.
+
+### 7.2 Checkout, venv, `.env`
+
+```bash
+sudo install -d -o cappuccina -g cappuccina -m 750 /srv/cappuccina
+cd / && sudo -u cappuccina git clone https://github.com/mayhair/cappuccina-ai.git /srv/cappuccina
+cd / && sudo -u cappuccina python3 -m venv /srv/cappuccina/backend/.venv
+cd / && sudo -u cappuccina /srv/cappuccina/backend/.venv/bin/pip install -r /srv/cappuccina/backend/requirements.txt
+cd / && sudo -u cappuccina cp /srv/cappuccina/backend/.env.example /srv/cappuccina/backend/.env
+```
+
+Fill `.env` exactly as in §3 — the API keys are the same keys — with the
+production values:
+
+| Variable | Value on a server |
+|---|---|
+| `APP_ORIGIN` | the origin **users browse**, scheme included (live: `http://cappuccina.mayhair.net`). It builds the three Google redirect URIs and turns the session cookie's `Secure` flag on when it starts with `https://` |
+| `SITE_CONTAINER_CLI` | leave the default `podman` |
+| `SITE_IDLE_MINUTES`, `SITE_*_TIMEOUT` | defaults are fine |
+
+If the repo is private, give the box its own read-only credential rather than
+leaving a token in the remote URL:
+
+```bash
+sudo -u cappuccina ssh-keygen -t ed25519 -N '' -f /home/cappuccina/.ssh/id_ed25519
+cat /home/cappuccina/.ssh/id_ed25519.pub   # GitHub → repo → Settings → Deploy keys (read-only)
+cd / && sudo -u cappuccina git -C /srv/cappuccina remote set-url origin git@github.com:mayhair/cappuccina-ai.git
+```
+
+### 7.3 The systemd unit
+
 `/etc/systemd/system/cappuccina.service`, with `cappuccina` and
 `/srv/cappuccina/backend` replaced by your deployment user and checkout path:
 
@@ -238,21 +356,146 @@ WantedBy=multi-user.target
 ```
 
 Podman runs as the same user the service does (`User=`) — rootless Podman never
-needs root here. Enable linger so that user's runtime directory exists from
-boot even with no login session (`loginctl enable-linger cappuccina`) and make
-sure the user has subuid/subgid ranges (`grep '^cappuccina:' /etc/subuid
-/etc/subgid`). The unit sets **no** `XDG_RUNTIME_DIR` and no
+needs root here. The unit sets **no** `XDG_RUNTIME_DIR` and no
 `DBUS_SESSION_BUS_ADDRESS`: Podman derives `/run/user/<uid>` from its own
 effective UID, which is already the `User=` user. No systemd specifier can name
 that UID — in a system unit `%U`, `%u`, `%h` and `%s` expand to the service
 *manager's* values (`%U` becomes `0`, root), so setting
 `Environment=XDG_RUNTIME_DIR=/run/user/%U` makes every Podman call fail with
-`mkdir /run/user/0/libpod: permission denied`.
+`mkdir /run/user/0/libpod: permission denied`. For the same reason the unit does
+not order itself after `user@%U.service` — that pulls in `user@0.service`; the
+linger from §7.1 keeps the real runtime directory alive instead.
+
+```bash
+sudo tee /etc/systemd/system/cappuccina.service >/dev/null <<'UNIT'
+[Unit]
+Description=Cappuccina backend
+After=network.target
+
+[Service]
+User=cappuccina
+Group=cappuccina
+WorkingDirectory=/srv/cappuccina/backend
+
+Environment=PATH=/srv/cappuccina/backend/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+ExecStart=/srv/cappuccina/backend/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000 --proxy-headers --forwarded-allow-ips=127.0.0.1
+
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+sudo systemctl daemon-reload
+sudo systemctl enable --now cappuccina.service
+systemctl show cappuccina.service -p Environment -p ActiveState -p ExecMainStatus
+journalctl -u cappuccina -f
+```
+
+Expected: `Environment=` holds only that `PATH` line, `ActiveState=active`,
+`ExecMainStatus=0`, and no restart loop.
+
+### 7.4 Public API — a Cloudflare Tunnel
+
+There is no nginx, no caddy and no open HTTP port: `cloudflared` dials out to
+Cloudflare, which terminates TLS for the API hostname.
+
+1. Cloudflare dashboard → **Zero Trust → Networks → Tunnels → Create a tunnel
+   → cloudflared**; name it (live: `cappuccina-api`) and copy the token.
+2. Add a **public hostname**: `cappuccina-api.<your-domain>` → type `HTTP` →
+   URL `127.0.0.1:8000`. The dashboard creates the DNS record itself.
+3. On the box:
+
+```bash
+sudo mkdir -p --mode=0755 /usr/share/keyrings
+curl -fsSL https://pkg.cloudflare.com/cloudflare-main.gpg \
+  | sudo tee /usr/share/keyrings/cloudflare-main.gpg >/dev/null
+echo "deb [signed-by=/usr/share/keyrings/cloudflare-main.gpg] https://pkg.cloudflare.com/cloudflared any main" \
+  | sudo tee /etc/apt/sources.list.d/cloudflared.list
+sudo apt update && sudo apt install -y cloudflared
+sudo cloudflared service install <TOKEN-FROM-THE-DASHBOARD>
+systemctl status cloudflared
+```
+
+That writes `/etc/cloudflared/token` (mode 600) and a unit whose `ExecStart` is
+`/usr/bin/cloudflared --no-autoupdate tunnel run --token-file
+/etc/cloudflared/token`. **The token wins**: ingress lives in the dashboard, so
+a hand-written `/etc/cloudflared/config.yml` is ignored — don't maintain one.
+
+Verify from anywhere:
+
+```bash
+curl -s -o /dev/null -w '%{http_code}\n' https://cappuccina-api.<your-domain>/api/v1/auth/me   # 401
+```
+
+### 7.5 Public frontend — the Worker
+
+The UI is the built Vite app served by a Cloudflare Worker that proxies `/api/*`
+to the tunnel hostname. This runs **from your machine**, not the box — Node and
+npm are not installed on the server, and the backend serves no frontend assets
+of its own:
+
+```bash
+npm install
+npm run build
+npx wrangler deploy
+```
+
+`wrangler.jsonc` versions the parts that belong in the repo: worker name
+`cappuccina-frontend`, `assets.directory: ./dist`, `run_worker_first:
+["/api/*"]`, and `vars.API_ORIGIN` — point that at the tunnel hostname from
+§7.4 (`https://cappuccina-api.<your-domain>`). Two things are **not** in the
+repo and have to be set in the dashboard:
+
+- **A route / custom domain for the worker.** `workers_dev` is `false` and no
+  `routes` are declared, so a bare `wrangler deploy` publishes a worker with no
+  reachable URL. Add `cappuccina.<your-domain>` under **Workers →
+  cappuccina-frontend → Settings → Domains & Routes**.
+- **The Google redirect URIs for the public origin**, in the same client as §4,
+  matching `APP_ORIGIN` exactly:
+
+  ```
+  https://cappuccina.<your-domain>/api/v1/auth/google/callback
+  https://cappuccina.<your-domain>/api/v1/gmail/callback
+  https://cappuccina.<your-domain>/api/v1/calendar/callback
+  ```
+
+Verify the worker is really proxying:
+
+```bash
+curl -s -o /dev/null -w '%{http_code}\n' https://cappuccina.<your-domain>/api/v1/auth/me   # 401
+```
+
+### 7.6 Updating a deployment
+
+```bash
+cd / && sudo -u cappuccina git -C /srv/cappuccina pull --ff-only
+cd / && sudo -u cappuccina /srv/cappuccina/backend/.venv/bin/pip install -r /srv/cappuccina/backend/requirements.txt  # only if deps changed
+sudo systemctl restart cappuccina.service
+```
+
+Frontend changes are `npm run build && npx wrangler deploy` from your machine.
+Nothing else needs restarting: the site image is rebuilt by the app whenever the
+Containerfile's hash changes.
+
+### 7.7 What the app creates on first use
+
+- `backend/data/cappuccina.db` (users, sessions, chats, messages, webpage
+  registry) plus `data/attachments/`, `data/images/` and `data/sites/` — all
+  gitignored, all created on demand.
+- The site image, built lazily by the first `webpage_shell` call and tagged
+  `cappuccina-site:<first 12 hex of the sha256 of backend/sitebox/Containerfile>`
+  (`podman images cappuccina-site`). The build is capped at 600 s; on a slow box
+  build it by hand with the same tag instead.
+- One container per chat that owns a site, named `capweb-<site_id>`
+  (`podman ps --filter name=capweb`), stopped after `SITE_IDLE_MINUTES` of
+  inactivity and started again on the next command.
 
 The webpage canvas needs this container runtime; every other feature runs
 without it.
 
-## 7. Verify it works
+## 8. Verify it works
 
 1. **Backend tools self-test** (venv activated, from `backend/`):
 
@@ -325,7 +568,7 @@ without it.
    python chat_cli.py --reasoning high --mode tutor --subject fractions
    ```
 
-## 8. Troubleshooting
+## 9. Troubleshooting
 
 | Symptom | Likely cause / fix |
 |---|---|
@@ -343,8 +586,16 @@ without it.
 | Weird local state | Delete `backend/data/` to reset all chats and stored files (fresh `CREATE TABLE`s + migrations re-run on next start) |
 | `pip install` fails on Windows | Use a matching Python 3.11+ from python.org; avoid the Store shim (`py -m pip install -r requirements.txt`) |
 | Playwright `Executable doesn't exist` | Run `npx playwright install chromium` |
+| **"The website workspace isn't available on this server right now"** | The runtime could not be reached *and* the build was silent about it. As of the current build the tool shows the runtime's own words instead, so check its message — a genuine connection loss keeps this line (`SITE_CONTAINER_CLI`, engine not running), anything else is quoted (§7.3) |
+| `mkdir /run/user/0/libpod: permission denied` | The unit sets `XDG_RUNTIME_DIR=/run/user/%U`; in a **system** unit `%U` is the service manager's UID (`0`), not `User=`. Delete that line (and `DBUS_SESSION_BUS_ADDRESS`) — Podman derives the path itself (§7.3) |
+| `podman run` fails at once on a fresh VPS | Check, in order: `sysctl kernel.apparmor_restrict_unprivileged_userns` is `0`, `loginctl show-user <user> -p Linger` is `Linger=yes`, `/etc/subuid` + `/etc/subgid` have the user's ranges, and the `user@.service` delegate drop-in is in place (§7.1) |
+| `cannot chdir to /home/…` when testing as the deploy user | `sudo -u` inherits your working directory — `cd /` first (§7.1) |
+| Cloudflare shows 502 for the API hostname | The tunnel is up but nothing answers `127.0.0.1:8000`: check `systemctl status cappuccina`, `journalctl -u cappuccina -n 50`, and that the tunnel's public hostname still points at that port (§7.4) |
+| `wrangler deploy` succeeds but the site URL 404s | No custom domain/route on the worker — `workers_dev` is `false` in `wrangler.jsonc` (§7.5) |
+| Sign-in works locally but not on the server | `APP_ORIGIN` must be the origin users browse, and its three callback URIs must be registered in the Google client; Google requires HTTPS for non-localhost redirect URIs (§7.5, §4) |
+| Chat sends a site command and it hangs, then times out | The site container is starting or the image is building — the first call can take up to the build timeout (§7.7) |
 
-## 9. Repo map (for orientation)
+## 10. Repo map (for orientation)
 
 - `src/` — React UI (`components/ChatWindow.jsx`, `hooks/useChatController.js`)
 - `backend/app/` — FastAPI routes (`main.py`), OAuth (`google_oauth.py`), Gmail
