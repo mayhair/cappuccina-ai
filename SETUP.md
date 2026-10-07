@@ -255,11 +255,24 @@ manager, delegated cgroup controllers and unprivileged user namespaces:
 
 ```bash
 sudo apt update
-sudo apt install -y podman uidmap slirp4netns fuse-overlayfs crun dbus-user-session
+sudo apt install -y podman uidmap slirp4netns fuse-overlayfs crun dbus-user-session \
+  python3-venv git curl
 podman --version                                  # live box: 5.7.0
+```
 
-grep '^cappuccina:' /etc/subuid /etc/subgid       # ranges must exist
-sudo usermod --add-subuids 100000-165535 --add-subgids 100000-165535 cappuccina
+`python3-venv` is easy to miss on a minimal image — Ubuntu ships the venv/ensurepip
+support in a versioned package (`python3.14-venv` on the live box), and without it
+`python3 -m venv` fails.
+
+Rootless Podman also needs subordinate ID ranges, a lingering user manager,
+delegated cgroup controllers and unprivileged user namespaces — the user-level
+half of the setup:
+
+```bash
+cat /etc/subuid /etc/subgid                       # pick a range nobody else holds
+# live box: administrator has 100000:65536, so cappuccina got 165536:65536
+sudo usermod --add-subuids 165536-231071 --add-subgids 165536-231071 cappuccina
+grep '^cappuccina:' /etc/subuid /etc/subgid       # both lines must exist
 
 sudo loginctl enable-linger cappuccina            # /run/user/<uid> and the user manager at boot
 loginctl show-user cappuccina -p Linger           # Linger=yes
@@ -286,6 +299,13 @@ addition: with AppArmor's userns restriction on, the user namespace is refused
 and every `podman run` fails. Live box: that sysctl is `0`,
 `user.max_user_namespaces` is `27245`.
 
+Only SSH needs an inbound rule. Outbound is where the app lives, so leave the
+default `allow outgoing`: the site image build pulls
+`docker.io/library/node:22-bookworm-slim`, site containers reach the npm
+registry, and the backend calls `openrouter.ai`, `api.openai.com`,
+`api.parallel.ai`, `api.fish.audio`, Google's OAuth/Gmail/Calendar endpoints and
+`fmhy-mcp.ken.tools` (blank `FMHY_MCP_URL` disables that tool).
+
 Prove the environment before building on it. Two quirks of testing as this
 user, both of which apply to every `sudo -u cappuccina` command in this
 section: `sudo -u` inherits root's working directory (so `cd /` first, else
@@ -305,31 +325,40 @@ to run sudo — that is the intended state, not a problem to fix.
 
 ### 7.2 Checkout, venv, `.env`
 
+The repo is **private**, so give the box its own read-only credential *before*
+cloning — a deploy key, not a token in the remote URL:
+
+```bash
+cd / && sudo -u cappuccina sh -c 'ssh-keygen -q -t ed25519 -N "" -f ~/.ssh/id_ed25519 && ssh-keyscan -t ed25519 github.com >> ~/.ssh/known_hosts 2>/dev/null'
+sudo -u cappuccina cat /home/cappuccina/.ssh/id_ed25519.pub   # GitHub → repo → Settings → Deploy keys → Add (read-only)
+```
+
+Then the checkout, venv and `.env`:
+
 ```bash
 sudo install -d -o cappuccina -g cappuccina -m 750 /srv/cappuccina
-cd / && sudo -u cappuccina git clone https://github.com/mayhair/cappuccina-ai.git /srv/cappuccina
+cd / && sudo -u cappuccina git clone git@github.com:mayhair/cappuccina-ai.git /srv/cappuccina
 cd / && sudo -u cappuccina python3 -m venv /srv/cappuccina/backend/.venv
 cd / && sudo -u cappuccina /srv/cappuccina/backend/.venv/bin/pip install -r /srv/cappuccina/backend/requirements.txt
 cd / && sudo -u cappuccina cp /srv/cappuccina/backend/.env.example /srv/cappuccina/backend/.env
 ```
+
+A clone that fails with `Permission denied (publickey)` means the key was never
+added to the repo; `Repository not found` over HTTPS means the same thing, since
+GitHub answers `404` for private repos you can't read.
 
 Fill `.env` exactly as in §3 — the API keys are the same keys — with the
 production values:
 
 | Variable | Value on a server |
 |---|---|
-| `APP_ORIGIN` | the origin **users browse**, scheme included (live: `http://cappuccina.mayhair.net`). It builds the three Google redirect URIs and turns the session cookie's `Secure` flag on when it starts with `https://` |
+| `APP_ORIGIN` | the origin **users browse**, scheme included (live: `http://cappuccina.mayhair.net`). It builds the three Google redirect URIs, and the session cookie gets its `Secure` flag only when it starts with `https://` — so a plain-`http` origin means a cookie that is also sent over http |
 | `SITE_CONTAINER_CLI` | leave the default `podman` |
 | `SITE_IDLE_MINUTES`, `SITE_*_TIMEOUT` | defaults are fine |
 
-If the repo is private, give the box its own read-only credential rather than
-leaving a token in the remote URL:
-
-```bash
-sudo -u cappuccina ssh-keygen -t ed25519 -N '' -f /home/cappuccina/.ssh/id_ed25519
-cat /home/cappuccina/.ssh/id_ed25519.pub   # GitHub → repo → Settings → Deploy keys (read-only)
-cd / && sudo -u cappuccina git -C /srv/cappuccina remote set-url origin git@github.com:mayhair/cappuccina-ai.git
-```
+No CORS configuration is needed in production: the Worker serves the UI and
+proxies `/api/*` to the tunnel, so the browser only ever talks to one origin
+(the backend's CORS list is for localhost dev).
 
 ### 7.3 The systemd unit
 
@@ -444,6 +473,11 @@ npm run build
 npx wrangler deploy
 ```
 
+`wrangler` is not a dependency of this repo and there is no deploy script — `npx`
+fetches it on demand. Authenticate once with `npx wrangler login` (browser
+OAuth), or export `CLOUDFLARE_API_TOKEN` (and `CLOUDFLARE_ACCOUNT_ID` if the
+token can see more than one account) for a non-interactive deploy.
+
 `wrangler.jsonc` versions the parts that belong in the repo: worker name
 `cappuccina-frontend`, `assets.directory: ./dist`, `run_worker_first:
 ["/api/*"]`, and `vars.API_ORIGIN` — point that at the tunnel hostname from
@@ -497,6 +531,35 @@ Containerfile's hash changes.
 
 The webpage canvas needs this container runtime; every other feature runs
 without it.
+
+### 7.8 Acceptance test on the box
+
+The site runtime has its own suite, and it is the one test that must pass on a
+server (it needs a real engine, so it skips itself elsewhere). As the deploy
+user, in the same environment the service runs in:
+
+```bash
+cd / && sudo -u cappuccina /srv/cappuccina/backend/.venv/bin/pip install -q -r /srv/cappuccina/backend/requirements-dev.txt
+cd / && sudo -u cappuccina sh -c 'cd /srv/cappuccina/backend && .venv/bin/python -m pytest tests/test_sitebox.py -q -rs'
+```
+
+Expected on the live box: `8 passed, 1 skipped` — the skip is
+`test_container_symlinks_are_dropped_so_git_can_stage`, which only applies to
+Windows/WSL hosts. It covers engine availability, image build, create/start,
+exec with exit codes, the timeout message, the npm build landing in `dist/`, the
+in-container `curl` + restricted `apt-get` sudo, and idle stop/restart. It
+removes its own container and volume.
+
+Then prove the user-visible path end to end, in the app itself: open a chat that
+owns a site and ask her to run something in the website terminal (e.g. *"in the
+website terminal run `uname -a` and `ls`"*). The reply must carry a **Running
+Site Command** card with `exit_code: 0` and the container's real output — never
+*"The website workspace isn't available on this server right now"*. While it
+runs:
+
+```bash
+cd / && sudo -u cappuccina podman ps --filter name=capweb
+```
 
 ## 8. Verify it works
 
