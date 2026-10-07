@@ -128,8 +128,10 @@ Gmail connection. In [Google Cloud Console](https://console.cloud.google.com/):
    ```
 
    Deploying to a server means adding the same three paths on the public origin
-   you browse, as `https://<frontend-origin>/api/v1/...` — Google requires
-   HTTPS for anything that isn't localhost (§7.5).
+   you browse, with the same scheme as `APP_ORIGIN` (§7.5). Google's
+   [redirect-URI rules](https://developers.google.com/identity/protocols/oauth2/web-server#uri-validation)
+   prefer HTTPS for anything that isn't localhost — the live deployment
+   registers plain `http://` and works, but use `https://` where you can.
 
 5. Copy the **client ID** and **client secret** into `backend/.env` as
    `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`, and generate the token key:
@@ -453,7 +455,8 @@ repo and have to be set in the dashboard:
   reachable URL. Add `cappuccina.<your-domain>` under **Workers →
   cappuccina-frontend → Settings → Domains & Routes**.
 - **The Google redirect URIs for the public origin**, in the same client as §4,
-  matching `APP_ORIGIN` exactly:
+  matching `APP_ORIGIN` exactly — the live deployment registers the `http://`
+  trio and signs in, but HTTPS is the better choice:
 
   ```
   https://cappuccina.<your-domain>/api/v1/auth/google/callback
@@ -592,7 +595,7 @@ without it.
 | `cannot chdir to /home/…` when testing as the deploy user | `sudo -u` inherits your working directory — `cd /` first (§7.1) |
 | Cloudflare shows 502 for the API hostname | The tunnel is up but nothing answers `127.0.0.1:8000`: check `systemctl status cappuccina`, `journalctl -u cappuccina -n 50`, and that the tunnel's public hostname still points at that port (§7.4) |
 | `wrangler deploy` succeeds but the site URL 404s | No custom domain/route on the worker — `workers_dev` is `false` in `wrangler.jsonc` (§7.5) |
-| Sign-in works locally but not on the server | `APP_ORIGIN` must be the origin users browse, and its three callback URIs must be registered in the Google client; Google requires HTTPS for non-localhost redirect URIs (§7.5, §4) |
+| Sign-in works locally but not on the server | `APP_ORIGIN` must be the origin users browse, scheme included, and its three callback URIs must be registered in the Google client exactly as they are built (§7.5, §4) |
 | Chat sends a site command and it hangs, then times out | The site container is starting or the image is building — the first call can take up to the build timeout (§7.7) |
 
 ## 10. Repo map (for orientation)
