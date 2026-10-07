@@ -207,6 +207,20 @@ def test_shell_reports_an_unreachable_engine_verbatim(isolated_db, monkeypatch):
     out = tools.webpage_shell.invoke({"command": "echo hi"}, config=_config(user, chat))
     assert out == sitebox.UNAVAILABLE_MESSAGE
 
+    # Any other runtime failure carries its own reason: a container that cannot
+    # be built/created/started must show the CLI's words, not the generic line.
+    reason = (
+        "Could not build the website workspace image: "
+        "mkdir /run/user/0/libpod: permission denied"
+    )
+
+    def broken(site, command, timeout):
+        raise sitebox.SiteboxUnavailable(reason)
+
+    monkeypatch.setattr(tools.sitebox, "run_command", broken)
+    out = tools.webpage_shell.invoke({"command": "echo hi"}, config=_config(user, chat))
+    assert out == reason
+
 
 def test_shell_clamps_the_timeout_and_shapes_its_result(isolated_db, monkeypatch):
     from agent import tools

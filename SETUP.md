@@ -211,6 +211,47 @@ npm run dev
 
 Same URL: **http://localhost:5173**. Drop `--reload` for a calmer backend log.
 
+### Option C — Linux VPS as a systemd service (rootless Podman)
+
+`/etc/systemd/system/cappuccina.service`, with `cappuccina` and
+`/srv/cappuccina/backend` replaced by your deployment user and checkout path:
+
+```ini
+[Unit]
+Description=Cappuccina backend
+After=network.target
+
+[Service]
+User=cappuccina
+Group=cappuccina
+WorkingDirectory=/srv/cappuccina/backend
+
+Environment=PATH=/srv/cappuccina/backend/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+ExecStart=/srv/cappuccina/backend/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000 --proxy-headers --forwarded-allow-ips=127.0.0.1
+
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Podman runs as the same user the service does (`User=`) — rootless Podman never
+needs root here. Enable linger so that user's runtime directory exists from
+boot even with no login session (`loginctl enable-linger cappuccina`) and make
+sure the user has subuid/subgid ranges (`grep '^cappuccina:' /etc/subuid
+/etc/subgid`). The unit sets **no** `XDG_RUNTIME_DIR` and no
+`DBUS_SESSION_BUS_ADDRESS`: Podman derives `/run/user/<uid>` from its own
+effective UID, which is already the `User=` user. No systemd specifier can name
+that UID — in a system unit `%U`, `%u`, `%h` and `%s` expand to the service
+*manager's* values (`%U` becomes `0`, root), so setting
+`Environment=XDG_RUNTIME_DIR=/run/user/%U` makes every Podman call fail with
+`mkdir /run/user/0/libpod: permission denied`.
+
+The webpage canvas needs this container runtime; every other feature runs
+without it.
+
 ## 7. Verify it works
 
 1. **Backend tools self-test** (venv activated, from `backend/`):

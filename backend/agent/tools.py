@@ -934,8 +934,8 @@ def webpage_shell(command: str, config: RunnableConfig, timeout: int = SITE_EXEC
         exit_code, output = sitebox.run_command(
             site, command, max(1, min(_WEBPAGE_TIMEOUT_MAX, int(timeout)))
         )
-    except sitebox.SiteboxUnavailable:
-        return sitebox.UNAVAILABLE_MESSAGE
+    except sitebox.SiteboxUnavailable as exc:
+        return str(exc)
     return json.dumps(
         {
             "status": "webpage_command_ran",
