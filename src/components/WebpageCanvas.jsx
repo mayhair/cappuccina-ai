@@ -535,6 +535,20 @@ export function WebpageCanvas({
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [fullscreen, draft])
 
+  // On phones the canvas is already full-bleed and its fullscreen toggle is
+  // hidden, so leave fullscreen if the viewport shrinks into that range.
+  useEffect(() => {
+    if (!fullscreen) return
+    const mq = window.matchMedia?.('(max-width: 768px)')
+    if (!mq) return
+    const onChange = () => {
+      if (mq.matches) setFullscreen(false)
+    }
+    onChange()
+    mq.addEventListener('change', onChange)
+    return () => mq.removeEventListener('change', onChange)
+  }, [fullscreen])
+
   // The diff is fetched when the Changes tab is shown and refetched whenever
   // the active iteration moves (activation, a new run, a manual save).
   useEffect(() => {
@@ -685,7 +699,7 @@ export function WebpageCanvas({
           <div className="canvas-icons">
             <button
               type="button"
-              className="canvas-icon-btn has-tip"
+              className="canvas-icon-btn canvas-fs-btn has-tip"
               data-tip={fullscreen ? 'Exit fullscreen' : 'Fullscreen'}
               aria-label={fullscreen ? 'Exit fullscreen' : 'Fullscreen'}
               aria-pressed={fullscreen}

@@ -4,7 +4,7 @@ import { TypewriterTitle } from './TypewriterTitle'
 import { ChatTitle } from './ChatTitle'
 import { EmojiText } from '../lib/emoji'
 
-export function Sidebar({ chats, activeChatId, onSelect, onNewChat, onDelete, onRename, query, onQuery, searchInputRef, collapsed, typingTitleId, onTitleTyped, user, onLogout, onSettings }) {
+export function Sidebar({ chats, activeChatId, onSelect, onNewChat, onDelete, onRename, query, onQuery, searchInputRef, collapsed, typingTitleId, onTitleTyped, user, onLogout, onSettings, onClose }) {
   const [pendingDelete, setPendingDelete] = useState(null)
   const [menuFor, setMenuFor] = useState(null)
   const [menuUp, setMenuUp] = useState(false)
@@ -99,6 +99,14 @@ export function Sidebar({ chats, activeChatId, onSelect, onNewChat, onDelete, on
           <img src="/plates/msg-avatar.webp" alt="Ballerina Cappuccina, an AI character whose head is a coffee cup" />
         </div>
         <div className="side-name">Cappuccina</div>
+        <button
+          type="button"
+          className="sidebar-close"
+          aria-label="Close sidebar"
+          onClick={onClose}
+        >
+          <CloseIcon />
+        </button>
       </div>
 
       <button className="new-chat-btn" type="button" onClick={onNewChat}>

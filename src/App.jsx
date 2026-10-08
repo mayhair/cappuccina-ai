@@ -12,6 +12,7 @@ import { AlphaGate } from './components/AlphaGate'
 import { SettingsDialog } from './components/SettingsDialog'
 import { getMe, logout } from './api/authClient'
 import { useChatController } from './hooks/useChatController'
+import { useMediaQuery } from './hooks/useMediaQuery'
 import tts from './lib/tts'
 
 export default function App() {
@@ -34,13 +35,43 @@ export default function App() {
     tts.setEnabled(voice)
   }, [voice])
 
-  const [collapsed, setCollapsed] = useState(
-    () => localStorage.getItem('cappuccina-sidebar-collapsed') === '1',
-  )
+  const isMobile = useMediaQuery('(max-width: 900px)')
+
+  const [collapsed, setCollapsed] = useState(() => {
+    const saved = localStorage.getItem('cappuccina-sidebar-collapsed')
+    if (saved === '1') return true
+    if (saved === '0') return false
+    return window.matchMedia?.('(max-width: 900px)').matches ?? false
+  })
 
   useEffect(() => {
     localStorage.setItem('cappuccina-sidebar-collapsed', collapsed ? '1' : '0')
   }, [collapsed])
+
+  // Track the visual viewport so the composer stays above the phone keyboard.
+  // Only the keyboard shrinks vv.height; pinch/browser zoom also shrinks
+  // vv.width, so we ignore those (and desktop entirely) to avoid reflowing the
+  // app on every zoom frame, which made the layout twist while zooming.
+  useEffect(() => {
+    const vv = window.visualViewport
+    if (!vv) return
+    const root = document.documentElement
+    const update = () => {
+      const zoomed = vv.width < root.clientWidth - 1
+      if (window.innerWidth > 900 || zoomed) {
+        root.style.removeProperty('--app-height')
+        return
+      }
+      root.style.setProperty('--app-height', `${Math.round(vv.height)}px`)
+    }
+    update()
+    vv.addEventListener('resize', update)
+    window.addEventListener('resize', update)
+    return () => {
+      vv.removeEventListener('resize', update)
+      window.removeEventListener('resize', update)
+    }
+  }, [])
 
   const searchInputRef = useRef(null)
 
@@ -50,6 +81,27 @@ export default function App() {
     setCollapsed(false)
     requestAnimationFrame(() => searchInputRef.current?.focus())
   }
+
+  // On mobile the sidebar is a drawer: picking a chat or starting a new one
+  // closes it so the chat gets the whole screen.
+  const handleSelectChat = (id) => {
+    selectChat(id)
+    if (isMobile) setCollapsed(true)
+  }
+
+  const handleNewChat = () => {
+    newChat()
+    if (isMobile) setCollapsed(true)
+  }
+
+  useEffect(() => {
+    if (!isMobile || collapsed) return
+    const onKey = (e) => {
+      if (e.key === 'Escape') setCollapsed(true)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [isMobile, collapsed])
 
   const [user, setUser] = useState(null)
   const [authPhase, setAuthPhase] = useState('checking') // checking | landing
@@ -171,11 +223,19 @@ export default function App() {
     <div className={`app${collapsed ? ' is-collapsed' : ''}${canvasOpen ? ' canvas-open' : ''}`}>
       <Sky theme={theme} />
 
+      {isMobile && !collapsed && (
+        <div
+          className="sidebar-scrim"
+          aria-hidden="true"
+          onClick={() => setCollapsed(true)}
+        />
+      )}
+
       <Sidebar
         chats={chats}
         activeChatId={activeChatId}
-        onSelect={selectChat}
-        onNewChat={newChat}
+        onSelect={handleSelectChat}
+        onNewChat={handleNewChat}
         onDelete={deleteChat}
         onRename={renameChat}
         query={query}
@@ -186,7 +246,11 @@ export default function App() {
         onTitleTyped={clearTypingTitle}
         user={user}
         onLogout={handleLogout}
-        onSettings={() => setSettingsOpen(true)}
+        onSettings={() => {
+          setSettingsOpen(true)
+          if (isMobile) setCollapsed(true)
+        }}
+        onClose={() => setCollapsed(true)}
       />
       <SettingsDialog
         user={user}
@@ -210,7 +274,8 @@ export default function App() {
               collapsed={collapsed}
               onToggle={toggleSidebar}
               onSearch={openSidebarAndSearch}
-              onNewChat={newChat}
+              onNewChat={handleNewChat}
+              mobile={isMobile}
             />
             <TopBarTitle
               title={activeChat.pending ? '' : activeChat.title}
@@ -235,8 +300,11 @@ export default function App() {
             <SpeakerToggle enabled={voice} onChange={setVoice} />
             <ThemeToggle theme={theme} onChange={setTheme} />
             <span className="ai-badge">
-              <SparkleIcon />
-              I'm an AI
+              <SparkleIcon aria-hidden="true" />
+              <span className="ai-badge-full">I'm an AI</span>
+              <span className="ai-badge-short" aria-hidden="true">
+                AI
+              </span>
             </span>
           </div>
         </header>

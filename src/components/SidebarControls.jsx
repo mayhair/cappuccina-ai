@@ -1,6 +1,6 @@
 import { SidebarIcon, SearchIcon, PlusIcon } from './Icons'
 
-export function SidebarControls({ collapsed, onToggle, onSearch, onNewChat }) {
+export function SidebarControls({ collapsed, onToggle, onSearch, onNewChat, mobile = false }) {
   return (
     <div className="sidebar-controls" role="group" aria-label="Chat controls">
       <button
@@ -15,15 +15,17 @@ export function SidebarControls({ collapsed, onToggle, onSearch, onNewChat }) {
       </button>
       {collapsed && (
         <>
-          <button
-            type="button"
-            className="ctrl-btn has-tip"
-            data-tip="Search"
-            aria-label="Search chats"
-            onClick={onSearch}
-          >
-            <SearchIcon />
-          </button>
+          {!mobile && (
+            <button
+              type="button"
+              className="ctrl-btn has-tip"
+              data-tip="Search"
+              aria-label="Search chats"
+              onClick={onSearch}
+            >
+              <SearchIcon />
+            </button>
+          )}
           <button
             type="button"
             className="ctrl-btn has-tip"
