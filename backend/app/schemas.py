@@ -52,7 +52,8 @@ class ChatResponse(BaseModel):
 
 
 class UpdateProfileRequest(BaseModel):
-    display_name: str = Field(alias="displayName")
+    display_name: str | None = Field(default=None, alias="displayName")
+    adult_mode: bool | None = Field(default=None, alias="adultMode")
 
     model_config = {"populate_by_name": True}
 
@@ -64,6 +65,7 @@ class UserResponse(BaseModel):
     avatar_url: str | None = Field(default=None, alias="avatarUrl")
     gmail_connected: bool = Field(default=False, alias="gmailConnected")
     calendar_connected: bool = Field(default=False, alias="calendarConnected")
+    adult_mode: bool = Field(default=False, alias="adultMode")
 
     model_config = {"populate_by_name": True}
 

@@ -258,6 +258,34 @@ def test_system_prompt_omits_lore_in_tutor_mode():
     assert "Your lore book" not in prompt
 
 
+def test_system_prompt_default_keeps_young_user_safety():
+    from agent.prompts import build_system_prompt
+
+    prompt = build_system_prompt("chat", None)
+    assert "Users are kids." in prompt
+    assert "18 or older" not in prompt
+
+
+def test_system_prompt_adult_swaps_young_user_safety():
+    from agent.prompts import build_system_prompt
+
+    prompt = build_system_prompt("chat", None, adult=True)
+    assert "## Safety for young users" not in prompt
+    assert "Users are kids." not in prompt
+    assert "18 or older" in prompt
+    # age-neutral rules survive the swap
+    assert "never sends email" in prompt
+
+
+def test_build_messages_threads_adult_flag():
+    from agent import prompts
+
+    messages = prompts.build_messages(
+        "chat", None, None, [{"role": "user", "content": "hi"}], adult=True
+    )
+    assert "18 or older" in messages[0]["content"]
+
+
 def test_today_uses_the_given_timezone():
     from datetime import datetime, timezone
 

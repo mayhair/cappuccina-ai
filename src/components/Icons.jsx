@@ -324,3 +324,11 @@ export function SpeakerOffIcon(props) {
     </svg>
   )
 }
+
+export function ShieldIcon(props) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <path d="M12 3l7 3v5.5c0 4.4-3 7.7-7 9.5-4-1.8-7-5.1-7-9.5V6l7-3Z" />
+    </svg>
+  )
+}

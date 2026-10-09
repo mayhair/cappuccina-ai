@@ -29,6 +29,8 @@ async function request(path, { method = 'GET', body } = {}) {
 export const getMe = () => request('/api/v1/auth/me')
 export const updateProfile = ({ name }) =>
   request('/api/v1/auth/me', { method: 'PATCH', body: { displayName: name } })
+export const setAdultMode = (enabled) =>
+  request('/api/v1/auth/me', { method: 'PATCH', body: { adultMode: enabled } })
 
 // Sign-in is a full-page redirect (cookie is set by the OAuth callback).
 export const googleSignInUrl = '/api/v1/auth/google/start'

@@ -2035,6 +2035,12 @@ img.user-avatar {
   outline: 2px solid var(--pink-strong);
   outline-offset: 0;
 }
+/* The browser draws a date field's calendar glyph in a dark colour, so it all
+   but vanishes on the dark field. color-scheme tells the browser to render the
+   native control (glyph and the popup calendar) for a dark surface. */
+[data-theme='dark'] .settings-input[type='date'] {
+  color-scheme: dark;
+}
 .settings-actions {
   display: flex;
   justify-content: flex-end;

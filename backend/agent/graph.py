@@ -16,6 +16,7 @@ class AgentState(MessagesState):
     mode: str
     subject: str | None
     timezone: str | None
+    adult: bool
 
 
 def _tool_error_message(error: Exception) -> str:
@@ -51,7 +52,11 @@ def build_graph(tools=None):
     def call_model(state: AgentState):
         model = make_model(state["reasoning"], tool_list)
         messages = build_messages(
-            state["mode"], state.get("subject"), state.get("timezone"), state["messages"]
+            state["mode"],
+            state.get("subject"),
+            state.get("timezone"),
+            state["messages"],
+            state.get("adult", False),
         )
         return {"messages": [model.invoke(messages)]}
 

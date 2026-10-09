@@ -130,3 +130,27 @@ def test_schema_allows_oauth_only_users(isolated_db):
     assert "avatar_url" in cols
     plan = db.create_google_user("a@b.com", "A", "sub-a")
     assert plan["email"] == "a@b.com"
+
+
+def test_adult_mode_defaults_off_and_round_trips(signed_in):
+    assert signed_in.get("/api/v1/auth/me").json()["adultMode"] is False
+
+    res = signed_in.patch("/api/v1/auth/me", json={"adultMode": True})
+    assert res.status_code == 200
+    assert res.json()["adultMode"] is True
+    assert signed_in.get("/api/v1/auth/me").json()["adultMode"] is True
+
+    # a name-only patch leaves the flag alone
+    signed_in.patch("/api/v1/auth/me", json={"displayName": "New Name"})
+    me = signed_in.get("/api/v1/auth/me").json()
+    assert me["displayName"] == "New Name"
+    assert me["adultMode"] is True
+
+
+def test_state_carries_adult_mode(signed_in):
+    from app import db, main
+    from app.schemas import ChatRequest
+
+    signed_in.patch("/api/v1/auth/me", json={"adultMode": True})
+    user = db.get_user_by_id(signed_in.get("/api/v1/auth/me").json()["id"])
+    assert main._state(ChatRequest(chatId="x", messages=[]), user)["adult"] is True

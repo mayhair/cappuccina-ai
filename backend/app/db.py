@@ -162,6 +162,7 @@ def _init_schema(conn: sqlite3.Connection) -> None:
             password_hash TEXT,
             google_sub TEXT,
             avatar_url TEXT,
+            adult_mode INTEGER NOT NULL DEFAULT 0,
             created_at TEXT NOT NULL
         );
 
@@ -307,7 +308,15 @@ def _init_schema(conn: sqlite3.Connection) -> None:
     _migrate_messages_for_branching(conn)
     _migrate_users_for_oauth(conn)
     _migrate_grants_for_services(conn)
+    _migrate_users_for_adult_mode(conn)
     conn.commit()
+
+
+def _migrate_users_for_adult_mode(conn: sqlite3.Connection) -> None:
+    """Add the adult-mode flag column to databases created before it existed."""
+    info = {row["name"] for row in conn.execute("PRAGMA table_info(users)").fetchall()}
+    if info and "adult_mode" not in info:
+        conn.execute("ALTER TABLE users ADD COLUMN adult_mode INTEGER NOT NULL DEFAULT 0")
 
 
 def _migrate_messages_for_branching(conn: sqlite3.Connection) -> None:
@@ -478,6 +487,15 @@ def update_user_display_name(user_id: str, display_name: str) -> None:
     conn.execute(
         "UPDATE users SET display_name = :name WHERE id = :id",
         {"name": display_name, "id": user_id},
+    )
+    conn.commit()
+
+
+def update_user_adult_mode(user_id: str, enabled: bool) -> None:
+    conn = get_conn()
+    conn.execute(
+        "UPDATE users SET adult_mode = :v WHERE id = :id",
+        {"v": 1 if enabled else 0, "id": user_id},
     )
     conn.commit()
 

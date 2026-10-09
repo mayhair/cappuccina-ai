@@ -52,6 +52,11 @@ def _without_sections(text: str, headings: set[str]) -> str:
 BOUNDARIES = _read("boundaries.md")
 PERSONA = _read("persona.md")
 VOICE = _read("voice.md")
+ADULT_SAFETY = _read("safety-adult.md")
+
+# The young-user safety block lives in the boundaries file under this heading;
+# adult mode swaps it for the adult safety section.
+_YOUNG_USER_SAFETY = {"Safety for young users"}
 
 # Tutor mode keeps the persona's core but trims the decorative sections,
 # so teaching instructions lead and the prompt stays focused.
@@ -107,7 +112,7 @@ folders freely):
 Do not run git yourself; the system versions every change automatically."""
 
 
-def build_system_prompt(mode: str, subject: str | None) -> str:
+def build_system_prompt(mode: str, subject: str | None, adult: bool = False) -> str:
     if mode == "tutor":
         persona = _without_sections(PERSONA, _TUTOR_PERSONA_TRIM)
         voice = _without_sections(VOICE, _TUTOR_VOICE_TRIM)
@@ -119,7 +124,12 @@ def build_system_prompt(mode: str, subject: str | None) -> str:
         voice = VOICE
         tutor = ""
         lore = lorebook.prompt_section()
-    sections = [BOUNDARIES, persona, voice]
+    if adult:
+        boundaries = _without_sections(BOUNDARIES, _YOUNG_USER_SAFETY)
+        boundaries = f"{boundaries}\n\n{ADULT_SAFETY}"
+    else:
+        boundaries = BOUNDARIES
+    sections = [boundaries, persona, voice]
     if lore:
         sections.append(lore)
     sections.append(ATTACHMENT_NOTE)
@@ -133,7 +143,13 @@ def date_line(timezone: str | None = None) -> str:
     return f"Current Date: {today(timezone)}"
 
 
-def build_messages(mode: str, subject: str | None, timezone: str | None, history):
+def build_messages(
+    mode: str,
+    subject: str | None,
+    timezone: str | None,
+    history,
+    adult: bool = False,
+):
     """One model call's full message list.
 
     The system prompt leads (stable, so it stays cache-friendly), the chat
@@ -142,7 +158,7 @@ def build_messages(mode: str, subject: str | None, timezone: str | None, history
     instead of a date frozen at the top of the conversation.
     """
     return [
-        {"role": "system", "content": build_system_prompt(mode, subject)},
+        {"role": "system", "content": build_system_prompt(mode, subject, adult)},
         *history,
         {"role": "system", "content": date_line(timezone)},
     ]
