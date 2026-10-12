@@ -71,6 +71,18 @@ to test the webpages she builds (the `check_webpage` tool and the automatic
 check before she says a page is ready). Without it everything else works; the
 check just reports that it isn't set up.
 
+On Linux the browser also needs OS libraries that pip cannot install (`libatk`,
+`libgbm` and friends). From `backend/`, with the venv active, run once:
+
+```bash
+sudo .venv/bin/python -m playwright install-deps chromium
+```
+
+macOS and Windows don't need this step. Without it the browser is downloaded
+but cannot start, and the check reports the same "isn't set up" message even
+though Chromium is present — the backend log has the real reason (typically a
+missing shared library).
+
 > If Windows blocks the activation script, run
 > `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` once, then retry.
 
@@ -662,6 +674,7 @@ cd / && sudo -u cappuccina podman ps --filter name=capweb
 | Weird local state | Delete `backend/data/` to reset all chats and stored files (fresh `CREATE TABLE`s + migrations re-run on next start) |
 | `pip install` fails on Windows | Use a matching Python 3.11+ from python.org; avoid the Store shim (`py -m pip install -r requirements.txt`) |
 | Playwright `Executable doesn't exist` | Run `npx playwright install chromium` |
+| **"Testing webpages isn't set up on this server"** from `check_webpage` | Chromium is missing *or* cannot start — on Linux run `sudo .venv/bin/python -m playwright install-deps chromium`, then `python -m playwright install chromium` in the venv (§3); the backend log (`journalctl -u cappuccina`) has the real cause |
 | **"The website workspace isn't available on this server right now"** | The runtime could not be reached *and* the build was silent about it. As of the current build the tool shows the runtime's own words instead, so check its message — a genuine connection loss keeps this line (`SITE_CONTAINER_CLI`, engine not running), anything else is quoted (§7.3) |
 | `mkdir /run/user/0/libpod: permission denied` | The unit sets `XDG_RUNTIME_DIR=/run/user/%U`; in a **system** unit `%U` is the service manager's UID (`0`), not `User=`. Delete that line (and `DBUS_SESSION_BUS_ADDRESS`) — Podman derives the path itself (§7.3) |
 | `podman run` fails at once on a fresh VPS | Check, in order: `sysctl kernel.apparmor_restrict_unprivileged_userns` is `0`, `loginctl show-user <user> -p Linger` is `Linger=yes`, `/etc/subuid` + `/etc/subgid` have the user's ranges, and the `user@.service` delegate drop-in is in place (§7.1) |

@@ -20,11 +20,14 @@ http, localhost or private-address request is aborted, so page code cannot
 reach this backend or anything else on the host's network.
 
 Chromium comes from Python Playwright (`python -m playwright install
-chromium`); without it every check raises CheckUnavailable.
+chromium`; its OS libraries on Linux come from `install-deps chromium`);
+without it every check raises CheckUnavailable. The real failure is logged
+server-side so a misconfigured host is diagnosable.
 """
 
 import asyncio
 import ipaddress
+import logging
 import re
 import sys
 import time
@@ -37,6 +40,8 @@ from app.webpage_preview import (
     resolve_preview,
     serve_root,
 )
+
+logger = logging.getLogger(__name__)
 
 CHECK_ORIGIN = "http://site.check"
 # Must match the canvas iframe (src/components/WebpageCanvas.jsx).
@@ -60,7 +65,7 @@ UNAVAILABLE_MESSAGE = (
 
 
 class CheckUnavailable(Exception):
-    """Playwright or its Chromium is not installed on this server."""
+    """Playwright or its Chromium is missing or cannot start on this server."""
 
 
 def _harness(src: str) -> str:
@@ -619,6 +624,11 @@ async def _check(workspace, base: str, steps: list | None) -> dict:
         try:
             browser = await pw.chromium.launch()
         except Exception as exc:
+            # The message for the model stays friendly; the real cause (a
+            # missing OS library, a half-downloaded browser, …) goes to the
+            # server log, where the Playwright error carries the browser's
+            # own stderr.
+            logger.warning("check_webpage: launching Chromium failed: %s", exc)
             raise CheckUnavailable(UNAVAILABLE_MESSAGE) from exc
         try:
             context = await browser.new_context(viewport=VIEWPORT, service_workers="block")
@@ -655,11 +665,12 @@ def run_check(site: dict, steps: list | None = None) -> dict:
 
     Blocking (it drives its own event loop), so call it from a worker thread —
     tools and graph nodes already run there. Raises CheckUnavailable when
-    Playwright or Chromium is missing.
+    Playwright or Chromium is missing or cannot start.
     """
     try:
         import playwright.async_api  # noqa: F401
     except ImportError as exc:
+        logger.warning("check_webpage: Playwright is not importable: %s", exc)
         raise CheckUnavailable(UNAVAILABLE_MESSAGE) from exc
     workspace = sitebox.workspace_dir(site["id"])
     base = preview_base(site)
