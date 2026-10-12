@@ -6,7 +6,7 @@ from langgraph.prebuilt import ToolNode
 from agent.fmhy import safety_note_for
 from agent.model import make_model
 from agent.prompts import build_messages
-from agent.tools import ALL_TOOLS
+from agent.tools import ALL_TOOLS, CALENDAR_TOOL_NAMES, GMAIL_TOOL_NAMES
 
 logger = logging.getLogger(__name__)
 
@@ -17,6 +17,18 @@ class AgentState(MessagesState):
     subject: str | None
     timezone: str | None
     adult: bool
+    gmail: bool
+    calendar: bool
+
+
+def _tools_for(tool_list: list, gmail: bool, calendar: bool) -> list:
+    """The tools the model is offered: Google tools only when that service is linked."""
+    hidden: set[str] = set()
+    if not gmail:
+        hidden |= GMAIL_TOOL_NAMES
+    if not calendar:
+        hidden |= CALENDAR_TOOL_NAMES
+    return [t for t in tool_list if t.name not in hidden]
 
 
 def _tool_error_message(error: Exception) -> str:
@@ -50,13 +62,19 @@ def build_graph(tools=None):
     tool_list = list(ALL_TOOLS if tools is None else tools)
 
     def call_model(state: AgentState):
-        model = make_model(state["reasoning"], tool_list)
+        # Missing flags mean "linked" so callers that predate them (CLI, tests)
+        # keep the full tool set.
+        gmail = state.get("gmail", True)
+        calendar = state.get("calendar", True)
+        model = make_model(state["reasoning"], _tools_for(tool_list, gmail, calendar))
         messages = build_messages(
             state["mode"],
             state.get("subject"),
             state.get("timezone"),
             state["messages"],
             state.get("adult", False),
+            gmail=gmail,
+            calendar=calendar,
         )
         return {"messages": [model.invoke(messages)]}
 

@@ -555,6 +555,8 @@ def _state(req: ChatRequest, user) -> dict:
         "subject": req.subject,
         "timezone": _resolve_timezone(req, user),
         "adult": bool(user["adult_mode"]),
+        "gmail": db.get_google_grant(user["id"], "gmail") is not None,
+        "calendar": db.get_google_grant(user["id"], "calendar") is not None,
     }
 
 

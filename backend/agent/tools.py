@@ -949,6 +949,14 @@ def webpage_shell(command: str, config: RunnableConfig, timeout: int = SITE_EXEC
 
 ALL_TOOLS = [solve_equation, web_search, read_webpage, lore_lookup, generate_image, image_edit, read_attachment, write_webpage_file, add_webpage_asset, read_webpage_file, webpage_shell, search_emails, read_email, draft_email, list_events, read_event, create_event, update_event, propose_event_deletion]
 
+# Tools that only work once the user has linked that Google service. The graph
+# leaves them out of the model's tool list until then, which saves their schema
+# tokens on every call and keeps the model from calling a tool that can only fail.
+GMAIL_TOOL_NAMES = frozenset({"search_emails", "read_email", "draft_email"})
+CALENDAR_TOOL_NAMES = frozenset(
+    {"list_events", "read_event", "create_event", "update_event", "propose_event_deletion"}
+)
+
 # Human-friendly names for UI display ("Called Tool: ...").
 TOOL_DISPLAY_NAMES = {
     "solve_equation": "Calculator",

@@ -58,6 +58,17 @@ ADULT_SAFETY = _read("safety-adult.md")
 # adult mode swaps it for the adult safety section.
 _YOUNG_USER_SAFETY = {"Safety for young users"}
 
+# Each Google service's rules live in the boundaries file under one heading.
+# Until the user links that service its tools are not offered, so its rules are
+# swapped for a one-line hint: cheaper, and she can still say how to connect it.
+_GMAIL_RULES = {"Email (Gmail)"}
+_CALENDAR_RULES = {"Calendar (Google Calendar)"}
+GOOGLE_NOT_LINKED = (
+    "## Google services\n\n"
+    "The user has not linked their {services}, so you have no tools for it. "
+    "If they ask, tell them they can connect it in Settings."
+)
+
 # Tutor mode keeps the persona's core but trims the decorative sections,
 # so teaching instructions lead and the prompt stays focused.
 _TUTOR_PERSONA_TRIM = {"Likes and dislikes", "Things she would say"}
@@ -112,7 +123,13 @@ folders freely):
 Do not run git yourself; the system versions every change automatically."""
 
 
-def build_system_prompt(mode: str, subject: str | None, adult: bool = False) -> str:
+def build_system_prompt(
+    mode: str,
+    subject: str | None,
+    adult: bool = False,
+    gmail: bool = True,
+    calendar: bool = True,
+) -> str:
     if mode == "tutor":
         persona = _without_sections(PERSONA, _TUTOR_PERSONA_TRIM)
         voice = _without_sections(VOICE, _TUTOR_VOICE_TRIM)
@@ -129,6 +146,16 @@ def build_system_prompt(mode: str, subject: str | None, adult: bool = False) -> 
         boundaries = f"{boundaries}\n\n{ADULT_SAFETY}"
     else:
         boundaries = BOUNDARIES
+    unlinked: list[str] = []
+    if not gmail:
+        boundaries = _without_sections(boundaries, _GMAIL_RULES)
+        unlinked.append("Gmail")
+    if not calendar:
+        boundaries = _without_sections(boundaries, _CALENDAR_RULES)
+        unlinked.append("Google Calendar")
+    if unlinked:
+        hint = GOOGLE_NOT_LINKED.format(services=" or ".join(unlinked))
+        boundaries = f"{boundaries}\n\n{hint}"
     sections = [boundaries, persona, voice]
     if lore:
         sections.append(lore)
@@ -149,6 +176,8 @@ def build_messages(
     timezone: str | None,
     history,
     adult: bool = False,
+    gmail: bool = True,
+    calendar: bool = True,
 ):
     """One model call's full message list.
 
@@ -158,7 +187,7 @@ def build_messages(
     instead of a date frozen at the top of the conversation.
     """
     return [
-        {"role": "system", "content": build_system_prompt(mode, subject, adult)},
+        {"role": "system", "content": build_system_prompt(mode, subject, adult, gmail, calendar)},
         *history,
         {"role": "system", "content": date_line(timezone)},
     ]

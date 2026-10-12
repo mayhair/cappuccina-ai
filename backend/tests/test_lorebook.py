@@ -277,6 +277,41 @@ def test_system_prompt_adult_swaps_young_user_safety():
     assert "never sends email" in prompt
 
 
+def test_system_prompt_keeps_google_rules_when_linked():
+    from agent.prompts import build_system_prompt
+
+    prompt = build_system_prompt("chat", None)
+    assert "## Email (Gmail)" in prompt
+    assert "## Calendar (Google Calendar)" in prompt
+    assert "## Google services" not in prompt
+
+
+def test_system_prompt_swaps_unlinked_google_rules_for_a_hint():
+    from agent.prompts import build_system_prompt
+
+    prompt = build_system_prompt("chat", None, gmail=False)
+    assert "## Email (Gmail)" not in prompt
+    assert "## Calendar (Google Calendar)" in prompt
+    assert "not linked their Gmail," in prompt
+
+    prompt = build_system_prompt("chat", None, gmail=False, calendar=False)
+    assert "## Calendar (Google Calendar)" not in prompt
+    assert "not linked their Gmail or Google Calendar," in prompt
+
+
+def test_graph_hides_tools_for_unlinked_google_services():
+    from agent.graph import _tools_for
+    from agent.tools import ALL_TOOLS, CALENDAR_TOOL_NAMES, GMAIL_TOOL_NAMES
+
+    names = {t.name for t in _tools_for(ALL_TOOLS, gmail=False, calendar=True)}
+    assert not names & GMAIL_TOOL_NAMES
+    assert CALENDAR_TOOL_NAMES <= names
+    names = {t.name for t in _tools_for(ALL_TOOLS, gmail=True, calendar=False)}
+    assert GMAIL_TOOL_NAMES <= names
+    assert not names & CALENDAR_TOOL_NAMES
+    assert len(_tools_for(ALL_TOOLS, True, True)) == len(ALL_TOOLS)
+
+
 def test_build_messages_threads_adult_flag():
     from agent import prompts
 
