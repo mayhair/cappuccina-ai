@@ -1,6 +1,7 @@
 """The capability-URL preview route (no session) and one-file reads."""
 
 from app import db, sitebox
+from app.webpage_preview import PREVIEW_RUNTIME, cors_local_scripts, inject_runtime
 
 KEY = "preview-key-1"
 ROOT_HTML = "<!doctype html><title>Root</title><h1>root page</h1>"
@@ -174,6 +175,55 @@ def test_a_site_with_no_index_shows_a_placeholder(client):
     notes = client.get(base + "notes.txt")
     assert notes.status_code == 200
     assert notes.text == "just notes"
+
+
+# ---------- the preview runtime ----------
+
+
+def test_html_gets_the_runtime_first_and_other_files_do_not(client):
+    _user, _chat, _site_row, base, workspace = _root_site(
+        '<!doctype html><html><head><title>T</title><script src="script.js"></script>'
+        '<script src="https://cdn.example.com/lib.js"></script></head><body></body></html>'
+    )
+    (workspace / "script.js").write_text("let a = 1;", encoding="utf-8")
+    (workspace / "styles.css").write_text("h1 { color: red; }", encoding="utf-8")
+
+    body = client.get(base).text
+    # Ahead of the page's own scripts, so storage works before they run.
+    assert body.index(PREVIEW_RUNTIME) < body.index("script.js")
+    assert body.startswith("<!doctype html><html><head>" + PREVIEW_RUNTIME)
+    # The site's own script loads in CORS mode (real error messages); a CDN's
+    # does not (it may not send CORS headers).
+    assert '<script crossorigin src="script.js">' in body
+    assert '<script src="https://cdn.example.com/lib.js">' in body
+
+    assert client.get(base + "script.js").text == "let a = 1;"
+    assert client.get(base + "styles.css").text == "h1 { color: red; }"
+    # The file on disk is untouched.
+    assert PREVIEW_RUNTIME not in (workspace / "index.html").read_text(encoding="utf-8")
+
+
+def test_the_runtime_goes_after_the_doctype_when_there_is_no_head():
+    assert inject_runtime("<!DOCTYPE html><p>hi</p>") == "<!DOCTYPE html>" + PREVIEW_RUNTIME + "<p>hi</p>"
+    assert inject_runtime("<p>hi</p>") == PREVIEW_RUNTIME + "<p>hi</p>"
+    assert inject_runtime('<HEAD lang="en"><title>x</title>') == (
+        '<HEAD lang="en">' + PREVIEW_RUNTIME + "<title>x</title>"
+    )
+
+
+def test_only_local_scripts_are_marked_crossorigin():
+    html = (
+        '<script src="a.js"></script><script src="/api/v1/webpages/c/preview/k/b.js"></script>'
+        '<script src="//cdn.example.com/c.js"></script><script src="https://x.example/d.js"></script>'
+        "<script>inline()</script><script src=e.js crossorigin=use-credentials></script>"
+    )
+    out = cors_local_scripts(html)
+    assert '<script crossorigin src="a.js">' in out
+    assert '<script crossorigin src="/api/v1/webpages/c/preview/k/b.js">' in out
+    assert '<script src="//cdn.example.com/c.js">' in out
+    assert '<script src="https://x.example/d.js">' in out
+    assert "<script>inline()</script>" in out
+    assert "<script src=e.js crossorigin=use-credentials>" in out
 
 
 # ---------- one-file reads for the Code tab ----------

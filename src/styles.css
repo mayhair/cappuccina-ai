@@ -2703,6 +2703,7 @@ a.settings-save { text-decoration: none; display: inline-flex; align-items: cent
 .canvas-icon-btn svg { width: 18px; height: 18px; }
 
 .canvas-stage {
+  position: relative;
   flex: 1 1 auto;
   min-height: 0;
   padding: 0.75rem;
@@ -2920,6 +2921,44 @@ a.settings-save { text-decoration: none; display: inline-flex; align-items: cent
 }
 .canvas-notice .canvas-icon-btn { width: 24px; height: 24px; margin-left: auto; color: inherit; }
 .canvas-notice .canvas-icon-btn svg { width: 15px; height: 15px; }
+
+/* An error the previewed page reported while someone used it, floating over the
+   bottom of the page so it never shifts the page's own layout. */
+.canvas-page-error {
+  position: absolute;
+  left: 1.4rem;
+  right: 1.4rem;
+  bottom: 1.4rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.45rem 0.6rem;
+  border-radius: 8px;
+  background: var(--danger-soak);
+  color: var(--danger-strong);
+  font-size: 12.5px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);
+}
+.canvas-page-error-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.canvas-page-error-fix {
+  flex: none;
+  padding: 0.25rem 0.6rem;
+  border: 1px solid currentColor;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.canvas-page-error-fix:disabled { opacity: 0.5; cursor: default; }
+.canvas-page-error .canvas-icon-btn { width: 24px; height: 24px; color: inherit; }
+.canvas-page-error .canvas-icon-btn svg { width: 15px; height: 15px; }
 
 /* Manual editing of the active iteration (its own iteration once saved). */
 .canvas-edit-btn { margin-left: auto; width: 28px; height: 28px; }

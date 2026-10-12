@@ -149,19 +149,85 @@ function IterationsBar({
   )
 }
 
+// What the preview runtime (backend app/webpage_preview.py) posts when the page
+// throws or a file fails to load.
+const PREVIEW_ERROR_TYPE = 'cappuccina-preview-error'
+const MAX_PAGE_ERRORS = 5
+
+// "TypeError: x is null (script.js:12)": one page error as the badge and the
+// fix request show it.
+function describePageError(error) {
+  const where = error.source ? ` (${error.source}${error.line ? `:${error.line}` : ''})` : ''
+  return `${error.message}${where}`
+}
+
 // The live page: the site as the server serves it, in a sandboxed frame. The
 // frame reloads on the controller's revision (a run's writes, an activation, a
-// save) and on the Refresh button's own counter.
-function PreviewTab({ previewUrl, revision, localRevision }) {
+// save) and on the Refresh button's own counter. Errors the page reports while
+// someone uses it show as a badge that can hand them to Cappuccina.
+function PreviewTab({ previewUrl, revision, localRevision, streaming, onAskFix }) {
+  const frameRef = useRef(null)
+  const [errors, setErrors] = useState([])
+  const frameKey = `${revision}-${localRevision}`
+
+  // A reload is a fresh page: its old errors no longer apply.
+  useEffect(() => {
+    setErrors([])
+  }, [frameKey])
+
+  useEffect(() => {
+    const onMessage = (event) => {
+      if (event.source !== frameRef.current?.contentWindow) return
+      const data = event.data
+      if (data?.type !== PREVIEW_ERROR_TYPE || typeof data.message !== 'string') return
+      const error = {
+        message: data.message.slice(0, 300),
+        source: typeof data.source === 'string' ? data.source.slice(0, 120) : '',
+        line: Number(data.line) || 0,
+      }
+      setErrors((all) => {
+        const text = describePageError(error)
+        if (all.length >= MAX_PAGE_ERRORS || all.some((e) => describePageError(e) === text)) return all
+        return [...all, error]
+      })
+    }
+    window.addEventListener('message', onMessage)
+    return () => window.removeEventListener('message', onMessage)
+  }, [])
+
+  const askFix = () => {
+    const list = errors.map((e) => `- ${describePageError(e)}`).join('\n')
+    const which = errors.length === 1 ? 'this error' : 'these errors'
+    onAskFix?.(`The webpage shows ${which} when I use it:\n${list}\nCan you fix it?`)
+    setErrors([])
+  }
+
   return (
     <div className="canvas-stage">
       <iframe
-        key={`${revision}-${localRevision}`}
+        ref={frameRef}
+        key={frameKey}
         className="canvas-frame"
         title="Webpage preview"
-        sandbox="allow-scripts"
+        sandbox="allow-scripts allow-forms allow-modals"
         src={previewUrl}
       />
+      {errors.length > 0 && (
+        <div className="canvas-page-error" role="status">
+          <span className="canvas-page-error-text">
+            {errors.length === 1 ? 'Page error: ' : `${errors.length} page errors, first: `}
+            {describePageError(errors[0])}
+          </span>
+          {onAskFix && (
+            <button type="button" className="canvas-page-error-fix" disabled={streaming} onClick={askFix}>
+              Ask Cappuccina to fix
+            </button>
+          )}
+          <button type="button" className="canvas-icon-btn" aria-label="Dismiss" onClick={() => setErrors([])}>
+            <CloseIcon />
+          </button>
+        </div>
+      )}
     </div>
   )
 }
@@ -440,6 +506,7 @@ export function WebpageCanvas({
   onDismissNotice,
   onActivateVersion,
   onSaveFile,
+  onAskFix,
   onClose,
 }) {
   const [tab, setTab] = useState('preview')
@@ -757,7 +824,13 @@ export function WebpageCanvas({
       )}
 
       {tab === 'preview' ? (
-        <PreviewTab previewUrl={previewUrl} revision={revision} localRevision={localRevision} />
+        <PreviewTab
+          previewUrl={previewUrl}
+          revision={revision}
+          localRevision={localRevision}
+          streaming={streaming}
+          onAskFix={onAskFix}
+        />
       ) : tab === 'changes' ? (
         <ChangesTab diff={diff} loading={diffLoading} selected={diffFile} onSelect={setDiffFile} />
       ) : (

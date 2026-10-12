@@ -20,3 +20,6 @@ python-pptx>=1.0
 openpyxl>=3.1
 Pillow>=10
 tzdata>=2024.1
+# Headless Chromium for check_webpage (app/webpage_check.py); the browser
+# itself is a separate download: python -m playwright install chromium
+playwright>=1.50

@@ -21,7 +21,7 @@ from sympy.parsing.sympy_parser import (
 )
 
 from agent import lorebook
-from app import calendar, db, documents, gmail, sitebox, webpage_git
+from app import calendar, db, documents, gmail, sitebox, webpage_check, webpage_git
 from app.config import (
     CHARACTER_REF_IMAGES,
     IMAGE_MODEL_ID,
@@ -826,7 +826,7 @@ def _human_size(size: int) -> str:
 
 @tool
 def write_webpage_file(path: str, content: str, config: RunnableConfig) -> str:
-    """Build or update a webpage in the user's live website workspace. Use this whenever the user asks you to make a webpage, website, landing page, game, quiz, or anything else that runs in a browser. Write one file per call: start with `index.html`, then add `styles.css` and `script.js` when they help, and use folders (`src/`, `pages/`, `img/` …) whenever they make the site clearer. Link files with RELATIVE paths — `<link rel="stylesheet" href="styles.css">`, `<script src="script.js"></script>` — because the page is served from the site's own root. Fonts and libraries come from https URLs. A picture the user attached, or one you drew with generate_image, goes into the site folder with add_webpage_asset; reference it by the name you gave it there (`<img src="cat.png">`). When the user asks for a real app, a framework or a build step, use webpage_shell instead. To change a page you already made, call read_webpage_file first to see the current text, then write the whole file back. The page appears live in the canvas as you write, so when you're finished tell the user it's ready. Never invent a webpage_id; the returned JSON describes what was written."""
+    """Build or update a webpage in the user's live website workspace. Use this whenever the user asks you to make a webpage, website, landing page, game, quiz, or anything else that runs in a browser. Write one file per call: start with `index.html`, then add `styles.css` and `script.js` when they help, and use folders (`src/`, `pages/`, `img/` …) whenever they make the site clearer. Link files with RELATIVE paths — `<link rel="stylesheet" href="styles.css">`, `<script src="script.js"></script>` — because the page is served from the site's own root. Fonts and libraries come from https URLs. A picture the user attached, or one you drew with generate_image, goes into the site folder with add_webpage_asset; reference it by the name you gave it there (`<img src="cat.png">`). When the user asks for a real app, a framework or a build step, use webpage_shell instead. To change a page you already made, call read_webpage_file first to see the current text, then write the whole file back. The page appears live in the canvas as you write; when you've written the last file, call check_webpage and fix what it reports, then tell the user it's ready. Never invent a webpage_id; the returned JSON describes what was written."""
     site = _ensure_site(config)
     if site is None:
         return "Building webpages isn't available right now."
@@ -947,7 +947,35 @@ def webpage_shell(command: str, config: RunnableConfig, timeout: int = SITE_EXEC
     )
 
 
-ALL_TOOLS = [solve_equation, web_search, read_webpage, lore_lookup, generate_image, image_edit, read_attachment, write_webpage_file, add_webpage_asset, read_webpage_file, webpage_shell, search_emails, read_email, draft_email, list_events, read_event, create_event, update_event, propose_event_deletion]
+def run_webpage_check(config: RunnableConfig, steps: list | None = None) -> tuple[str, dict]:
+    """Check the chat's site; (report text, {"status": clean|problems|unavailable|none}).
+
+    Shared by the check_webpage tool and the graph's automatic check, which
+    decides from the status whether the model has to go back and fix things.
+    """
+    user_id = _user_id(config)
+    chat_id = _chat_id(config)
+    site = db.get_webpage_site(user_id, chat_id) if user_id and chat_id else None
+    if site is None:
+        return (
+            "There is no website in this chat yet — build one with write_webpage_file first.",
+            {"status": "none"},
+        )
+    try:
+        result = webpage_check.run_check(site, steps)
+    except webpage_check.CheckUnavailable as exc:
+        return str(exc), {"status": "unavailable"}
+    status = "problems" if result["problems"] else "clean"
+    return webpage_check.format_report(result), {"status": status}
+
+
+@tool(response_format="content_and_artifact")
+def check_webpage(config: RunnableConfig, steps: list[dict] | None = None) -> tuple[str, dict]:
+    """Test the website in a real (headless) browser, exactly as the user's canvas shows it. Call this once after you write the last file of a page or a change, BEFORE telling the user it's ready; fix everything it reports and check once more. A report with no problems means you're done — don't check again. It loads the page, reports errors the scripts throw, files that don't exist (a wrong name in src/href), and then clicks every button — including the ones that only appear after a click, like a popup's close button — and reports clicks that throw, reload the page, or do nothing. To test a specific flow, pass `steps`, run in order, for example [{"click": "#open"}, {"expect_visible": "#popup"}, {"click": "#popup .close"}, {"expect_hidden": "#popup"}]. Step kinds: {"click": selector}, {"type": selector, "text": "..."}, {"press": "Enter", "selector": optional}, {"wait": ms}, {"expect_visible": selector}, {"expect_hidden": selector}, {"expect_text": selector, "text": "..."}; one step may pair an action with an expectation, like {"click": "#open", "expect_visible": "#popup"}."""
+    return run_webpage_check(config, steps)
+
+
+ALL_TOOLS = [solve_equation, web_search, read_webpage, lore_lookup, generate_image, image_edit, read_attachment, write_webpage_file, add_webpage_asset, read_webpage_file, webpage_shell, check_webpage, search_emails, read_email, draft_email, list_events, read_event, create_event, update_event, propose_event_deletion]
 
 # Tools that only work once the user has linked that Google service. The graph
 # leaves them out of the model's tool list until then, which saves their schema
@@ -970,6 +998,7 @@ TOOL_DISPLAY_NAMES = {
     "add_webpage_asset": "Adding to Webpage",
     "read_webpage_file": "Reading Webpage",
     "webpage_shell": "Running Site Command",
+    "check_webpage": "Testing Webpage",
     "search_emails": "Inbox Search",
     "read_email": "Read Email",
     "draft_email": "Compose Email",

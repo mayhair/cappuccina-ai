@@ -203,8 +203,11 @@ await page.waitForSelector(".canvas-frame", { timeout: 5000 });
 //    app — and it loads the served preview URL, not an inlined srcdoc.
 const sandbox = await page.locator(".canvas-frame").getAttribute("sandbox");
 console.log("iframe sandbox:", sandbox);
-const sandboxed = sandbox === "allow-scripts";
-console.log("iframe sandboxed script-only:", sandboxed);
+// Forms and alert/confirm work like an ordinary tab; same-origin never.
+const sandboxed =
+  sandbox === "allow-scripts allow-forms allow-modals" &&
+  !sandbox.includes("allow-same-origin");
+console.log("iframe sandboxed without same-origin:", sandboxed);
 const frameSrc = await page.locator(".canvas-frame").getAttribute("src");
 const srcdoc = await page.locator(".canvas-frame").getAttribute("srcdoc");
 console.log("iframe src is the preview URL:", frameSrc === PREVIEW_URL, frameSrc);
@@ -226,6 +229,40 @@ console.log(
   "preview loaded the picture from the preview URL:",
   frameImage.w > 0 && frameImage.src.endsWith("/preview/key-check/cat.png"),
 );
+
+// 3b. an error the page reports (the backend's preview runtime posts it from
+//     inside the frame) shows as a badge, and "Ask Cappuccina to fix" puts it
+//     in the composer for the user to send.
+const previewFrame = page.frames().find((f) => f.url().includes(PREVIEW_BASE));
+await previewFrame.evaluate(() =>
+  parent.postMessage(
+    {
+      type: "cappuccina-preview-error",
+      kind: "error",
+      message: "TypeError: Cannot read properties of null (reading 'hidden')",
+      source: "script.js",
+      line: 4,
+    },
+    "*",
+  ),
+);
+// A message from anything but the preview frame is ignored.
+await page.evaluate(() =>
+  window.postMessage({ type: "cappuccina-preview-error", message: "spoofed" }, "*"),
+);
+const badge = await page
+  .locator(".canvas-page-error")
+  .textContent({ timeout: 3000 })
+  .catch(() => "");
+const badgeOk = badge.includes("(script.js:4)") && !badge.includes("spoofed");
+console.log("page error shows as a badge:", badgeOk, badge);
+await page.click(".canvas-page-error-fix");
+const composer = await page.locator('textarea[aria-label="Message Cappuccina"]').inputValue();
+const askedFix =
+  composer.includes("Cannot read properties of null") &&
+  (await page.locator(".canvas-page-error").count()) === 0;
+console.log("ask-to-fix fills the composer:", askedFix);
+await page.locator('textarea[aria-label="Message Cappuccina"]').fill("");
 
 // 4. the Code tab lists the workspace tree (entry first), fetches a file's text
 //    on demand, and highlights it.
@@ -489,6 +526,8 @@ await browser.close();
 if (
   !open ||
   !sandboxed ||
+  !badgeOk ||
+  !askedFix ||
   frameSrc !== PREVIEW_URL ||
   srcdoc !== null ||
   renderedHeading !== "from script" ||

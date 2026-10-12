@@ -1,11 +1,15 @@
 import logging
+from uuid import uuid4
 
+from langchain_core.messages import SystemMessage
+from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, START, MessagesState, StateGraph
 from langgraph.prebuilt import ToolNode
 
 from agent.fmhy import safety_note_for
 from agent.model import make_model
 from agent.prompts import build_messages
+from agent import tools as agent_tools
 from agent.tools import ALL_TOOLS, CALENDAR_TOOL_NAMES, GMAIL_TOOL_NAMES
 
 logger = logging.getLogger(__name__)
@@ -53,6 +57,54 @@ def _trailing_tool_messages(messages) -> list:
     return messages[index:]
 
 
+# Tools whose success means the site's files may have changed.
+WEBPAGE_CHANGE_TOOLS = frozenset({"write_webpage_file", "add_webpage_asset", "webpage_shell"})
+# How many times one run may send the model back to fix what the automatic
+# check found, so a page the model can't fix never loops forever.
+AUTO_CHECK_LIMIT = 2
+
+AUTO_CHECK_NOTE = """An automatic test of the webpage you just built found problems (the report is below). Fix them now: read_webpage_file, then write the corrected file back. Afterwards tell the user in a sentence or two what you fixed. If something can't be fixed, say so honestly instead of calling the page ready.
+
+{report}"""
+
+
+def _is_auto_check_note(message) -> bool:
+    return bool(getattr(message, "additional_kwargs", {}).get("webpage_auto_check"))
+
+
+def _current_run(messages) -> list:
+    """The messages after the user's latest turn — this run's own work."""
+    index = len(messages)
+    while index > 0 and getattr(messages[index - 1], "type", "") != "human":
+        index -= 1
+    return messages[index:]
+
+
+def needs_auto_check(messages) -> bool:
+    """True when this run changed the site after its last check.
+
+    A check — the model's own check_webpage call or an automatic one — resets
+    the flag; a successful write, asset or shell command sets it. Capped at
+    AUTO_CHECK_LIMIT automatic rounds per run.
+    """
+    run = _current_run(messages)
+    if sum(1 for m in run if _is_auto_check_note(m)) >= AUTO_CHECK_LIMIT:
+        return False
+    changed = False
+    for message in run:
+        if _is_auto_check_note(message):
+            changed = False
+        elif message.__class__.__name__ == "ToolMessage":
+            if getattr(message, "status", "success") == "error":
+                continue
+            name = getattr(message, "name", "")
+            if name in WEBPAGE_CHANGE_TOOLS:
+                changed = True
+            elif name == "check_webpage":
+                changed = False
+    return changed
+
+
 def build_graph(tools=None):
     """Compile the agent graph around ``tools``.
 
@@ -82,7 +134,39 @@ def build_graph(tools=None):
         # pyrefly: ignore [missing-attribute]
         if state["messages"][-1].tool_calls:
             return "tools"
+        if needs_auto_check(state["messages"]):
+            return "auto_check"
         return END
+
+    def auto_check(state: AgentState, config: RunnableConfig):
+        """Test the site the model is about to call ready.
+
+        The model often finishes without checking, so the run does it for
+        her. Invoked as a tool call so the chat shows a "Testing Webpage"
+        card. A clean page ends the run with no extra model call; problems go
+        back to the model as a note so she fixes them before the reply ends.
+        """
+        call = {
+            "name": "check_webpage",
+            "args": {},
+            "id": f"auto-check-{uuid4().hex}",
+            "type": "tool_call",
+        }
+        try:
+            result = agent_tools.check_webpage.invoke(call, config)
+        except Exception:
+            logger.exception("automatic webpage check failed")
+            return {"messages": []}
+        if (getattr(result, "artifact", None) or {}).get("status") != "problems":
+            return {"messages": []}
+        note = SystemMessage(
+            content=AUTO_CHECK_NOTE.format(report=result.content),
+            additional_kwargs={"webpage_auto_check": True},
+        )
+        return {"messages": [note]}
+
+    def after_auto_check(state: AgentState):
+        return "call_model" if _is_auto_check_note(state["messages"][-1]) else END
 
     def inject_fmhy_note(state: AgentState):
         """Add the ad-blocker note after FMHY tools run — never before.
@@ -100,8 +184,10 @@ def build_graph(tools=None):
     graph.add_node("call_model", call_model)
     graph.add_node("tools", ToolNode(tool_list, handle_tool_errors=_tool_error_message))
     graph.add_node("inject_fmhy_note", inject_fmhy_note)
+    graph.add_node("auto_check", auto_check)
     graph.add_edge(START, "call_model")
-    graph.add_conditional_edges("call_model", should_continue, ["tools", END])
+    graph.add_conditional_edges("call_model", should_continue, ["tools", "auto_check", END])
+    graph.add_conditional_edges("auto_check", after_auto_check, ["call_model", END])
     graph.add_edge("tools", "inject_fmhy_note")
     graph.add_edge("inject_fmhy_note", "call_model")
     return graph.compile()

@@ -1,13 +1,9 @@
 import asyncio
 import base64
 import json
-import mimetypes
-import os
-import re
 import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
-from pathlib import Path
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
@@ -43,6 +39,14 @@ from app.config import (
     GOOGLE_LOGIN_SCOPES,
 )
 from app.google_oauth import ServiceNotConnected
+from app.webpage_preview import (
+    PREVIEW_HEADERS,
+    blocked_segment,
+    preview_base,
+    resolve_preview,
+    resolve_under,
+    webpage_mime,
+)
 from app.schemas import (
     CalendarStatusResponse,
     ChatRequest,
@@ -894,31 +898,14 @@ _WEBPAGE_BUILDS: dict[str, dict] = {}
 # (binary: true) instead of loaded. Mirrors the tools' 1 MB write cap.
 WEBPAGE_FILE_READ_MAX = 1024 * 1024
 
-# mimetypes guesses text/plain (or nothing) for a module script, and the
-# browser refuses a script served with the wrong type — so these are pinned.
-WEBPAGE_MIME_OVERRIDES = {
-    ".js": "text/javascript",
-    ".mjs": "text/javascript",
-    ".css": "text/css",
-    ".wasm": "application/wasm",
-    ".json": "application/json",
-    ".map": "application/json",
-    ".svg": "image/svg+xml",
-}
-
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
 def _preview_base(chat_id: str, site: dict) -> str:
-    """The root-absolute URL prefix a chat's page is served from.
-
-    A capability URL: `preview_key` is unguessable and the preview route
-    carries no session, which is what lets the sandboxed canvas iframe load
-    module scripts and fetch() a page's own assets.
-    """
-    return f"/api/v1/webpages/{chat_id}/preview/{site['preview_key']}/"
+    """The root-absolute URL prefix a chat's page is served from."""
+    return preview_base({**site, "chat_id": chat_id})
 
 
 def _record_build(chat_id: str, build: dict | None) -> None:
@@ -943,35 +930,6 @@ async def _rebuild_site(chat_id: str, site: dict) -> None:
     except sitebox.SiteboxUnavailable as exc:
         ok, error = False, str(exc)
     _record_build(chat_id, {"ok": ok, "error": error or None})
-
-
-def _webpage_mime(path: str) -> str:
-    """Content type for a served site file, with the overrides above."""
-    override = WEBPAGE_MIME_OVERRIDES.get(os.path.splitext(path)[1].lower())
-    if override:
-        return override
-    return mimetypes.guess_type(path)[0] or "application/octet-stream"
-
-
-def _webpage_blocked_segment(path: str) -> bool:
-    """True when a path walks into git's or npm's own directories."""
-    return any(
-        segment in (".git", "node_modules") for segment in path.replace("\\", "/").split("/")
-    )
-
-
-def _resolve_under(root: Path, relative: str) -> Path | None:
-    """The absolute path of `relative` inside `root`, or None when it escapes.
-
-    normpath first, so a path like a/../../b is judged on its real shape, then
-    a resolved-prefix test. Shared by the file routes and the preview route so
-    neither can read or write outside the workspace it belongs to.
-    """
-    resolved = Path(os.path.normpath(os.path.join(root, relative))).resolve()
-    base = root.resolve()
-    if resolved != base and base not in resolved.parents:
-        return None
-    return resolved
 
 
 def _webpage_env_payload(chat_id: str, site: dict | None) -> dict:
@@ -1039,9 +997,9 @@ async def get_webpage_file(chat_id: str, path: str, user=Depends(current_user)) 
     if site is None:
         raise HTTPException(status_code=404, detail="No webpage yet")
     clean = _webpage_path(path)
-    if clean is None or _webpage_blocked_segment(clean):
+    if clean is None or blocked_segment(clean):
         raise HTTPException(status_code=400, detail="That file name isn't allowed.")
-    target = _resolve_under(sitebox.workspace_dir(site["id"]), clean)
+    target = resolve_under(sitebox.workspace_dir(site["id"]), clean)
     if target is None or not target.is_file():
         raise HTTPException(status_code=404, detail="File not found")
     size = target.stat().st_size
@@ -1053,7 +1011,7 @@ async def get_webpage_file(chat_id: str, path: str, user=Depends(current_user)) 
     return {
         "path": clean,
         "binary": True,
-        "mime": _webpage_mime(clean),
+        "mime": webpage_mime(clean),
         "size": size,
     }
 
@@ -1121,8 +1079,8 @@ async def save_webpage_file(
             detail="The page changed since you opened it. Reload the canvas and try again.",
         )
     workspace = sitebox.workspace_dir(site["id"])
-    target = _resolve_under(workspace, clean)
-    if target is None or _webpage_blocked_segment(clean):
+    target = resolve_under(workspace, clean)
+    if target is None or blocked_segment(clean):
         raise HTTPException(status_code=400, detail="That file name isn't allowed.")
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(req.content, encoding="utf-8")
@@ -1146,57 +1104,9 @@ async def get_webpage_iteration_diff(
 
 
 # ---------- webpage preview (capability URL, no session) ----------
-
-# A page's own assets are fetched by the sandboxed iframe, whose origin is
-# opaque: no usable cookie, and module scripts/fetch() are CORS requests with
-# `Origin: null`. So every preview response is public, uncacheable and free of
-# referrer leakage (the key is what keeps the URL unguessable).
-PREVIEW_HEADERS = {
-    "Access-Control-Allow-Origin": "*",
-    "Referrer-Policy": "no-referrer",
-    "X-Content-Type-Options": "nosniff",
-    "Cache-Control": "no-cache",
-}
-
-# Shown when a site has been created but has nothing to serve yet (no root
-# index.html and no build output), so the canvas iframe shows words instead of
-# a bare 404 or a blank document.
-PREVIEW_PLACEHOLDER = (
-    "<!doctype html><html><head><meta charset=\"utf-8\">"
-    "<title>Preview</title></head><body>"
-    "<p>This site has no index.html yet.</p></body></html>"
-)
-
-# Root-absolute URLs in a page's own html/css are rebased onto the preview URL:
-# a hand-written <link href="/styles.css"> (or a build whose `base` was not
-# configured) would otherwise resolve against the backend's root. Relative and
-# protocol-relative (//) values, and data: URIs, never match.
-_ROOT_ABSOLUTE_URL = re.compile(
-    r"""((?:href|src|action)\s*=\s*)(["']?)(/(?!/)[^"'\s>]*)""", re.IGNORECASE
-)
-_CSS_URL = re.compile(r"""(url\(\s*)(["']?)(/(?!/)[^"')]*)""", re.IGNORECASE)
-
-
-def _rebase_root_absolute(body: str, preview_base: str) -> str:
-    """Prefix root-absolute html/css URLs with the preview base.
-
-    Values that already carry the preview base (a correctly configured build)
-    pass through byte-identical, as do relative ones.
-    """
-
-    def attr(match: re.Match) -> str:
-        value = match.group(3)
-        if value.startswith(preview_base):
-            return match.group(0)
-        return f"{match.group(1)}{match.group(2)}{preview_base}{value[1:]}"
-
-    def css(match: re.Match) -> str:
-        value = match.group(3)
-        if value.startswith(preview_base):
-            return match.group(0)
-        return f"{match.group(1)}{match.group(2)}{preview_base}{value[1:]}"
-
-    return _CSS_URL.sub(css, _ROOT_ABSOLUTE_URL.sub(attr, body))
+#
+# What a path serves (dist/ or root, rebasing, the preview runtime) lives in
+# app.webpage_preview, shared with the page checker.
 
 
 def _preview_response(body: bytes, mime: str) -> Response:
@@ -1207,48 +1117,23 @@ def _preview_404() -> HTTPException:
     return HTTPException(status_code=404, detail="Not found", headers=PREVIEW_HEADERS)
 
 
-def _preview_file(path: Path, preview_base: str) -> Response:
-    """One file, with html/css bodies rebased onto the preview URL."""
-    body = path.read_bytes()
-    mime = _webpage_mime(path.name)
-    if mime in ("text/html", "text/css"):
-        body = _rebase_root_absolute(body.decode("utf-8", errors="replace"), preview_base).encode(
-            "utf-8"
-        )
-    return _preview_response(body, mime)
-
-
 @app.get("/api/v1/webpages/{chat_id}/preview/{key}/{path:path}")
 async def webpage_preview(chat_id: str, key: str, path: str) -> Response:
     """Serve one file of a site to the sandboxed canvas iframe.
 
     Deliberately unauthenticated: `preview_key` is the capability, because the
-    iframe has no session. Serves the build output (`dist/`) when there is one,
-    else the workspace root, with a directory or extension-less miss falling
-    back to that root's index.html.
+    iframe has no session. See webpage_preview.resolve_preview for what each
+    path serves.
     """
     site = db.get_webpage_site_by_chat(chat_id)
     if site is None or key != site["preview_key"]:
         raise _preview_404()
-    workspace = sitebox.workspace_dir(site["id"])
-    serve_root = (
-        workspace / "dist" if (workspace / "dist" / "index.html").is_file() else workspace
+    served = resolve_preview(
+        sitebox.workspace_dir(site["id"]), _preview_base(chat_id, site), path
     )
-    requested = (path or "").replace("\\", "/")
-    if _webpage_blocked_segment(requested):
+    if served is None:
         raise _preview_404()
-    target = _resolve_under(serve_root, requested)
-    if target is None:
-        raise _preview_404()
-    if target.is_dir():
-        target = target / "index.html"
-    if not target.is_file() and not os.path.splitext(requested)[1]:
-        target = serve_root / "index.html"
-    if target.is_file():
-        return _preview_file(target, _preview_base(chat_id, site))
-    if not (serve_root / "index.html").is_file():
-        return _preview_response(PREVIEW_PLACEHOLDER.encode("utf-8"), "text/html")
-    raise _preview_404()
+    return _preview_response(*served)
 
 
 # ---------- attachments (user uploads) ----------
@@ -1385,11 +1270,19 @@ async def _tracked_events(chat_id: str, events):
         _WEBPAGE_BUSY.discard(chat_id)
 
 
+GRAPH_RECURSION_LIMIT = 75
+
+
 def _graph_config(user, req: ChatRequest) -> RunnableConfig:
     """Invisible tool context: user id (auth scoping), chat id (so
     generate_image/image_edit can persist pictures against the current chat),
-    and reply id (so every webpage write of one run lands as one iteration)."""
+    and reply id (so every webpage write of one run lands as one iteration).
+
+    The recursion limit counts graph steps (three per tool round): LangGraph's
+    default of 25 ends a run after about eight tool calls, which a site with a
+    few files, a test and a fix already needs."""
     return {
+        "recursion_limit": GRAPH_RECURSION_LIMIT,
         "configurable": {
             "user_id": user["id"],
             "chat_id": req.chat_id,

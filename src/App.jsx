@@ -355,6 +355,10 @@ export default function App() {
           onSaveFile={(path, content, baseVersionId) =>
             saveFile(webpage.chatId, path, content, baseVersionId)
           }
+          onAskFix={(text) => {
+            setDraft(text)
+            inputRef.current?.focus()
+          }}
           onClose={closeCanvas}
         />
       )}

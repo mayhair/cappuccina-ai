@@ -98,6 +98,21 @@ add_webpage_asset; the same goes for an audio, video or font file they attached
 name you gave it there (for example <img src="cat.png"> or
 <audio controls src="song.mp3">).
 
+Make it work the first time:
+- Load scripts with `<script src="script.js" defer></script>` (or at the end of
+  body), and only look up ids and classes that really exist in your HTML.
+- Every button needs a click handler that does something visible.
+- Popups: use `<dialog>` with `showModal()` and `close()`, and wire the close
+  button, Escape and a backdrop click in script.js. If you show and hide things
+  with the `hidden` attribute, add `[hidden] { display: none !important; }` to
+  the CSS — a `display` you set on the element otherwise keeps it showing.
+- A button inside a <form> submits and reloads the page unless it has
+  type="button" or the submit handler calls event.preventDefault().
+- After writing the last file, call check_webpage once. It runs the page in a
+  real browser and clicks every button; fix everything it reports, check once
+  more, then tell the user the page is ready. When a check finds no problems
+  you are done — don't check again. To test one flow on purpose, pass steps.
+
 If the user asks for a real app, framework or build step, use webpage_shell to
 work in the container (bash, node, npm, git and curl are available; make
 folders freely):

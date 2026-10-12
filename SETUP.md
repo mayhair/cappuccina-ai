@@ -54,6 +54,7 @@ cd backend
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
+python -m playwright install chromium
 ```
 
 ```bash
@@ -62,7 +63,13 @@ cd backend
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
+python -m playwright install chromium
 ```
+
+`playwright install chromium` downloads the headless browser Cappuccina uses
+to test the webpages she builds (the `check_webpage` tool and the automatic
+check before she says a page is ready). Without it everything else works; the
+check just reports that it isn't set up.
 
 > If Windows blocks the activation script, run
 > `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` once, then retry.
@@ -340,6 +347,8 @@ sudo install -d -o cappuccina -g cappuccina -m 750 /srv/cappuccina
 cd / && sudo -u cappuccina git clone git@github.com:mayhair/cappuccina-ai.git /srv/cappuccina
 cd / && sudo -u cappuccina python3 -m venv /srv/cappuccina/backend/.venv
 cd / && sudo -u cappuccina /srv/cappuccina/backend/.venv/bin/pip install -r /srv/cappuccina/backend/requirements.txt
+cd / && sudo /srv/cappuccina/backend/.venv/bin/python -m playwright install-deps chromium
+cd / && sudo -u cappuccina /srv/cappuccina/backend/.venv/bin/python -m playwright install chromium
 cd / && sudo -u cappuccina cp /srv/cappuccina/backend/.env.example /srv/cappuccina/backend/.env
 ```
 
@@ -509,6 +518,7 @@ curl -s -o /dev/null -w '%{http_code}\n' https://cappuccina.<your-domain>/api/v1
 ```bash
 cd / && sudo -u cappuccina git -C /srv/cappuccina pull --ff-only
 cd / && sudo -u cappuccina /srv/cappuccina/backend/.venv/bin/pip install -r /srv/cappuccina/backend/requirements.txt  # only if deps changed
+cd / && sudo -u cappuccina /srv/cappuccina/backend/.venv/bin/python -m playwright install chromium  # after a playwright upgrade
 sudo systemctl restart cappuccina.service
 ```
 
