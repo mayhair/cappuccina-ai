@@ -2603,7 +2603,8 @@ a.settings-save { text-decoration: none; display: inline-flex; align-items: cent
 /* Fullscreen: the canvas covers the whole browser window, whatever size the
    window is. Square corners and no margin, so nothing of the chat shows
    through; the header's exit button stays in reach at the top. */
-.webpage-canvas.canvas-fullscreen {
+.webpage-canvas.canvas-fullscreen,
+.app.is-collapsed .webpage-canvas.canvas-fullscreen {
   position: fixed;
   inset: 0;
   z-index: 80;
