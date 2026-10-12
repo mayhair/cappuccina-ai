@@ -5,6 +5,7 @@ import {
   CloseIcon,
   CollapseIcon,
   DotsIcon,
+  DownloadIcon,
   ExpandIcon,
   FileIcon,
   PencilIcon,
@@ -12,7 +13,13 @@ import {
   WindowIcon,
 } from './Icons'
 import { highlightCode } from '../lib/highlightCode'
-import { getWebpageFile, getWebpageVersionDiff, previewFileUrl } from '../api/webpageClient'
+import {
+  downloadWebpageZip,
+  getWebpageFile,
+  getWebpageVersionDiff,
+  previewFileUrl,
+} from '../api/webpageClient'
+import { SaveWebpageNotice, shouldShowSaveNotice } from './SaveWebpageNotice'
 
 const ENTRY_FILE = 'index.html'
 const IMAGE_EXTENSIONS = ['png', 'jpg', 'jpeg', 'webp', 'gif', 'svg']
@@ -518,6 +525,11 @@ export function WebpageCanvas({
   // The canvas normally shares the window with the chat; fullscreen makes it
   // cover the whole browser window instead (whatever size that window is).
   const [fullscreen, setFullscreen] = useState(false)
+  // The Save button: the explainer shows first (until dismissed for good), then
+  // the zip downloads.
+  const [saveNoticeOpen, setSaveNoticeOpen] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState('')
   // { path, text, baseVersionId }: the draft keeps the iteration it was started
   // from, so the save is refused (409) rather than overwriting a newer one.
   const [draft, setDraft] = useState(null)
@@ -673,6 +685,27 @@ export function WebpageCanvas({
 
   const refresh = () => setLocalRevision((r) => r + 1)
   const openInNewTab = () => window.open(previewUrl, '_blank', 'noopener')
+  const downloadZip = async () => {
+    setSaveNoticeOpen(false)
+    setSaving(true)
+    setSaveError('')
+    try {
+      const { blob, filename } = await downloadWebpageZip(chatId)
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = filename
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      setTimeout(() => URL.revokeObjectURL(url), 1000)
+    } catch (err) {
+      setSaveError(err.message || "Couldn't save the webpage.")
+    } finally {
+      setSaving(false)
+    }
+  }
+  const saveWebpage = () => (shouldShowSaveNotice() ? setSaveNoticeOpen(true) : downloadZip())
   const pick = (name) => {
     setActiveFile(name)
     setMenuOpen(false)
@@ -780,6 +813,9 @@ export function WebpageCanvas({
             <button type="button" className="canvas-icon-btn has-tip" data-tip="Open in a new tab" aria-label="Open the page in a new tab" onClick={openInNewTab}>
               <WindowIcon />
             </button>
+            <button type="button" className="canvas-icon-btn has-tip" data-tip="Save webpage" aria-label="Save webpage" disabled={saving} onClick={saveWebpage}>
+              <DownloadIcon />
+            </button>
             <button type="button" className="canvas-icon-btn has-tip" data-tip="Close" aria-label="Close canvas" onClick={onClose}>
               <CloseIcon />
             </button>
@@ -811,6 +847,19 @@ export function WebpageCanvas({
             <CloseIcon />
           </button>
         </div>
+      )}
+
+      {saveError && (
+        <div className="canvas-notice" role="status">
+          {saveError}
+          <button type="button" className="canvas-icon-btn" aria-label="Dismiss" onClick={() => setSaveError('')}>
+            <CloseIcon />
+          </button>
+        </div>
+      )}
+
+      {saveNoticeOpen && (
+        <SaveWebpageNotice onConfirm={downloadZip} onCancel={() => setSaveNoticeOpen(false)} />
       )}
 
       {buildFailed && (

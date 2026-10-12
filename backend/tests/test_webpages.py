@@ -473,6 +473,44 @@ def test_get_webpage_is_user_scoped(signed_in):
     assert signed_in.get(f"/api/v1/webpages/{chat['id']}").status_code == 404
 
 
+def test_download_zips_the_raw_site(signed_in):
+    import io
+    import zipfile
+
+    from agent import tools
+
+    chat = signed_in.post("/api/v1/chats", json={"mode": "chat"}).json()
+    user = db.get_user_by_email("kid@example.com")
+    assert user is not None
+    assert signed_in.get(f"/api/v1/webpages/{chat['id']}/download").status_code == 404
+
+    config = _config(user, chat)
+    tools.write_webpage_file.invoke({"path": "index.html", "content": PAGE}, config=config)
+    tools.write_webpage_file.invoke({"path": "styles.css", "content": CSS}, config=config)
+    workspace = _workspace(user, chat)
+    (workspace / "node_modules").mkdir()
+    (workspace / "node_modules" / "dep.js").write_text("x")
+
+    res = signed_in.get(f"/api/v1/webpages/{chat['id']}/download")
+    assert res.status_code == 200
+    assert res.headers["content-type"] == "application/zip"
+    assert 'filename="' in res.headers["content-disposition"]
+    archive = zipfile.ZipFile(io.BytesIO(res.content))
+    assert sorted(archive.namelist()) == ["index.html", "styles.css"]
+    assert archive.read("index.html").decode() == PAGE
+
+
+def test_download_is_user_scoped_and_needs_login(signed_in):
+    stranger = db.create_google_user("stranger3@example.com", "Stranger", "sub-dl")
+    chat = db.create_chat(stranger["id"], title="Theirs")
+    db.create_webpage_site(stranger["id"], chat["id"], "their-key")
+    assert signed_in.get(f"/api/v1/webpages/{chat['id']}/download").status_code == 404
+
+    mine = signed_in.post("/api/v1/chats", json={"mode": "chat"}).json()
+    signed_in.post("/api/v1/auth/logout")
+    assert signed_in.get(f"/api/v1/webpages/{mine['id']}/download").status_code == 401
+
+
 def test_chat_delete_removes_the_site_row(signed_in):
     from agent import tools
 

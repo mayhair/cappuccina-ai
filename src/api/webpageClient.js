@@ -72,6 +72,23 @@ export function getWebpageVersionDiff(chatId, versionId, against) {
   return requestJson(`/api/v1/webpages/${chatId}/versions/${versionId}/diff${query}`)
 }
 
+// The whole site as a zip, for rehosting or sending: {blob, filename}.
+export async function downloadWebpageZip(chatId) {
+  const res = await fetch(`/api/v1/webpages/${chatId}/download`, { credentials: 'include' })
+  if (!res.ok) {
+    let detail = `request failed: ${res.status}`
+    try {
+      const body = await res.json()
+      if (body?.detail) detail = body.detail
+    } catch {
+      // not JSON: keep the generic message
+    }
+    throw new Error(detail)
+  }
+  const named = /filename="([^"]+)"/.exec(res.headers.get('Content-Disposition') ?? '')
+  return { blob: await res.blob(), filename: named?.[1] ?? 'website.zip' }
+}
+
 // A workspace file's served URL, for the Code tab's <img>: the preview route
 // carries the chat's capability key instead of a session cookie, so it works
 // inside a sandboxed frame and outside one alike.

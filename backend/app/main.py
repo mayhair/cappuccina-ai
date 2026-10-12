@@ -1,9 +1,13 @@
 import asyncio
 import base64
+import io
 import json
+import re
 import time
+import zipfile
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
+from pathlib import Path
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
@@ -45,6 +49,7 @@ from app.webpage_preview import (
     preview_base,
     resolve_preview,
     resolve_under,
+    serve_root,
     webpage_mime,
 )
 from app.schemas import (
@@ -1014,6 +1019,61 @@ async def get_webpage_file(chat_id: str, path: str, user=Depends(current_user)) 
         "mime": webpage_mime(clean),
         "size": size,
     }
+
+
+WEBPAGE_DOWNLOAD_MAX = 50 * 1024 * 1024
+
+
+def _download_name(title: str | None) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "-", (title or "").lower()).strip("-")[:60]
+    return f"{slug or 'website'}.zip"
+
+
+def _zip_site(root: Path) -> bytes | None:
+    """The site's raw files as a zip, or None past WEBPAGE_DOWNLOAD_MAX."""
+    buffer = io.BytesIO()
+    total = 0
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+        for file in sorted(root.rglob("*")):
+            if file.is_symlink() or not file.is_file():
+                continue
+            rel = file.relative_to(root).as_posix()
+            # .gitignore is the workspace's own repo bookkeeping, not site content.
+            if rel == ".gitignore" or blocked_segment(rel) or resolve_under(root, rel) is None:
+                continue
+            total += file.stat().st_size
+            if total > WEBPAGE_DOWNLOAD_MAX:
+                return None
+            archive.write(file, rel)
+    return buffer.getvalue()
+
+
+@app.get("/api/v1/webpages/{chat_id}/download")
+async def download_webpage(chat_id: str, user=Depends(current_user)) -> Response:
+    """The site as a .zip for rehosting or sending.
+
+    Raw files from the serve root (dist/ once built, else the workspace), so
+    the zip carries none of the preview runtime or rebased URLs.
+    """
+    chat = db.get_chat(user["id"], chat_id)
+    if chat is None:
+        raise HTTPException(status_code=404, detail="Chat not found")
+    site = db.get_webpage_site(user["id"], chat_id)
+    if site is None:
+        raise HTTPException(status_code=404, detail="No webpage yet")
+    root = serve_root(sitebox.workspace_dir(site["id"]))
+    if not (root / "index.html").is_file():
+        raise HTTPException(status_code=404, detail="No webpage yet")
+    body = await asyncio.to_thread(_zip_site, root)
+    if body is None:
+        raise HTTPException(status_code=413, detail="This site is too big to download.")
+    return Response(
+        content=body,
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": f'attachment; filename="{_download_name(chat["title"])}"'
+        },
+    )
 
 
 @app.get("/api/v1/webpages/{chat_id}/versions")
