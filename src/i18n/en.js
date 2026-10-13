@@ -45,7 +45,7 @@ export default {
   'auth.missing_code': 'Google didn’t finish signing you in. Please try again.',
   'auth.exchange_failed': 'We couldn’t reach Google. Please try again.',
   'auth.email_unverified': 'That Google account’s email isn’t verified.',
-  'auth.access_denied': 'Sign-in was cancelled.',
+  'auth.access_denied': 'Sign-in was canceled.',
   'auth.account_error': 'We couldn’t open your account. Please try again.',
   'auth.default': 'Sign-in didn’t work. Please try again.',
 

@@ -138,16 +138,16 @@ export default function App() {
   }, [])
 
   useEffect(() => {
-    let cancelled = false
+    let canceled = false
     getMe()
       .then((me) => {
-        if (!cancelled) setUser(me)
+        if (!canceled) setUser(me)
       })
       .catch(() => {
-        if (!cancelled) setAuthPhase('landing')
+        if (!canceled) setAuthPhase('landing')
       })
     return () => {
-      cancelled = true
+      canceled = true
     }
   }, [])
 

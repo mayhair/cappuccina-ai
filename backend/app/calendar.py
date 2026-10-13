@@ -5,7 +5,7 @@ app.google_oauth. We only ever touch the user's primary calendar.
 
 Google's event times are either ``dateTime`` (RFC3339 with an offset, or a
 naive local time plus the calendar's timezone) or ``date`` (all-day). The
-helpers here accept the model's friendly forms and normalise them before the
+helpers here accept the model's friendly forms and normalize them before the
 request, preferring the calendar's own timezone for naive input.
 """
 
@@ -91,7 +91,7 @@ def _rfc3339(value: str, tz: str, *, end_of_day: bool = False) -> str:
     """An absolute RFC3339 timestamp for Calendar list query parameters.
 
     Accepts 'YYYY-MM-DD' (all-day bounds) or any ISO datetime; naive values are
-    localised to the calendar's timezone, since timeMin/timeMax need an offset.
+    localized to the calendar's timezone, since timeMin/timeMax need an offset.
     """
     value = (value or "").strip()
     if _DATE_ONLY.match(value):

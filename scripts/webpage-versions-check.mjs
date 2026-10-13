@@ -380,7 +380,7 @@ const editMetrics = await page.evaluate(() => {
     sameLines: pre.scrollHeight === area.scrollHeight,
     extent: `pre ${pre.scrollWidth}x${pre.scrollHeight} (pad-right ${padRight}) vs textarea ${area.scrollWidth}x${area.scrollHeight}`,
     // Whatever the highlighter wraps tokens in, a colored span proves the pane
-    // still paints per-token colours while editing.
+    // still paints per-token colors while editing.
     spans: (() => {
       const layerColor = a.color;
       const all = [...pre.querySelectorAll("span")];

@@ -44,7 +44,7 @@ def test_callback_creates_user_and_session(client, monkeypatch):
     me = client.get("/api/v1/auth/me")
     assert me.status_code == 200
     body = me.json()
-    assert body["email"] == "kid@example.com"  # normalised
+    assert body["email"] == "kid@example.com"  # normalized
     assert body["displayName"] == "Kid Example"
     assert body["gmailConnected"] is False
     assert db.get_user_by_google_sub("sub-1") is not None

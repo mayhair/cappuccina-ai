@@ -649,23 +649,23 @@ export function WebpageCanvas({
   // the active iteration moves (activation, a new run, a manual save).
   useEffect(() => {
     if (tab !== 'changes' || !activeVersionId || !chatId) return
-    let cancelled = false
+    let canceled = false
     setDiffLoading(true)
     getWebpageVersionDiff(chatId, activeVersionId)
       .then((data) => {
-        if (cancelled) return
+        if (canceled) return
         const list = data.files ?? []
         setDiff({ files: list, truncated: Boolean(data.truncated) })
         setDiffFile(list[0]?.path ?? null)
       })
       .catch(() => {
-        if (!cancelled) setDiff({ files: [], truncated: false })
+        if (!canceled) setDiff({ files: [], truncated: false })
       })
       .finally(() => {
-        if (!cancelled) setDiffLoading(false)
+        if (!canceled) setDiffLoading(false)
       })
     return () => {
-      cancelled = true
+      canceled = true
     }
   }, [tab, activeVersionId, chatId])
 
@@ -673,12 +673,12 @@ export function WebpageCanvas({
   // save, an activation or a run's writes: the file on screen may have moved.
   useEffect(() => {
     if (tab !== 'code' || !chatId || !shownFile) return
-    let cancelled = false
+    let canceled = false
     setFileLoading(true)
     setBinary(null)
     getWebpageFile(chatId, shownFile)
       .then((data) => {
-        if (cancelled) return
+        if (canceled) return
         if (data?.binary) {
           setBinary(data)
           setCode('')
@@ -688,15 +688,15 @@ export function WebpageCanvas({
         }
       })
       .catch(() => {
-        if (cancelled) return
+        if (canceled) return
         setBinary(null)
         setCode('')
       })
       .finally(() => {
-        if (!cancelled) setFileLoading(false)
+        if (!canceled) setFileLoading(false)
       })
     return () => {
-      cancelled = true
+      canceled = true
     }
   }, [tab, chatId, shownFile, revision])
 

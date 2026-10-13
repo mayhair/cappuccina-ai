@@ -36,14 +36,14 @@ export function useVoiceInput({ onTranscript, disabled = false } = {}) {
       setSupported(false)
       return
     }
-    let cancelled = false
+    let canceled = false
     Promise.resolve(window.navigator.brave?.isBrave?.())
       .then((isBrave) => {
-        if (!cancelled && isBrave) setSupported(false)
+        if (!canceled && isBrave) setSupported(false)
       })
       .catch(() => {})
     return () => {
-      cancelled = true
+      canceled = true
     }
   }, [])
 

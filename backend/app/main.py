@@ -98,7 +98,7 @@ async def lifespan(app: FastAPI):
         yield
     finally:
         idle_task.cancel()
-        # Drain it so shutdown never leaves a cancelled task complaining.
+        # Drain it so shutdown never leaves a canceled task complaining.
         await asyncio.gather(idle_task, return_exceptions=True)
 
 

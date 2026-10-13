@@ -1238,7 +1238,7 @@ export function ChatWindow({ chat, user, isStreaming, draft, onDraft, onSend, on
   // Window-level drag & drop. dragenter/dragleave fire for every child element
   // crossed, so a depth counter keeps the overlay visible until we really leave.
   // A dragover watchdog is the safety net: touch browsers often never fire
-  // dragleave/drop when a drag is cancelled, which otherwise strands the overlay.
+  // dragleave/drop when a drag is canceled, which otherwise strands the overlay.
   const dragDepth = useRef(0)
   const [dragActive, setDragActive] = useState(false)
 

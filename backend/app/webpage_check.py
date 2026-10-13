@@ -106,7 +106,7 @@ _INIT_SCRIPT = """
 
 # One string per element (keyed by a per-load id) describing how it looks:
 # hidden elements are "-", shown ones carry their box, classes, own text,
-# colours, transform, form state and, for a canvas, its pixels. Two snapshots
+# colors, transform, form state and, for a canvas, its pixels. Two snapshots
 # differ exactly where something visibly changed.
 _SNAPSHOT_JS = """
 () => {

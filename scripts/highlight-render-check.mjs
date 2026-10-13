@@ -225,7 +225,7 @@ await page.evaluate(() => {
 });
 await checkWiring("css light theme");
 {
-  // The requested distinction: a JS variable (plain text = the surface colour) must
+  // The requested distinction: a JS variable (plain text = the surface color) must
   // not match the operators/punctuation around it.
   const theme = "light";
   const identColor = await page
@@ -259,7 +259,7 @@ await page.evaluate(() => {
 });
 await checkWiring("css dark theme");
 {
-  // Same distinction as the light theme: identifiers get their own colour.
+  // Same distinction as the light theme: identifiers get their own color.
   const theme = "dark";
   const identColor = await page
     .locator(".canvas-code-body")

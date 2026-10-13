@@ -1228,13 +1228,13 @@ img.user-avatar {
 }
 /* Syntax highlighting: Prism token classes themed with the app palette. The same
    rules serve the canvas Code pane, tool-arg panels, and markdown. Plain code text
-   (identifiers, variables) keeps the surface's --code-ident colour while operators
+   (identifiers, variables) keeps the surface's --code-ident color while operators
    and punctuation use the dimmer --code-punct, so a variable never blends into the
    punctuation around it. */
 /* Prism's class names are unprefixed (`token tag`, `token value`, `token string`),
    so any app rule with the same bare name would leak its padding, background,
    uppercase, size or weight into code. Tokens are plain text: only the rules below
-   colour them. This sits before them so the equal-specificity colour rules win. */
+   color them. This sits before them so the equal-specificity color rules win. */
 .canvas-code-body .token,
 .tool-args .token,
 .bubble .md-pre .token {
@@ -1261,7 +1261,7 @@ img.user-avatar {
 .token.parameter, .token.interpolation { color: var(--code-param); }
 .token.operator, .token.punctuation, .token.attr-equals, .token.interpolation-punctuation { color: var(--code-punct); }
 /* Container tokens wrap a whole element or an inlined language; they keep the
-   surrounding colour and let their inner tokens do the colouring. */
+   surrounding color and let their inner tokens do the coloring. */
 .token.style, .token.script, .token.special-attr, .token.value, .token.css, .token.javascript,
 .token.language-css, .token.language-javascript, .token.included-cdata, .token.internal-subset { color: inherit; }
 .tool-result {
@@ -1809,7 +1809,7 @@ img.user-avatar {
   display: grid;
   /* One column capped at the veil's width (minus padding). Without this the
      column grows to fit a card wider than the space, and the card shifts off
-     centre (common on phones, where 92vw is wider than the padded veil). */
+     center (common on phones, where 92vw is wider than the padded veil). */
   grid-template-columns: minmax(0, 1fr);
   place-items: center;
   background: rgba(24, 26, 46, 0.45);
@@ -2150,7 +2150,7 @@ html[lang='ur'] body { line-height: 1.9; }
   outline: 2px solid var(--pink-strong);
   outline-offset: 0;
 }
-/* The browser draws a date field's calendar glyph in a dark colour, so it all
+/* The browser draws a date field's calendar glyph in a dark color, so it all
    but vanishes on the dark field. color-scheme tells the browser to render the
    native control (glyph and the popup calendar) for a dark surface. */
 [data-theme='dark'] .settings-input[type='date'] {
@@ -3659,7 +3659,7 @@ html[lang='ur'] .welcome-sub { line-height: 1.9; }
 html[lang='ur'] .modal h2 { line-height: 1.7; }
 
 /* Urdu hint text is wider and taller than the Latin one: give it room so it
-   isn't ellipsised or clipped by the pill's overflow. */
+   isn't ellipsized or clipped by the pill's overflow. */
 html[lang='ur'] .user-hint {
   font-size: clamp(10.5px, 0.8vw, 12px);
   line-height: 2;

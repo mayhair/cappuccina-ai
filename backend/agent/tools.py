@@ -337,7 +337,7 @@ def _reference_prompt(prompt: str, names: list[str], editing: bool) -> str:
         lead = f"The provided images are the official reference looks for {listed}. "
     return (
         lead
-        + "Keep every character's face, colours, proportions and outfit exactly "
+        + "Keep every character's face, colors, proportions and outfit exactly "
         "consistent with its reference. " + prompt
     )
 
@@ -804,7 +804,7 @@ def _ensure_site(config: RunnableConfig) -> dict | None:
     None when the config carries no user or chat; each tool then answers with
     its own "not available right now" line. Parallel tool calls of one run all
     come through here, so the row is claimed atomically (db layer) and the repo
-    is only initialised when it is missing (webpage_git serialises that).
+    is only initialized when it is missing (webpage_git serializes that).
     """
     user_id = _user_id(config)
     chat_id = _chat_id(config)

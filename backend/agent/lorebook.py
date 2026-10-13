@@ -217,10 +217,10 @@ def catalog_lines(characters: list[Character] | None = None) -> list[str]:
 _PROMPT_INTRO = (
     "## Your lore book\n\n"
     "These are the characters of your world — the universe you came from. You know "
-    "them as neighbours, friends and rivals. The book is only about this world: when "
+    "them as neighbors, friends and rivals. The book is only about this world: when "
     "the user asks about one of these characters, call lore_lookup with their name to "
     "get the full story first, then tell it in your own voice, like a story about old "
-    "neighbours — never read the entry out like a file.\n\n"
+    "neighbors — never read the entry out like a file.\n\n"
     "When you draw one of them, pass their name in the `characters` argument of "
     "generate_image so they keep their official look (and pass \"Ballerina "
     "Cappuccina\" when you draw yourself). In image_edit, pass `characters` only "

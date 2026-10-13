@@ -61,3 +61,7 @@ Laptop web browser. Sessions are casual and conversational; a user may switch be
 ## Accessibility & Inclusion
 
 Audience includes younger readers: clear type sizes, plain language, obvious affordances and states. Standard web accessibility baseline (contrast, focus visibility, keyboard use).
+
+## Language
+
+Default English is American English: spelling in the UI copy, code, comments, docs and LLM prompts (e.g. "color", "center", "behavior", "canceled", "license"). Proper nouns and quoted third-party text keep their original spelling. Other locales go in their own `src/i18n` file rather than by editing the default.

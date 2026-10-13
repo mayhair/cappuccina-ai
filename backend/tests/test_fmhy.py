@@ -452,7 +452,7 @@ def test_safety_note_added_for_media_sites():
     assert note is not None
 
 
-# ---------- loader behaviour ----------
+# ---------- loader behavior ----------
 
 
 def test_load_returns_empty_when_disabled(monkeypatch):

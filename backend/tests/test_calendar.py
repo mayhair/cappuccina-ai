@@ -241,7 +241,7 @@ def test_list_events_defaults_to_a_week_and_reports_timezone(isolated_db, monkey
     assert "timeMin" in kwargs["params"] and "timeMax" in kwargs["params"]
 
 
-def test_list_events_localises_naive_bounds(isolated_db, monkeypatch):
+def test_list_events_localizes_naive_bounds(isolated_db, monkeypatch):
     calls = _fake_request(
         monkeypatch,
         {

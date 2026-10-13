@@ -191,11 +191,11 @@ export function useChatController(enabled) {
   // Load chat history from the server (source of truth when signed in).
   useEffect(() => {
     if (!enabled) return
-    let cancelled = false
+    let canceled = false
     ;(async () => {
       try {
         const stored = await listChats()
-        if (cancelled) return
+        if (canceled) return
         if (Array.isArray(stored) && stored.length > 0) {
           const restored = stored.map(normalizeChat)
           setChats(restored)
@@ -213,7 +213,7 @@ export function useChatController(enabled) {
       }
     })()
     return () => {
-      cancelled = true
+      canceled = true
     }
   }, [enabled])
 
@@ -268,10 +268,10 @@ export function useChatController(enabled) {
     if (!enabled || !activeChatId) return
     const chat = chatsRef.current.find((c) => c.id === activeChatId)
     if (!chat || chat.pending) return
-    let cancelled = false
+    let canceled = false
     Promise.all([getWebpageEnv(activeChatId), getWebpageVersions(activeChatId)])
       .then(([env, list]) => {
-        if (cancelled) return
+        if (canceled) return
         applyWebpageEnv(activeChatId, env)
         setWebpages((prev) => ({
           ...prev,
@@ -284,7 +284,7 @@ export function useChatController(enabled) {
       })
       .catch(() => {})
     return () => {
-      cancelled = true
+      canceled = true
     }
   }, [activeChatId, enabled, applyWebpageEnv])
 

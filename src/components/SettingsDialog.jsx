@@ -174,16 +174,16 @@ function ConnectionForm({
   const [busy, setBusy] = useState(false)
 
   useEffect(() => {
-    let cancelled = false
+    let canceled = false
     loadStatus()
       .then((s) => {
-        if (!cancelled) setStatus(s)
+        if (!canceled) setStatus(s)
       })
       .catch(() => {
-        if (!cancelled) setStatus({ connected: false })
+        if (!canceled) setStatus({ connected: false })
       })
     return () => {
-      cancelled = true
+      canceled = true
     }
   }, [loadStatus])
 

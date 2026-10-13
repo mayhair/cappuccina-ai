@@ -68,7 +68,7 @@ def test_parallel_writes_claim_one_site_and_land_every_file(isolated_db):
     assert _site_rows(chat["id"]) == 1
     written = sorted(p.name for p in sitebox.workspace_dir(site["id"]).glob("page-*.html"))
     assert written == [f"page-{i}.html" for i in range(8)]
-    # One repo, initialised once: the first commit sees the files as tracked-worthy.
+    # One repo, initialized once: the first commit sees the files as tracked-worthy.
     assert (sitebox.workspace_dir(site["id"]) / ".git" / "HEAD").is_file()
 
 
@@ -104,7 +104,7 @@ def test_same_insert_across_threads_does_not_misuse_the_connection(isolated_db):
     assert sum(_site_rows(chat_id) for chat_id in chat_ids) == len(chat_ids)
 
 
-def test_concurrent_repo_initialisation(isolated_db):
+def test_concurrent_repo_initialization(isolated_db):
     """`git init` copies template hooks; two at once exit 128 ("File exists")."""
     workspace = sitebox.workspace_dir("conc-repo")
 
