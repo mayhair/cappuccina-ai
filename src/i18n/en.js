@@ -56,6 +56,7 @@ export default {
 
   'settings.title': 'Settings',
   'settings.close': 'Close settings',
+  'settings.back': 'Back',
   'settings.nav.account': 'Account',
   'settings.nav.connections': 'Connections',
   'settings.nav.adult': 'Adult mode',

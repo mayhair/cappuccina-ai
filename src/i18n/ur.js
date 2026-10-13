@@ -55,6 +55,7 @@ export default {
 
   'settings.title': 'ترتیبات',
   'settings.close': 'ترتیبات بند کریں',
+  'settings.back': 'واپس',
   'settings.nav.account': 'اکاؤنٹ',
   'settings.nav.connections': 'کنکشنز',
   'settings.nav.adult': 'بالغ موڈ',

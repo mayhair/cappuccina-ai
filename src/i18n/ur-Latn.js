@@ -55,6 +55,7 @@ export default {
 
   'settings.title': 'Settings',
   'settings.close': 'Settings band karein',
+  'settings.back': 'Wapas',
   'settings.nav.account': 'Account',
   'settings.nav.connections': 'Connections',
   'settings.nav.adult': 'Baligh mode',

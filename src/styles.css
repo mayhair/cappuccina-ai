@@ -3457,24 +3457,79 @@ a.settings-save { text-decoration: none; display: inline-flex; align-items: cent
     backdrop-filter: none;
     -webkit-backdrop-filter: none;
   }
-  .settings-nav {
+  /* Settings are a two-screen stack on mobile: an index listing every
+     section, then one detail screen per section. */
+  .settings-topbar {
     flex: none;
-    flex-direction: row;
+    display: flex;
     align-items: center;
     gap: 0.3rem;
+    min-height: 48px;
     padding: calc(0.5rem + env(safe-area-inset-top)) 0.6rem 0.5rem;
-    border-inline-end: none;
     border-bottom: 1px solid var(--hairline);
-    overflow-x: auto;
   }
-  .settings-close { margin: 0 0.3rem 0 0; }
-  .settings-nav-item {
-    flex: none;
-    white-space: nowrap;
-    padding: 0.5rem 0.7rem;
+  .settings-mobile-title {
+    flex: 1;
+    margin: 0;
+    font-family: var(--font-body);
+    font-weight: 700;
+    font-size: 17px;
+    color: var(--ink);
   }
+  .settings-back {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    min-height: 44px;
+    padding: 0.4rem 0.5rem 0.4rem 0;
+    border: none;
+    border-radius: 9px;
+    background: transparent;
+    color: var(--ink);
+    font-family: var(--font-body);
+    font-weight: 600;
+    font-size: 15px;
+    cursor: pointer;
+    transition: color 120ms ease;
+  }
+  .settings-back svg { width: 18px; height: 18px; flex: none; }
+  .settings-back:hover, .settings-back:active { color: var(--pink-strong); }
+  .settings-close { flex: none; margin: 0; margin-inline-start: auto; }
+  .settings-index {
+    flex: 1 1 auto;
+    overflow-y: auto;
+    display: grid;
+    gap: 0.5rem;
+    align-content: start;
+    margin: 0;
+    padding: 0.9rem 1.1rem calc(1.5rem + env(safe-area-inset-bottom));
+    list-style: none;
+  }
+  .settings-index-item {
+    display: flex;
+    align-items: center;
+    gap: 0.7rem;
+    width: 100%;
+    min-height: 52px;
+    padding: 0.8rem 0.9rem;
+    border: 1px solid var(--hairline);
+    border-radius: 14px;
+    background: var(--glass);
+    color: var(--ink);
+    font-family: var(--font-body);
+    font-size: 15.5px;
+    font-weight: 600;
+    text-align: start;
+    cursor: pointer;
+    transition: background 120ms ease;
+  }
+  .settings-index-item:hover, .settings-index-item:active { background: var(--glass-strong); }
+  .settings-index-item svg { width: 18px; height: 18px; flex: none; color: var(--ink-soft); }
+  .settings-index-label { flex: 1; }
+  .settings-index-item .settings-chevron { color: var(--ink-faint); }
   .settings-pane {
     padding: 1.1rem 1.1rem calc(1.5rem + env(safe-area-inset-bottom));
+    animation: settings-push 220ms cubic-bezier(0.3, 0.9, 0.3, 1) both;
   }
   .settings-row {
     flex-direction: column;
@@ -3487,6 +3542,19 @@ a.settings-save { text-decoration: none; display: inline-flex; align-items: cent
   }
 }
 
+/* Push a settings detail screen in from the inline end (mirrored for RTL). */
+@keyframes settings-push {
+  from { opacity: 0; transform: translateX(1.1rem); }
+}
+@keyframes settings-push-rtl {
+  from { opacity: 0; transform: translateX(-1.1rem); }
+}
+html[dir='rtl'] .settings-pane { animation-name: settings-push-rtl; }
+
+@media (prefers-reduced-motion: reduce) {
+  .settings-pane { animation: none; }
+}
+
 /* Touch devices: enlarge small targets and stop 16px-zoom on focus. */
 @media (pointer: coarse) {
   .canvas-icon-btn { width: 40px; height: 40px; }
@@ -3494,6 +3562,7 @@ a.settings-save { text-decoration: none; display: inline-flex; align-items: cent
   .copy-msg { padding: 0.4rem 0.55rem; font-size: 13px; }
   .attach-chip-remove { width: 28px; height: 28px; }
   .chat-menu-btn { width: 2.2em; height: 2.2em; }
+  .settings-close { width: 40px; height: 40px; }
 
   .input textarea,
   .search,
@@ -3530,8 +3599,11 @@ html[dir='rtl'] .canvas-history-step ~ .canvas-history-step svg { transform: rot
 html[dir='rtl'] .thinking-head .chev:not(.open),
 html[dir='rtl'] .tool-call-head .chev:not(.open) { transform: scaleX(-1); }
 
+html[dir='rtl'] .settings-chevron { transform: scaleX(-1); }
+
 /* Icons that draw a direction. */
 html[dir='rtl'] .canvas-back-btn svg,
+html[dir='rtl'] .settings-back svg,
 html[dir='rtl'] .send svg,
 html[dir='rtl'] .sidebar-controls .ctrl-btn:first-child svg { transform: scaleX(-1); }
 

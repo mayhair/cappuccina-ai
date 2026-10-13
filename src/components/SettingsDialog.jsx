@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react'
-import { PersonIcon, MailIcon, CalendarIcon, ShieldIcon, GlobeIcon } from './Icons'
+import { useEffect, useRef, useState } from 'react'
+import { PersonIcon, MailIcon, CalendarIcon, ShieldIcon, GlobeIcon, ChevronIcon, ArrowLeftIcon } from './Icons'
 import { LanguagePicker } from './LanguagePicker'
 import { useLanguage } from '../i18n/LanguageProvider'
+import { useMediaQuery } from '../hooks/useMediaQuery'
 import { updateProfile, setAdultMode } from '../api/authClient'
 import { isAdultBirthday } from '../lib/adultMode'
 import { connectGmailUrl, disconnectGmail, gmailStatus } from '../api/gmailClient'
@@ -298,7 +299,101 @@ export function SettingsDialog({
 }) {
   const { lang, setLang, t } = useLanguage()
   const [section, setSection] = useState('account')
+  // Mobile shows settings as a two-screen stack: an index that lists every
+  // section, and a detail screen per section. Desktop ignores `view` and keeps
+  // the nav-rail + pane layout.
+  const [view, setView] = useState('index')
+  const isMobile = useMediaQuery('(max-width: 768px)')
+  const backRef = useRef(null)
+  const rowRefs = useRef({})
   const adultEnabled = user.adultModeEnabled !== false
+
+  const sections = [
+    {
+      key: 'account',
+      icon: <PersonIcon />,
+      label: t('settings.nav.account'),
+      content: (
+        <>
+          <h3 className="settings-heading">{t('settings.nav.account')}</h3>
+          <section className="settings-section">
+            <h4>{t('settings.account.profile')}</h4>
+            <ProfileForm user={user} onUpdated={onUserUpdated} />
+          </section>
+          <section className="settings-section">
+            <h4>{t('settings.account.signin')}</h4>
+            <p className="settings-hint">
+              {t('settings.account.signinHint', { email: user.email })}
+            </p>
+          </section>
+        </>
+      ),
+    },
+    {
+      key: 'connections',
+      icon: <MailIcon />,
+      label: t('settings.nav.connections'),
+      content: (
+        <>
+          <h3 className="settings-heading">{t('settings.nav.connections')}</h3>
+          <section className="settings-section">
+            <h4>{t('settings.connections.gmail')}</h4>
+            <GmailForm
+              user={user}
+              notice={gmailNotice}
+              onNoticeClear={onGmailNoticeClear}
+              onUserUpdated={onUserUpdated}
+            />
+          </section>
+          <section className="settings-section">
+            <h4>{t('settings.connections.calendar')}</h4>
+            <CalendarForm
+              user={user}
+              notice={calendarNotice}
+              onNoticeClear={onCalendarNoticeClear}
+              onUserUpdated={onUserUpdated}
+            />
+          </section>
+        </>
+      ),
+    },
+    ...(adultEnabled
+      ? [
+          {
+            key: 'adult',
+            icon: <ShieldIcon />,
+            label: t('settings.nav.adult'),
+            content: (
+              <>
+                <h3 className="settings-heading">{t('settings.nav.adult')}</h3>
+                <section className="settings-section">
+                  <h4>{t('settings.adult.section')}</h4>
+                  <AdultModeForm user={user} onUpdated={onUserUpdated} />
+                </section>
+              </>
+            ),
+          },
+        ]
+      : []),
+    {
+      key: 'language',
+      icon: <GlobeIcon />,
+      label: t('settings.nav.language'),
+      content: (
+        <>
+          <h3 className="settings-heading">{t('language.settings.heading')}</h3>
+          <section className="settings-section">
+            <p className="settings-hint">{t('language.settings.hint')}</p>
+            <LanguagePicker value={lang} onChange={setLang} />
+          </section>
+        </>
+      ),
+    },
+  ]
+  // Turning adult mode off from inside its own section removes that section, so
+  // the pane falls back to "nothing" and the mobile stack back to the index.
+  const active = sections.find((s) => s.key === section)
+  const showDetail = isMobile && view === 'detail' && Boolean(active)
 
   // Reset to the first section only when the dialog opens. `onClose` is a new
   // function on every parent render, so keying this off it would also fire on
@@ -307,18 +402,51 @@ export function SettingsDialog({
   useEffect(() => {
     if (!open) return
     setSection('account')
+    setView('index')
   }, [open])
 
   useEffect(() => {
     if (!open) return
     const esc = (e) => {
-      if (e.key === 'Escape') onClose()
+      if (e.key !== 'Escape') return
+      // On mobile Escape steps back out of the detail screen before closing.
+      if (isMobile && view === 'detail') setView('index')
+      else onClose()
     }
     window.addEventListener('keydown', esc)
     return () => window.removeEventListener('keydown', esc)
-  }, [open, onClose])
+  }, [open, onClose, isMobile, view])
+
+  // Move focus with the stack: the back button when a section opens, the row
+  // that was visited when it closes. The first render is skipped so opening
+  // the dialog doesn't move focus.
+  const openedRef = useRef(false)
+  useEffect(() => {
+    if (!open) {
+      openedRef.current = false
+      return
+    }
+    if (!openedRef.current) {
+      openedRef.current = true
+      return
+    }
+    if (!isMobile) return
+    if (view === 'detail') backRef.current?.focus()
+    else rowRefs.current[section]?.focus()
+  }, [open, isMobile, view, section])
 
   if (!open) return null
+
+  const closeButton = (
+    <button
+      type="button"
+      className="settings-close"
+      aria-label={t('settings.close')}
+      onClick={onClose}
+    >
+      ✕
+    </button>
+  )
 
   return (
     <div
@@ -329,108 +457,70 @@ export function SettingsDialog({
       onMouseDown={(e) => e.target === e.currentTarget && onClose()}
     >
       <div className="settings">
-        <aside className="settings-nav">
-          <button
-            type="button"
-            className="settings-close"
-            aria-label={t('settings.close')}
-            onClick={onClose}
-          >
-            ✕
-          </button>
-          <button
-            type="button"
-            className={`settings-nav-item${section === 'account' ? ' active' : ''}`}
-            onClick={() => setSection('account')}
-          >
-            <PersonIcon />
-            {t('settings.nav.account')}
-          </button>
-          <button
-            type="button"
-            className={`settings-nav-item${section === 'connections' ? ' active' : ''}`}
-            onClick={() => setSection('connections')}
-          >
-            <MailIcon />
-            {t('settings.nav.connections')}
-          </button>
-          {adultEnabled && (
-            <button
-              type="button"
-              className={`settings-nav-item${section === 'adult' ? ' active' : ''}`}
-              onClick={() => setSection('adult')}
-            >
-              <ShieldIcon />
-              {t('settings.nav.adult')}
-            </button>
-          )}
-          <button
-            type="button"
-            className={`settings-nav-item${section === 'language' ? ' active' : ''}`}
-            onClick={() => setSection('language')}
-          >
-            <GlobeIcon />
-            {t('settings.nav.language')}
-          </button>
-        </aside>
-        <div className="settings-pane">
-          {section === 'account' && (
-            <>
-              <h3 className="settings-heading">{t('settings.nav.account')}</h3>
-              <section className="settings-section">
-                <h4>{t('settings.account.profile')}</h4>
-                <ProfileForm user={user} onUpdated={onUserUpdated} />
-              </section>
-              <section className="settings-section">
-                <h4>{t('settings.account.signin')}</h4>
-                <p className="settings-hint">
-                  {t('settings.account.signinHint', { email: user.email })}
-                </p>
-              </section>
-            </>
-          )}
-          {section === 'language' && (
-            <>
-              <h3 className="settings-heading">{t('language.settings.heading')}</h3>
-              <section className="settings-section">
-                <p className="settings-hint">{t('language.settings.hint')}</p>
-                <LanguagePicker value={lang} onChange={setLang} />
-              </section>
-            </>
-          )}
-          {section === 'connections' && (
-            <>
-              <h3 className="settings-heading">{t('settings.nav.connections')}</h3>
-              <section className="settings-section">
-                <h4>{t('settings.connections.gmail')}</h4>
-                <GmailForm
-                  user={user}
-                  notice={gmailNotice}
-                  onNoticeClear={onGmailNoticeClear}
-                  onUserUpdated={onUserUpdated}
-                />
-              </section>
-              <section className="settings-section">
-                <h4>{t('settings.connections.calendar')}</h4>
-                <CalendarForm
-                  user={user}
-                  notice={calendarNotice}
-                  onNoticeClear={onCalendarNoticeClear}
-                  onUserUpdated={onUserUpdated}
-                />
-              </section>
-            </>
-          )}
-          {adultEnabled && section === 'adult' && (
-            <>
-              <h3 className="settings-heading">{t('settings.nav.adult')}</h3>
-              <section className="settings-section">
-                <h4>{t('settings.adult.section')}</h4>
-                <AdultModeForm user={user} onUpdated={onUserUpdated} />
-              </section>
-            </>
-          )}
-        </div>
+        {isMobile ? (
+          <>
+            <div className="settings-topbar">
+              {showDetail ? (
+                <button
+                  ref={backRef}
+                  type="button"
+                  className="settings-back"
+                  aria-label={t('settings.back')}
+                  onClick={() => setView('index')}
+                >
+                  <ArrowLeftIcon />
+                  {t('settings.title')}
+                </button>
+              ) : (
+                <h2 className="settings-mobile-title">{t('settings.title')}</h2>
+              )}
+              {closeButton}
+            </div>
+            {showDetail ? (
+              <div className="settings-pane">{active.content}</div>
+            ) : (
+              <ul className="settings-index">
+                {sections.map(({ key, icon, label }) => (
+                  <li key={key}>
+                    <button
+                      ref={(el) => {
+                        rowRefs.current[key] = el
+                      }}
+                      type="button"
+                      className="settings-index-item"
+                      onClick={() => {
+                        setSection(key)
+                        setView('detail')
+                      }}
+                    >
+                      {icon}
+                      <span className="settings-index-label">{label}</span>
+                      <ChevronIcon className="settings-chevron" />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </>
+        ) : (
+          <>
+            <aside className="settings-nav">
+              {closeButton}
+              {sections.map(({ key, icon, label }) => (
+                <button
+                  key={key}
+                  type="button"
+                  className={`settings-nav-item${section === key ? ' active' : ''}`}
+                  onClick={() => setSection(key)}
+                >
+                  {icon}
+                  {label}
+                </button>
+              ))}
+            </aside>
+            <div className="settings-pane">{active && active.content}</div>
+          </>
+        )}
       </div>
     </div>
   )
