@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { translate, useLanguage } from '../i18n/LanguageProvider'
 
 // Web Speech API speech-to-text. Free (no API key), but only in Chromium- and
 // WebKit-based browsers: Firefox doesn't ship it, and Brave exposes the
@@ -13,6 +14,11 @@ const getRecognitionCtor = () =>
     : null
 
 export function useVoiceInput({ onTranscript, disabled = false } = {}) {
+  // Read through a ref so long-lived callbacks always use the current language.
+  const { lang } = useLanguage()
+  const langRef = useRef(lang)
+  langRef.current = lang
+  const tt = (key, vars) => translate(langRef.current, key, vars)
   const [supported, setSupported] = useState(() => Boolean(getRecognitionCtor()))
   const [listening, setListening] = useState(false)
   const [interim, setInterim] = useState('')
@@ -86,13 +92,13 @@ export function useVoiceInput({ onTranscript, disabled = false } = {}) {
         // No transcription backend (Brave masquerading as Chromium, offline, or
         // an Edge regression). Give up on voice for the rest of the session.
         setSupported(false)
-        setError("Voice isn't available in this browser right now — you can still type!")
+        setError(tt('voiceError.unsupported'))
       } else if (code === 'not-allowed' || code === 'service-not-allowed') {
-        setError('Microphone is blocked — allow mic access in your browser, then try again.')
+        setError(tt('voiceError.blocked'))
       } else if (code === 'audio-capture') {
-        setError('No microphone found — plug one in and try again.')
+        setError(tt('voiceError.noMic'))
       } else {
-        setError("Couldn't hear that — please try again.")
+        setError(tt('voiceError.noHear'))
       }
     }
 

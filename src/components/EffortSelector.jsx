@@ -1,11 +1,15 @@
 import { useState } from 'react'
 import { EFFORTS } from '../hooks/useChatController'
 import { ChevronIcon } from './Icons'
+import { useLanguage } from '../i18n/LanguageProvider'
 
 export function EffortSelector({ effort, onChange, disabled }) {
+  const { t, tr } = useLanguage()
   const [open, setOpen] = useState(false)
   const [helpOpen, setHelpOpen] = useState(false)
   const index = Math.max(0, EFFORTS.findIndex((e) => e.label === effort))
+  const label = (e) => t(`effort.${e.value}`)
+  const current = label(EFFORTS[index])
   const percent = (index / (EFFORTS.length - 1)) * 100
 
   const pick = (label) => {
@@ -19,10 +23,10 @@ export function EffortSelector({ effort, onChange, disabled }) {
         className="effort-pill"
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
-        aria-label={`Reasoning effort: ${effort}. Change effort`}
+        aria-label={t('effort.pillLabel', { effort: current })}
         disabled={disabled}
       >
-        <span>{effort}</span>
+        <span>{current}</span>
         <ChevronIcon className={`chev${open ? ' open' : ''}`} />
       </button>
       {open && (
@@ -34,18 +38,18 @@ export function EffortSelector({ effort, onChange, disabled }) {
             tabIndex={-1}
             onClick={() => setOpen(false)}
           />
-          <div className="effort-pop" role="dialog" aria-label="Select reasoning effort">
+          <div className="effort-pop" role="dialog" aria-label={t('effort.select')}>
             <div className="effort-name">
-              <span>{effort}</span>
+              <span>{current}</span>
             </div>
             <div className="effort-sub">
-              <span>Reasoning effort</span>
+              <span>{t('effort.title')}</span>
               <button
                 type="button"
                 className="effort-help"
                 onClick={() => setHelpOpen(true)}
               >
-                (What is this?)
+                {t('effort.what')}
               </button>
             </div>
             <input
@@ -56,7 +60,7 @@ export function EffortSelector({ effort, onChange, disabled }) {
               step={1}
               value={index}
               onChange={(e) => pick(EFFORTS[Number(e.target.value)].label)}
-              aria-label="Reasoning effort"
+              aria-label={t('effort.title')}
               style={{ '--fill': `${percent}%` }}
             />
             <div className="effort-ticks" aria-hidden="true">
@@ -72,7 +76,7 @@ export function EffortSelector({ effort, onChange, disabled }) {
                   className={e.label === effort ? 'on' : ''}
                   onClick={() => pick(e.label)}
                 >
-                  {e.label}
+                  {label(e)}
                 </button>
               ))}
             </div>
@@ -92,7 +96,7 @@ export function EffortSelector({ effort, onChange, disabled }) {
             <button
               type="button"
               className="modal-x"
-              aria-label="Close"
+              aria-label={t('common.close')}
               onClick={() => setHelpOpen(false)}
             >
               ✕
@@ -100,13 +104,11 @@ export function EffortSelector({ effort, onChange, disabled }) {
             <div className="modal-avatar">
               <img src="/plates/msg-avatar.webp" alt="" />
             </div>
-            <h2 id="effort-help-title">Let me think about that ☕</h2>
-            <p>
-              Reasoning effort is how long I let myself think before I answer. Turn it up and I'll take my time, making fewer silly mistakes and usually giving a smarter, more helpful reply. Turn it down and I'll answer quickly, which is perfect for little things like "what's 2+2?". For tricky questions, like math, code, or planning, give me a bit more effort and I'll do a much better job. The lazier the question, the lighter I can go! 💕
-            </p>
+            <h2 id="effort-help-title">{t('effort.help.title')}</h2>
+            <p>{t('effort.help.body')}</p>
             <div className="modal-actions">
               <button type="button" className="btn-gotit" onClick={() => setHelpOpen(false)}>
-                Got it, grazie!
+                {t('effort.help.ok')}
               </button>
             </div>
           </div>

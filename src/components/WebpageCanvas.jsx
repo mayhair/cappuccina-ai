@@ -20,6 +20,7 @@ import {
   previewFileUrl,
 } from '../api/webpageClient'
 import { SaveWebpageNotice, shouldShowSaveNotice } from './SaveWebpageNotice'
+import { useLanguage } from '../i18n/LanguageProvider'
 
 const ENTRY_FILE = 'index.html'
 const IMAGE_EXTENSIONS = ['png', 'jpg', 'jpeg', 'webp', 'gif', 'svg']
@@ -49,11 +50,16 @@ function formatBytes(bytes) {
 }
 
 // "AI run · 2 files · +8 −1" (or the edit's own label): what one iteration did.
-function historyLabel(version) {
+function historyLabel(version, t) {
   if (!version) return ''
-  const name = version.origin === 'manual' ? version.label || 'Manual edit' : 'AI run'
+  const name = version.origin === 'manual' ? version.label || t('canvas.manualEdit') : t('canvas.aiRun')
   const summary = version.summary ?? {}
-  return `${name} · ${summary.files ?? 0} file(s) · +${summary.added ?? 0} −${summary.removed ?? 0}`
+  return t('canvas.versionSummary', {
+    name,
+    files: summary.files ?? 0,
+    added: summary.added ?? 0,
+    removed: summary.removed ?? 0,
+  })
 }
 
 // Timestamps read better as a clock time for today and a date for older runs.
@@ -71,15 +77,17 @@ function iterationWhen(iso) {
   ).format(when)
 }
 
-function historyMeta(version) {
+function historyMeta(version, t) {
   const when = iterationWhen(version?.createdAt)
-  return when ? `${historyLabel(version)} · ${when}` : historyLabel(version)
+  // Isolate the time so numerals and separators keep their order in RTL.
+  return when ? `${historyLabel(version, t)} · \u2068${when}\u2069` : historyLabel(version, t)
 }
 
 function CanvasTitle({ streaming }) {
+  const { t } = useLanguage()
   return (
     <span className="canvas-title">
-      <WindowIcon /> Webpage
+      <WindowIcon /> {t('canvas.title')}
       {streaming && <span className="canvas-heading-dots" aria-hidden="true"><i /><i /><i /></span>}
     </span>
   )
@@ -98,12 +106,13 @@ function IterationsBar({
   onStep,
   onSelect,
 }) {
+  const { t } = useLanguage()
   return (
-    <div className="canvas-history" role="group" aria-label="Iterations">
+    <div className="canvas-history" role="group" aria-label={t('canvas.iterations')}>
       <button
         type="button"
         className="canvas-history-step"
-        aria-label="Previous iteration"
+        aria-label={t('canvas.prevIteration')}
         disabled={!canSwitch || index <= 0}
         onClick={() => onStep(versions[index - 1].id)}
       >
@@ -111,14 +120,14 @@ function IterationsBar({
       </button>
       <div className="canvas-history-label">
         <span className="canvas-history-count">
-          Iteration {index + 1} of {versions.length}
+          {t('canvas.iterationOf', { n: index + 1, total: versions.length })}
         </span>
-        <span className="canvas-history-meta">{historyMeta(current)}</span>
+        <span className="canvas-history-meta">{historyMeta(current, t)}</span>
       </div>
       <button
         type="button"
         className="canvas-history-step"
-        aria-label="Next iteration"
+        aria-label={t('canvas.nextIteration')}
         disabled={!canSwitch || index < 0 || index >= versions.length - 1}
         onClick={() => onStep(versions[index + 1].id)}
       >
@@ -128,14 +137,14 @@ function IterationsBar({
         type="button"
         className="canvas-history-btn"
         aria-expanded={historyOpen}
-        aria-label="All iterations"
+        aria-label={t('canvas.allIterations')}
         disabled={!canSwitch}
         onClick={onToggleHistory}
       >
         <DotsIcon />
       </button>
       {historyOpen && (
-        <div className="canvas-history-panel" role="listbox" aria-label="Iterations">
+        <div className="canvas-history-panel" role="listbox" aria-label={t('canvas.iterations')}>
           {[...versions].reverse().map((v) => (
             <button
               key={v.id}
@@ -147,7 +156,7 @@ function IterationsBar({
               onClick={() => onSelect(v.id)}
             >
               <span className="canvas-history-seq">#{v.seq}</span>
-              <span className="canvas-file-name">{historyLabel(v)}</span>
+              <span className="canvas-file-name">{historyLabel(v, t)}</span>
             </button>
           ))}
         </div>
@@ -173,6 +182,7 @@ function describePageError(error) {
 // save) and on the Refresh button's own counter. Errors the page reports while
 // someone uses it show as a badge that can hand them to Cappuccina.
 function PreviewTab({ previewUrl, revision, localRevision, streaming, onAskFix }) {
+  const { t } = useLanguage()
   const frameRef = useRef(null)
   const [errors, setErrors] = useState([])
   const frameKey = `${revision}-${localRevision}`
@@ -215,22 +225,22 @@ function PreviewTab({ previewUrl, revision, localRevision, streaming, onAskFix }
         ref={frameRef}
         key={frameKey}
         className="canvas-frame"
-        title="Webpage preview"
+        title={t('canvas.previewTitle')}
         sandbox="allow-scripts allow-forms allow-modals"
         src={previewUrl}
       />
       {errors.length > 0 && (
         <div className="canvas-page-error" role="status">
           <span className="canvas-page-error-text">
-            {errors.length === 1 ? 'Page error: ' : `${errors.length} page errors, first: `}
+            {errors.length === 1 ? t('canvas.pageError') : t('canvas.pageErrors', { n: errors.length })}
             {describePageError(errors[0])}
           </span>
           {onAskFix && (
             <button type="button" className="canvas-page-error-fix" disabled={streaming} onClick={askFix}>
-              Ask Cappuccina to fix
+              {t('canvas.askFix')}
             </button>
           )}
-          <button type="button" className="canvas-icon-btn" aria-label="Dismiss" onClick={() => setErrors([])}>
+          <button type="button" className="canvas-icon-btn" aria-label={t('canvas.dismiss')} onClick={() => setErrors([])}>
             <CloseIcon />
           </button>
         </div>
@@ -241,21 +251,22 @@ function PreviewTab({ previewUrl, revision, localRevision, streaming, onAskFix }
 
 // The Changes tab: one iteration's unified diff, one file at a time.
 function ChangesTab({ diff, loading, selected, onSelect }) {
+  const { t } = useLanguage()
   const change = diff.files.find((f) => f.path === selected) ?? diff.files[0] ?? null
   return (
     <div className="canvas-code">
       {loading ? (
         <div className="canvas-empty">
-          <p>Loading changes…</p>
+          <p>{t('canvas.loadingChanges')}</p>
         </div>
       ) : diff.files.length === 0 ? (
         <div className="canvas-empty">
-          <p>No changes yet.</p>
-          <p className="canvas-empty-hint">This iteration is the first version of the page.</p>
+          <p>{t('canvas.noChanges')}</p>
+          <p className="canvas-empty-hint">{t('canvas.firstVersion')}</p>
         </div>
       ) : (
         <>
-          <div className="canvas-change-list" role="listbox" aria-label="Changed files">
+          <div className="canvas-change-list" role="listbox" aria-label={t('canvas.changedFiles')}>
             {diff.files.map((f) => (
               <button
                 key={f.path}
@@ -283,7 +294,7 @@ function ChangesTab({ diff, loading, selected, onSelect }) {
           </pre>
           {diff.truncated && (
             <p className="canvas-empty-hint canvas-diff-note">
-              Diff truncated — open a single file to see the rest.
+              {t('canvas.diffTruncated')}
             </p>
           )}
         </>
@@ -295,10 +306,11 @@ function ChangesTab({ diff, loading, selected, onSelect }) {
 // The Code tab's file list: the workspace tree's names, nothing more — the text
 // of the one that is picked is fetched on demand.
 function FileMenu({ names, shownFile, onPick }) {
+  const { t } = useLanguage()
   return (
     <div className="canvas-file-menu">
-      <div className="canvas-file-menu-head">Files</div>
-      <div className="canvas-file-list" role="listbox" aria-label="Files">
+      <div className="canvas-file-menu-head">{t('canvas.files')}</div>
+      <div className="canvas-file-list" role="listbox" aria-label={t('canvas.files')}>
         {names.map((name) => (
           <button
             key={name}
@@ -320,13 +332,14 @@ function FileMenu({ names, shownFile, onPick }) {
 // A picture in the folder: served by URL from the preview route, since the
 // canvas holds no bytes of its own and the frame has no session to fetch with.
 function AssetPane({ name, url, mime, size }) {
+  const { t } = useLanguage()
   const shown = formatBytes(size)
   return (
     <div className="canvas-asset">
       {url ? (
         <img className="canvas-asset-preview" src={url} alt={name} />
       ) : (
-        <p className="canvas-empty-hint">Loading {name}…</p>
+        <p className="canvas-empty-hint">{t('canvas.loadingFile', { name })}</p>
       )}
       <p className="canvas-empty-hint">
         {name}
@@ -366,6 +379,7 @@ function CodeEditor({
   onSave,
   onCancel,
 }) {
+  const { t } = useLanguage()
   return (
     <>
       <div className="canvas-code-edit-wrap">
@@ -377,7 +391,7 @@ function CodeEditor({
         />
         <textarea
           className="canvas-code-body canvas-code-edit"
-          aria-label={`Edit ${draft.path}`}
+          aria-label={t('canvas.editFile', { name: draft.path })}
           spellCheck={false}
           wrap="off"
           ref={editRef}
@@ -388,9 +402,9 @@ function CodeEditor({
         />
       </div>
       <div className="canvas-edit-bar">
-        <span className="canvas-edit-hint">Editing {draft.path}</span>
+        <span className="canvas-edit-hint">{t('canvas.editing', { name: draft.path })}</span>
         <button type="button" className="canvas-edit-cancel" onClick={onCancel}>
-          Cancel
+          {t('common.cancel')}
         </button>
         <button
           type="button"
@@ -398,7 +412,7 @@ function CodeEditor({
           disabled={busy || draft.text === shownCode}
           onClick={onSave}
         >
-          {busy ? 'Saving…' : 'Save'}
+          {busy ? t('settings.profile.saving') : t('canvas.save')}
         </button>
       </div>
     </>
@@ -433,6 +447,7 @@ function CodeTab({
   onSaveDraft,
   onCancelDraft,
 }) {
+  const { t } = useLanguage()
   return (
     <div className="canvas-code">
       {menuOpen ? (
@@ -443,7 +458,7 @@ function CodeTab({
             <button
               type="button"
               className="canvas-back-btn"
-              aria-label="Back to files"
+              aria-label={t('canvas.backToFiles')}
               onClick={onBack}
             >
               <ArrowLeftIcon />
@@ -454,7 +469,7 @@ function CodeTab({
               <button
                 type="button"
                 className="canvas-icon-btn canvas-edit-btn"
-                aria-label={`Edit ${shownFile}`}
+                aria-label={t('canvas.editFile', { name: shownFile })}
                 disabled={streaming || busy || !canEdit}
                 onClick={onStartEdit}
               >
@@ -464,7 +479,7 @@ function CodeTab({
           </div>
           {loading ? (
             <div className="canvas-empty">
-              <p>Loading {shownFile}…</p>
+              <p>{t('canvas.loadingFile', { name: shownFile })}</p>
             </div>
           ) : kind === 'image' ? (
             <AssetPane name={shownFile} url={imageUrl} mime={binary?.mime} size={binary?.size} />
@@ -516,6 +531,7 @@ export function WebpageCanvas({
   onAskFix,
   onClose,
 }) {
+  const { t } = useLanguage()
   const [tab, setTab] = useState('preview')
   const [activeFile, setActiveFile] = useState(null)
   const [menuOpen, setMenuOpen] = useState(true)
@@ -700,7 +716,7 @@ export function WebpageCanvas({
       link.remove()
       setTimeout(() => URL.revokeObjectURL(url), 1000)
     } catch (err) {
-      setSaveError(err.message || "Couldn't save the webpage.")
+      setSaveError(err.message || t('canvas.saveFailed'))
     } finally {
       setSaving(false)
     }
@@ -739,28 +755,28 @@ export function WebpageCanvas({
   // so there is nothing to show or list.
   if (!previewUrl) {
     return (
-      <aside className={shellClass} aria-label="Webpage canvas">
+      <aside className={shellClass} aria-label={t('canvas.label')}>
         <header className="canvas-head">
           <CanvasTitle />
-          <button type="button" className="canvas-icon-btn" aria-label="Close canvas" onClick={onClose}>
+          <button type="button" className="canvas-icon-btn" aria-label={t('canvas.close')} onClick={onClose}>
             <CloseIcon />
           </button>
         </header>
         <div className="canvas-empty">
           <WindowIcon />
-          <p>Nothing here yet.</p>
-          <p className="canvas-empty-hint">Ask Cappuccina to build you a webpage!</p>
+          <p>{t('canvas.empty')}</p>
+          <p className="canvas-empty-hint">{t('canvas.emptyHint')}</p>
         </div>
       </aside>
     )
   }
 
   return (
-    <aside className={shellClass} aria-label="Webpage canvas">
+    <aside className={shellClass} aria-label={t('canvas.label')}>
       <header className="canvas-head">
         <CanvasTitle streaming={streaming} />
         <div className="canvas-actions">
-          <div className="canvas-tabs" role="tablist" aria-label="Canvas view">
+          <div className="canvas-tabs" role="tablist" aria-label={t('canvas.view')}>
             <button
               type="button"
               role="tab"
@@ -768,7 +784,7 @@ export function WebpageCanvas({
               className={tab === 'preview' ? 'active' : ''}
               onClick={() => setTab('preview')}
             >
-              Preview
+              {t('canvas.preview')}
             </button>
             <button
               type="button"
@@ -777,7 +793,7 @@ export function WebpageCanvas({
               className={tab === 'code' ? 'active' : ''}
               onClick={() => setTab('code')}
             >
-              Code
+              {t('canvas.code')}
             </button>
             {versions.length > 0 && (
               <button
@@ -790,7 +806,7 @@ export function WebpageCanvas({
                   setTab('changes')
                 }}
               >
-                Changes
+                {t('canvas.changes')}
               </button>
             )}
           </div>
@@ -800,23 +816,23 @@ export function WebpageCanvas({
             <button
               type="button"
               className="canvas-icon-btn canvas-fs-btn has-tip"
-              data-tip={fullscreen ? 'Exit fullscreen' : 'Fullscreen'}
-              aria-label={fullscreen ? 'Exit fullscreen' : 'Fullscreen'}
+              data-tip={fullscreen ? t('canvas.exitFullscreen') : t('canvas.fullscreen')}
+              aria-label={fullscreen ? t('canvas.exitFullscreen') : t('canvas.fullscreen')}
               aria-pressed={fullscreen}
               onClick={() => setFullscreen((on) => !on)}
             >
               {fullscreen ? <CollapseIcon /> : <ExpandIcon />}
             </button>
-            <button type="button" className="canvas-icon-btn has-tip" data-tip="Refresh" aria-label="Refresh preview" onClick={refresh}>
+            <button type="button" className="canvas-icon-btn has-tip" data-tip={t('canvas.refresh')} aria-label={t('canvas.refreshLabel')} onClick={refresh}>
               <RefreshIcon />
             </button>
-            <button type="button" className="canvas-icon-btn has-tip" data-tip="Open in a new tab" aria-label="Open the page in a new tab" onClick={openInNewTab}>
+            <button type="button" className="canvas-icon-btn has-tip" data-tip={t('canvas.newTab')} aria-label={t('canvas.newTabLabel')} onClick={openInNewTab}>
               <WindowIcon />
             </button>
-            <button type="button" className="canvas-icon-btn has-tip" data-tip="Save webpage" aria-label="Save webpage" disabled={saving} onClick={saveWebpage}>
+            <button type="button" className="canvas-icon-btn has-tip" data-tip={t('canvas.saveWebpage')} aria-label={t('canvas.saveWebpage')} disabled={saving} onClick={saveWebpage}>
               <DownloadIcon />
             </button>
-            <button type="button" className="canvas-icon-btn has-tip" data-tip="Close" aria-label="Close canvas" onClick={onClose}>
+            <button type="button" className="canvas-icon-btn has-tip" data-tip={t('common.close')} aria-label={t('canvas.close')} onClick={onClose}>
               <CloseIcon />
             </button>
           </div>
@@ -843,7 +859,7 @@ export function WebpageCanvas({
       {notice && (
         <div className="canvas-notice" role="status">
           {notice}
-          <button type="button" className="canvas-icon-btn" aria-label="Dismiss" onClick={onDismissNotice}>
+          <button type="button" className="canvas-icon-btn" aria-label={t('canvas.dismiss')} onClick={onDismissNotice}>
             <CloseIcon />
           </button>
         </div>
@@ -852,7 +868,7 @@ export function WebpageCanvas({
       {saveError && (
         <div className="canvas-notice" role="status">
           {saveError}
-          <button type="button" className="canvas-icon-btn" aria-label="Dismiss" onClick={() => setSaveError('')}>
+          <button type="button" className="canvas-icon-btn" aria-label={t('canvas.dismiss')} onClick={() => setSaveError('')}>
             <CloseIcon />
           </button>
         </div>
@@ -864,9 +880,9 @@ export function WebpageCanvas({
 
       {buildFailed && (
         <div className="canvas-notice" role="status">
-          The last build failed — the canvas shows the previous build.
+          {t('canvas.buildFailed')}
           {lastBuild.error ? ` ${lastBuild.error}` : ''}
-          <button type="button" className="canvas-icon-btn" aria-label="Dismiss" onClick={onDismissNotice}>
+          <button type="button" className="canvas-icon-btn" aria-label={t('canvas.dismiss')} onClick={onDismissNotice}>
             <CloseIcon />
           </button>
         </div>

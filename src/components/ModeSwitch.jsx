@@ -1,8 +1,11 @@
+import { useLanguage } from '../i18n/LanguageProvider'
+
 export function ModeSwitch({ mode, onMode, disabled }) {
+  const { t } = useLanguage()
   const tutor = mode === 'tutor'
   return (
     <div className="mode-switch">
-      <div className="mode-seg" role="group" aria-label="Chat mode">
+      <div className="mode-seg" role="group" aria-label={t('mode.group')}>
         <button
           type="button"
           className={`seg${!tutor ? ' active' : ''}`}
@@ -10,7 +13,7 @@ export function ModeSwitch({ mode, onMode, disabled }) {
           disabled={disabled}
           onClick={() => onMode('chat', null)}
         >
-          Chat
+          {t('mode.chat')}
         </button>
         <button
           type="button"
@@ -19,7 +22,7 @@ export function ModeSwitch({ mode, onMode, disabled }) {
           disabled={disabled}
           onClick={() => onMode('tutor', null)}
         >
-          Tutor
+          {t('mode.tutor')}
         </button>
       </div>
     </div>

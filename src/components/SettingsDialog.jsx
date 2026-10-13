@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
-import { PersonIcon, MailIcon, CalendarIcon, ShieldIcon } from './Icons'
+import { PersonIcon, MailIcon, CalendarIcon, ShieldIcon, GlobeIcon } from './Icons'
+import { LanguagePicker } from './LanguagePicker'
+import { useLanguage } from '../i18n/LanguageProvider'
 import { updateProfile, setAdultMode } from '../api/authClient'
 import { isAdultBirthday } from '../lib/adultMode'
 import { connectGmailUrl, disconnectGmail, gmailStatus } from '../api/gmailClient'
@@ -10,6 +12,7 @@ import {
 } from '../api/calendarClient'
 
 function ProfileForm({ user, onUpdated }) {
+  const { t } = useLanguage()
   const [name, setName] = useState(user.displayName)
   const [error, setError] = useState('')
   const [saved, setSaved] = useState(false)
@@ -27,7 +30,7 @@ function ProfileForm({ user, onUpdated }) {
       onUpdated(updated)
       setSaved(true)
     } catch (err) {
-      setError(err.message || 'Something went wrong — try again')
+      setError(err.message || t('settings.error.generic'))
     } finally {
       setBusy(false)
     }
@@ -37,7 +40,7 @@ function ProfileForm({ user, onUpdated }) {
     <form className="settings-form" onSubmit={submit}>
       <div className="settings-row">
         <label className="settings-label" htmlFor="settings-name">
-          Display name
+          {t('settings.profile.displayName')}
         </label>
         <input
           id="settings-name"
@@ -49,7 +52,7 @@ function ProfileForm({ user, onUpdated }) {
             setSaved(false)
           }}
           autoComplete="name"
-          placeholder="What should I call you?"
+          placeholder={t('settings.profile.placeholder')}
         />
       </div>
       {error && (
@@ -57,10 +60,10 @@ function ProfileForm({ user, onUpdated }) {
           {error}
         </p>
       )}
-      {saved && !error && <p className="settings-msg ok">Name updated ✓</p>}
+      {saved && !error && <p className="settings-msg ok">{t('settings.profile.updated')}</p>}
       <div className="settings-actions">
         <button type="submit" className="settings-save" disabled={busy || !dirty}>
-          {busy ? 'Saving…' : 'Save name'}
+          {busy ? t('settings.profile.saving') : t('settings.profile.save')}
         </button>
       </div>
     </form>
@@ -68,6 +71,7 @@ function ProfileForm({ user, onUpdated }) {
 }
 
 function AdultModeForm({ user, onUpdated }) {
+  const { t } = useLanguage()
   const [birthday, setBirthday] = useState('')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
@@ -80,7 +84,7 @@ function AdultModeForm({ user, onUpdated }) {
     try {
       onUpdated(await setAdultMode(enabled))
     } catch (err) {
-      setError(err.message || 'Something went wrong — try again')
+      setError(err.message || t('settings.error.generic'))
     } finally {
       setBusy(false)
     }
@@ -89,7 +93,7 @@ function AdultModeForm({ user, onUpdated }) {
   const submit = (e) => {
     e.preventDefault()
     if (!isAdultBirthday(birthday)) {
-      setError('That birthday isn\u2019t 18 or older — check the date and try again.')
+      setError(t('settings.adult.tooYoung'))
       return
     }
     setBirthday('') // the date is never kept
@@ -101,12 +105,9 @@ function AdultModeForm({ user, onUpdated }) {
       <div className="settings-form">
         <p className="settings-status">
           <ShieldIcon />
-          Adult mode is on
+          {t('settings.adult.on')}
         </p>
-        <p className="settings-hint">
-          Cappuccina won&rsquo;t assume you&rsquo;re a minor and treats adult topics
-          plainly. She&rsquo;s still an AI and still says when she isn&rsquo;t sure.
-        </p>
+        <p className="settings-hint">{t('settings.adult.onHint')}</p>
         {error && (
           <p className="settings-msg error" role="alert">
             {error}
@@ -114,7 +115,7 @@ function AdultModeForm({ user, onUpdated }) {
         )}
         <div className="settings-actions">
           <button type="button" className="settings-save" onClick={() => save(false)} disabled={busy}>
-            {busy ? 'Turning off…' : 'Turn off adult mode'}
+            {busy ? t('settings.adult.turningOff') : t('settings.adult.turnOff')}
           </button>
         </div>
       </div>
@@ -123,14 +124,10 @@ function AdultModeForm({ user, onUpdated }) {
 
   return (
     <form className="settings-form" onSubmit={submit}>
-      <p className="settings-hint">
-        Adult mode loosens Cappuccina&rsquo;s safety boundaries. To turn it on, confirm
-        you&rsquo;re 18 or older by entering your birthday — it&rsquo;s checked in your
-        browser and never saved.
-      </p>
+      <p className="settings-hint">{t('settings.adult.offHint')}</p>
       <div className="settings-row">
         <label className="settings-label" htmlFor="settings-birthday">
-          Your birthday
+          {t('settings.adult.birthday')}
         </label>
         <input
           id="settings-birthday"
@@ -150,7 +147,7 @@ function AdultModeForm({ user, onUpdated }) {
       )}
       <div className="settings-actions">
         <button type="submit" className="settings-save" disabled={busy || !birthday}>
-          {busy ? 'Enabling…' : 'Enable adult mode'}
+          {busy ? t('settings.adult.enabling') : t('settings.adult.enable')}
         </button>
       </div>
     </form>
@@ -170,6 +167,7 @@ function ConnectionForm({
   onNoticeClear,
   onUserUpdated,
 }) {
+  const { t } = useLanguage()
   const [status, setStatus] = useState(null)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
@@ -197,7 +195,7 @@ function ConnectionForm({
       onUserUpdated({ ...user, [connectedKey]: false })
       onNoticeClear()
     } catch (err) {
-      setError(err.message || 'Could not disconnect — try again')
+      setError(err.message || t('settings.connections.disconnectFailed'))
     } finally {
       setBusy(false)
     }
@@ -210,11 +208,11 @@ function ConnectionForm({
       <p className="settings-hint">{description}</p>
 
       {notice === 'connected' && (
-        <p className="settings-msg ok">{serviceName} connected ✓</p>
+        <p className="settings-msg ok">{t('settings.connections.connectedOk', { service: serviceName })}</p>
       )}
       {notice === 'error' && (
         <p className="settings-msg error" role="alert">
-          Connecting {serviceName} didn&rsquo;t finish. Please try again.
+          {t('settings.connections.connectFailed', { service: serviceName })}
         </p>
       )}
       {error && (
@@ -226,8 +224,8 @@ function ConnectionForm({
       <p className="settings-status">
         <Icon />
         {connected
-          ? `${serviceName} is connected`
-          : `${serviceName} is not connected`}
+          ? t('settings.connections.isConnected', { service: serviceName })
+          : t('settings.connections.isNotConnected', { service: serviceName })}
       </p>
 
       <div className="settings-actions">
@@ -238,11 +236,11 @@ function ConnectionForm({
             onClick={handleDisconnect}
             disabled={busy || status === null}
           >
-            {busy ? 'Disconnecting…' : `Disconnect ${serviceName}`}
+            {busy ? t('settings.connections.disconnecting') : t('settings.connections.disconnect', { service: serviceName })}
           </button>
         ) : (
           <a className="settings-save" href={connectUrl}>
-            Connect {serviceName}
+            {t('settings.connections.connect', { service: serviceName })}
           </a>
         )}
       </div>
@@ -251,11 +249,12 @@ function ConnectionForm({
 }
 
 function GmailForm({ user, notice, onNoticeClear, onUserUpdated }) {
+  const { t } = useLanguage()
   return (
     <ConnectionForm
       icon={MailIcon}
-      serviceName="Gmail"
-      description="Let Cappuccina read your inbox and write email drafts. She can never send email — every draft waits for you to press Send."
+      serviceName={t('settings.connections.gmail')}
+      description={t('settings.connections.gmailDesc')}
       connectUrl={connectGmailUrl}
       loadStatus={gmailStatus}
       disconnect={disconnectGmail}
@@ -269,11 +268,12 @@ function GmailForm({ user, notice, onNoticeClear, onUserUpdated }) {
 }
 
 function CalendarForm({ user, notice, onNoticeClear, onUserUpdated }) {
+  const { t } = useLanguage()
   return (
     <ConnectionForm
       icon={CalendarIcon}
-      serviceName="Google Calendar"
-      description="Let Cappuccina see your schedule and add or edit events for you. She can never delete an event on her own — she asks you to confirm first."
+      serviceName={t('settings.connections.calendar')}
+      description={t('settings.connections.calendarDesc')}
       connectUrl={connectCalendarUrl}
       loadStatus={calendarStatus}
       disconnect={disconnectCalendar}
@@ -296,6 +296,7 @@ export function SettingsDialog({
   calendarNotice = '',
   onCalendarNoticeClear = () => {},
 }) {
+  const { lang, setLang, t } = useLanguage()
   const [section, setSection] = useState('account')
 
   // Reset to the first section only when the dialog opens. `onClose` is a new
@@ -323,7 +324,7 @@ export function SettingsDialog({
       className="settings-veil"
       role="dialog"
       aria-modal="true"
-      aria-label="Settings"
+      aria-label={t('settings.title')}
       onMouseDown={(e) => e.target === e.currentTarget && onClose()}
     >
       <div className="settings">
@@ -331,7 +332,7 @@ export function SettingsDialog({
           <button
             type="button"
             className="settings-close"
-            aria-label="Close settings"
+            aria-label={t('settings.close')}
             onClick={onClose}
           >
             ✕
@@ -342,7 +343,7 @@ export function SettingsDialog({
             onClick={() => setSection('account')}
           >
             <PersonIcon />
-            Account
+            {t('settings.nav.account')}
           </button>
           <button
             type="button"
@@ -350,7 +351,7 @@ export function SettingsDialog({
             onClick={() => setSection('connections')}
           >
             <MailIcon />
-            Connections
+            {t('settings.nav.connections')}
           </button>
           <button
             type="button"
@@ -358,30 +359,47 @@ export function SettingsDialog({
             onClick={() => setSection('adult')}
           >
             <ShieldIcon />
-            Adult mode
+            {t('settings.nav.adult')}
+          </button>
+          <button
+            type="button"
+            className={`settings-nav-item${section === 'language' ? ' active' : ''}`}
+            onClick={() => setSection('language')}
+          >
+            <GlobeIcon />
+            {t('settings.nav.language')}
           </button>
         </aside>
         <div className="settings-pane">
           {section === 'account' && (
             <>
-              <h3 className="settings-heading">Account</h3>
+              <h3 className="settings-heading">{t('settings.nav.account')}</h3>
               <section className="settings-section">
-                <h4>Profile</h4>
+                <h4>{t('settings.account.profile')}</h4>
                 <ProfileForm user={user} onUpdated={onUserUpdated} />
               </section>
               <section className="settings-section">
-                <h4>Sign-in</h4>
+                <h4>{t('settings.account.signin')}</h4>
                 <p className="settings-hint">
-                  You sign in with your Google account ({user.email}).
+                  {t('settings.account.signinHint', { email: user.email })}
                 </p>
+              </section>
+            </>
+          )}
+          {section === 'language' && (
+            <>
+              <h3 className="settings-heading">{t('language.settings.heading')}</h3>
+              <section className="settings-section">
+                <p className="settings-hint">{t('language.settings.hint')}</p>
+                <LanguagePicker value={lang} onChange={setLang} />
               </section>
             </>
           )}
           {section === 'connections' && (
             <>
-              <h3 className="settings-heading">Connections</h3>
+              <h3 className="settings-heading">{t('settings.nav.connections')}</h3>
               <section className="settings-section">
-                <h4>Gmail</h4>
+                <h4>{t('settings.connections.gmail')}</h4>
                 <GmailForm
                   user={user}
                   notice={gmailNotice}
@@ -390,7 +408,7 @@ export function SettingsDialog({
                 />
               </section>
               <section className="settings-section">
-                <h4>Google Calendar</h4>
+                <h4>{t('settings.connections.calendar')}</h4>
                 <CalendarForm
                   user={user}
                   notice={calendarNotice}
@@ -402,9 +420,9 @@ export function SettingsDialog({
           )}
           {section === 'adult' && (
             <>
-              <h3 className="settings-heading">Adult mode</h3>
+              <h3 className="settings-heading">{t('settings.nav.adult')}</h3>
               <section className="settings-section">
-                <h4>18+ content</h4>
+                <h4>{t('settings.adult.section')}</h4>
                 <AdultModeForm user={user} onUpdated={onUserUpdated} />
               </section>
             </>

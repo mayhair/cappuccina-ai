@@ -11,6 +11,7 @@ import {
 } from '../api/chatClient'
 import { getWebpageEnv, getWebpageVersions, activateWebpageVersion, saveWebpageFile } from '../api/webpageClient'
 import tts from '../lib/tts'
+import { translate, useLanguage } from '../i18n/LanguageProvider'
 import {
   makeMessageId,
   nextBranchIndex,
@@ -22,7 +23,6 @@ import {
 const EFFORT_KEY = 'cappuccina-effort'
 const ACTIVE_CHAT_KEY = 'cappuccina-active-chat'
 const DEFAULT_TITLE = 'New chat'
-const STREAM_FAILED_MESSAGE = 'Oh no, my espresso machine hiccuped. Try again in a moment! 💕'
 export const MAX_ATTACHMENTS = 5
 
 // The canvas state of a chat with no webpage (yet): the same shape the server
@@ -127,6 +127,11 @@ function normalizeChat(c) {
 }
 
 export function useChatController(enabled) {
+  // Read through a ref so long-lived callbacks always use the current language.
+  const { lang } = useLanguage()
+  const langRef = useRef(lang)
+  langRef.current = lang
+  const tt = (key, vars) => translate(langRef.current, key, vars)
   const [chats, setChats] = useState(() => [makeChat()])
   const [activeChatId, setActiveChatId] = useState(null)
   const [draft, setDraft] = useState('')
@@ -324,7 +329,7 @@ export function useChatController(enabled) {
         setCanvasRevision((r) => r + 1)
         setCanvasNotice(null)
       } catch (err) {
-        setCanvasNotice(err.status === 409 ? err.message : 'Could not switch iteration.')
+        setCanvasNotice(err.status === 409 ? err.message : tt('controller.switchFailed'))
         refreshWebpageEnv(chatId)
         refreshWebpageVersions(chatId)
       } finally {
@@ -350,7 +355,7 @@ export function useChatController(enabled) {
         setCanvasNotice(null)
         return true
       } catch (err) {
-        setCanvasNotice(err.status === 409 ? err.message : 'Could not save that file.')
+        setCanvasNotice(err.status === 409 ? err.message : tt('controller.saveFileFailed'))
         refreshWebpageEnv(chatId)
         refreshWebpageVersions(chatId)
         return false
@@ -369,12 +374,12 @@ export function useChatController(enabled) {
       if (!files.length || status === 'streaming') return
       const room = MAX_ATTACHMENTS - attachments.length
       if (room <= 0) {
-        setAttachError(`You can attach up to ${MAX_ATTACHMENTS} files per message.`)
+        setAttachError(tt('controller.attachMax', { n: MAX_ATTACHMENTS }))
         return
       }
       const chosen = files.slice(0, room)
       setAttachError(
-        files.length > room ? `Up to ${MAX_ATTACHMENTS} files per message.` : '',
+        files.length > room ? tt('controller.attachUpTo', { n: MAX_ATTACHMENTS }) : '',
       )
       setUploading(true)
       try {
@@ -384,11 +389,11 @@ export function useChatController(enabled) {
             const meta = await uploadAttachment(chatId, file)
             setAttachments((list) => [...list, meta])
           } catch (err) {
-            setAttachError(err.message || 'Could not attach that file.')
+            setAttachError(err.message || tt('controller.attachFailed'))
           }
         }
       } catch {
-        setAttachError('Could not attach files — try again.')
+        setAttachError(tt('controller.attachFailedMany'))
       } finally {
         setUploading(false)
       }
@@ -532,7 +537,7 @@ export function useChatController(enabled) {
               parentId,
               branchIndex: nextBranchIndex(treeNodes, parentId),
               role: 'assistant',
-              content: STREAM_FAILED_MESSAGE,
+              content: tt('controller.streamFailed'),
               failed: true,
             },
           ],
@@ -730,7 +735,7 @@ export function useChatController(enabled) {
       patchMessages(chatId, (messages) =>
         messages.map((m) =>
           m.id === replyId && !m.content
-            ? { ...m, content: STREAM_FAILED_MESSAGE, failed: true }
+            ? { ...m, content: tt('controller.streamFailed'), failed: true }
             : m,
         ),
       )

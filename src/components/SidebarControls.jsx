@@ -1,13 +1,15 @@
 import { SidebarIcon, SearchIcon, PlusIcon } from './Icons'
+import { useLanguage } from '../i18n/LanguageProvider'
 
 export function SidebarControls({ collapsed, onToggle, onSearch, onNewChat, mobile = false }) {
+  const { t } = useLanguage()
   return (
-    <div className="sidebar-controls" role="group" aria-label="Chat controls">
+    <div className="sidebar-controls" role="group" aria-label={t('controls.group')}>
       <button
         type="button"
         className="ctrl-btn has-tip"
-        data-tip={collapsed ? 'Open sidebar' : 'Close sidebar'}
-        aria-label={collapsed ? 'Open sidebar' : 'Close sidebar'}
+        data-tip={collapsed ? t('controls.openSidebar') : t('sidebar.close')}
+        aria-label={collapsed ? t('controls.openSidebar') : t('sidebar.close')}
         aria-expanded={!collapsed}
         onClick={onToggle}
       >
@@ -19,8 +21,8 @@ export function SidebarControls({ collapsed, onToggle, onSearch, onNewChat, mobi
             <button
               type="button"
               className="ctrl-btn has-tip"
-              data-tip="Search"
-              aria-label="Search chats"
+              data-tip={t('controls.search')}
+              aria-label={t('sidebar.search')}
               onClick={onSearch}
             >
               <SearchIcon />
@@ -29,8 +31,8 @@ export function SidebarControls({ collapsed, onToggle, onSearch, onNewChat, mobi
           <button
             type="button"
             className="ctrl-btn has-tip"
-            data-tip="New chat"
-            aria-label="New chat"
+            data-tip={t('sidebar.newChat')}
+            aria-label={t('sidebar.newChat')}
             onClick={onNewChat}
           >
             <PlusIcon />

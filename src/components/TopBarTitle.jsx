@@ -1,7 +1,9 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { TypewriterTitle } from './TypewriterTitle'
+import { useLanguage } from '../i18n/LanguageProvider'
 
 export function TopBarTitle({ title, typing, onTyped, onRename }) {
+  const { t } = useLanguage()
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(title)
   const inputRef = useRef(null)
@@ -46,7 +48,7 @@ export function TopBarTitle({ title, typing, onTyped, onRename }) {
           className="chat-title-input"
           value={draft}
           autoFocus
-          aria-label="Rename chat"
+          aria-label={t('sidebar.renameChat')}
           onChange={(e) => setDraft(e.target.value)}
           onFocus={(e) => {
             const end = e.target.value.length

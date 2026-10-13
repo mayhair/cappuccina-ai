@@ -10,24 +10,26 @@ import { branchPosition } from '../lib/branching'
 import { useVoiceInput } from '../hooks/useVoiceInput'
 import { sendDraft, updateDraft } from '../api/gmailClient'
 import { deleteEvent } from '../api/calendarClient'
+import { useLanguage } from '../i18n/LanguageProvider'
 
 const isTouchKeyboard = () =>
   typeof window !== 'undefined' &&
   typeof window.matchMedia === 'function' &&
   window.matchMedia('(hover: none) and (pointer: coarse)').matches
 
-export function StreamingDots({ label = 'Cappuccina is typing' }) {
+export function StreamingDots({ label }) {
+  const { t } = useLanguage()
   return (
-    <span className="streaming" role="status" aria-label={label}>
+    <span className="streaming" role="status" aria-label={label ?? t('chat.typing')}>
       <i /><i /><i />
     </span>
   )
 }
 
-function formatThought(seconds) {
+function formatThought(seconds, t) {
   const s = Math.round(seconds * 10) / 10
   const shown = Number.isInteger(s) ? String(s) : s.toFixed(1)
-  return `Thought for ${shown} second${s === 1 ? '' : 's'}`
+  return t(s === 1 ? 'chat.thoughtOne' : 'chat.thought', { seconds: shown })
 }
 
 function thinkingParts(message) {
@@ -140,14 +142,14 @@ function imageFromPart(part) {
 const IMAGE_TOOLS = ['generate_image', 'image_edit']
 const IMAGE_STATUSES = ['image_generated', 'image_edited']
 
-function imageResultSummary(tool) {
+function imageResultSummary(tool, t) {
   if (!IMAGE_TOOLS.includes(tool?.name) || typeof tool.result !== 'string') return null
   try {
     const data = JSON.parse(tool.result)
     if (!IMAGE_STATUSES.includes(data?.status) || !data.image_id) return null
     return tool.name === 'image_edit'
-      ? 'Edit ready — see below ✨'
-      : 'Picture ready — see below ✨'
+      ? t('chat.editReady')
+      : t('chat.pictureReady')
   } catch {
     return null
   }
@@ -157,19 +159,19 @@ function imageResultSummary(tool) {
 // workspace (see backend/app/main.py); the page renders in the canvas, so the
 // thinking panel only needs a one-liner. Any result carrying a webpage_id
 // counts — the write, the asset copy and the site command.
-function webpageResultSummary(tool) {
+function webpageResultSummary(tool, t) {
   if (typeof tool?.result !== 'string') return null
   try {
     const data = JSON.parse(tool.result)
     if (!data?.webpage_id) return null
     if (data.status === 'webpage_file_written' && data.path) {
-      return `Saved ${data.path} — see the canvas ✨`
+      return t('chat.savedFile', { path: data.path })
     }
     if (data.status === 'webpage_asset_added' && data.path) {
-      return `Added ${data.path} — see the canvas ✨`
+      return t('chat.addedFile', { path: data.path })
     }
     if (data.status === 'webpage_command_ran') {
-      return 'Ran a site command — see the canvas ✨'
+      return t('chat.ranCommand')
     }
     return null
   } catch {
@@ -196,12 +198,13 @@ function webpagesFromParts(parts) {
 }
 
 function WebpageCard({ webpage, onOpen }) {
+  const { t } = useLanguage()
   const files = webpage.files ?? []
   return (
     <figure className="webpage-card">
       <div className="webpage-card-head">
         <WindowIcon />
-        <span className="webpage-card-title">Webpage ready</span>
+        <span className="webpage-card-title">{t('chat.webpageReady')}</span>
       </div>
       {files.length > 0 && (
         <ul className="webpage-card-files">
@@ -211,7 +214,7 @@ function WebpageCard({ webpage, onOpen }) {
         </ul>
       )}
       <button type="button" className="webpage-card-open" onClick={onOpen}>
-        Open canvas
+        {t('chat.openCanvas')}
       </button>
     </figure>
   )
@@ -269,6 +272,7 @@ function AttachmentPreview({ attachment }) {
 }
 
 function AttachmentChip({ attachment, onRemove }) {
+  const { t } = useLanguage()
   const href = `/api/v1/attachments/${attachment.id}`
   return (
     <div className={`attach-chip${attachment.kind === 'image' ? ' image' : ''}`}>
@@ -282,7 +286,7 @@ function AttachmentChip({ attachment, onRemove }) {
         type="button"
         className="attach-chip-remove"
         onClick={() => onRemove(attachment.id)}
-        aria-label={`Remove ${attachment.name}`}
+        aria-label={t('chat.removeAttachment', { name: attachment.name })}
       >
         ×
       </button>
@@ -291,9 +295,10 @@ function AttachmentChip({ attachment, onRemove }) {
 }
 
 function ImageCard({ image }) {
+  const { t } = useLanguage()
   const [open, setOpen] = useState(false)
   const src = `/api/v1/images/${image.imageId}`
-  const alt = image.prompt ? `Picture Cappuccina drew: ${image.prompt}` : 'Picture Cappuccina drew'
+  const alt = image.prompt ? t('chat.pictureDrewPrompt', { prompt: image.prompt }) : t('chat.pictureDrew')
   const transparent = image.transparent === true
 
   useEffect(() => {
@@ -316,7 +321,7 @@ function ImageCard({ image }) {
         type="button"
         className="image-card-frame"
         onClick={() => setOpen(true)}
-        aria-label="View picture full size"
+        aria-label={t('chat.viewPicture')}
       >
         <img
           className={transparent ? 'image-transparent' : undefined}
@@ -349,7 +354,7 @@ function ImageCard({ image }) {
               type="button"
               className="image-lightbox-close"
               onClick={() => setOpen(false)}
-              aria-label="Close full-size picture"
+              aria-label={t('chat.closePicture')}
             >
               ×
             </button>
@@ -361,6 +366,7 @@ function ImageCard({ image }) {
 }
 
 function DraftCard({ draft, onSent }) {
+  const { t } = useLanguage()
   const initial = { to: draft.to, subject: draft.subject, body: draft.body }
   const [saved, setSaved] = useState(initial) // last persisted contents
   const [fields, setFields] = useState(initial)
@@ -388,7 +394,7 @@ function DraftCard({ draft, onSent }) {
       return
     }
     setState('error')
-    setMessage(err.message || 'Something went wrong — try again')
+    setMessage(err.message || t('settings.error.generic'))
   }
 
   const save = async () => {
@@ -434,10 +440,10 @@ function DraftCard({ draft, onSent }) {
     <div className="draft-card">
       <div className="draft-card-head">
         <MailIcon />
-        Email draft
+        {t('draft.title')}
         {!editing && state !== 'sent' && (
           <button type="button" className="draft-edit" onClick={startEditing}>
-            <PencilIcon /> Edit
+            <PencilIcon /> {t('chat.edit')}
           </button>
         )}
       </div>
@@ -445,44 +451,44 @@ function DraftCard({ draft, onSent }) {
       {editing ? (
         <div className="draft-edit-form">
           <label className="draft-edit-field">
-            <span>To</span>
+            <span>{t('draft.to')}</span>
             <input
               type="email"
               value={fields.to}
               onChange={(e) => setFields({ ...fields, to: e.target.value })}
-              aria-label="Recipient"
+              aria-label={t('draft.recipient')}
             />
           </label>
           <label className="draft-edit-field">
-            <span>Subject</span>
+            <span>{t('draft.subject')}</span>
             <input
               type="text"
               value={fields.subject}
               onChange={(e) => setFields({ ...fields, subject: e.target.value })}
-              aria-label="Subject"
+              aria-label={t('draft.subject')}
             />
           </label>
           <label className="draft-edit-field">
-            <span>Message</span>
+            <span>{t('draft.message')}</span>
             <textarea
               rows={6}
               value={fields.body}
               onChange={(e) => setFields({ ...fields, body: e.target.value })}
-              aria-label="Message body"
+              aria-label={t('draft.body')}
             />
           </label>
         </div>
       ) : (
         <>
           <div className="draft-fields">
-            <div><b>To</b>{fields.to}</div>
-            <div><b>Subject</b>{fields.subject}</div>
+            <div><b>{t('draft.to')}</b>{fields.to}</div>
+            <div><b>{t('draft.subject')}</b>{fields.subject}</div>
           </div>
           <p
             className="draft-body"
             role={state === 'sent' ? undefined : 'button'}
             tabIndex={state === 'sent' ? undefined : 0}
-            title={state === 'sent' ? undefined : 'Click to edit'}
+            title={state === 'sent' ? undefined : t('draft.clickToEdit')}
             onClick={state === 'sent' ? undefined : startEditing}
             onKeyDown={
               state === 'sent'
@@ -506,7 +512,7 @@ function DraftCard({ draft, onSent }) {
 
       <div className="draft-actions">
         {state === 'sent' ? (
-          <span className="draft-note ok"><CheckIcon /> Sent</span>
+          <span className="draft-note ok"><CheckIcon /> {t('draft.sent')}</span>
         ) : editing ? (
           <>
             <button
@@ -515,7 +521,7 @@ function DraftCard({ draft, onSent }) {
               onClick={save}
               disabled={state === 'saving' || !canSubmit || !dirty}
             >
-              {state === 'saving' ? 'Saving…' : 'Save changes'}
+              {state === 'saving' ? t('settings.profile.saving') : t('draft.saveChanges')}
             </button>
             <button
               type="button"
@@ -523,7 +529,7 @@ function DraftCard({ draft, onSent }) {
               onClick={cancel}
               disabled={state === 'saving'}
             >
-              Cancel
+              {t('common.cancel')}
             </button>
           </>
         ) : (
@@ -534,9 +540,9 @@ function DraftCard({ draft, onSent }) {
               onClick={send}
               disabled={state === 'sending' || !canSubmit}
             >
-              {state === 'sending' ? 'Sending…' : 'Send email'}
+              {state === 'sending' ? t('draft.sending') : t('draft.send')}
             </button>
-            <span className="draft-note">Click the message to edit it</span>
+            <span className="draft-note">{t('draft.clickMessage')}</span>
           </>
         )}
       </div>
@@ -545,6 +551,7 @@ function DraftCard({ draft, onSent }) {
 }
 
 function EventDeleteCard({ proposal, onDeleted }) {
+  const { t } = useLanguage()
   // A previously confirmed deletion (from a reload) starts in the done state.
   const [state, setState] = useState(proposal.deleted ? 'deleted' : 'idle')
   const [message, setMessage] = useState('')
@@ -559,7 +566,7 @@ function EventDeleteCard({ proposal, onDeleted }) {
       return
     }
     setState('error')
-    setMessage(err.message || 'Something went wrong — try again')
+    setMessage(err.message || t('settings.error.generic'))
   }
 
   const remove = async () => {
@@ -579,13 +586,13 @@ function EventDeleteCard({ proposal, onDeleted }) {
     <div className="draft-card">
       <div className="draft-card-head">
         <CalendarIcon />
-        Delete this event?
+        {t('event.deleteQ')}
       </div>
 
       <div className="draft-fields">
-        <div><b>Event</b>{proposal.title}</div>
-        <div><b>When</b>{proposal.when}</div>
-        {proposal.location && <div><b>Where</b>{proposal.location}</div>}
+        <div><b>{t('event.event')}</b>{proposal.title}</div>
+        <div><b>{t('event.when')}</b>{proposal.when}</div>
+        {proposal.location && <div><b>{t('event.where')}</b>{proposal.location}</div>}
       </div>
 
       {state === 'error' && (
@@ -594,7 +601,7 @@ function EventDeleteCard({ proposal, onDeleted }) {
 
       <div className="draft-actions">
         {state === 'deleted' ? (
-          <span className="draft-note ok"><CheckIcon /> Deleted</span>
+          <span className="draft-note ok"><CheckIcon /> {t('event.deleted')}</span>
         ) : (
           <>
             <button
@@ -603,9 +610,9 @@ function EventDeleteCard({ proposal, onDeleted }) {
               onClick={remove}
               disabled={state === 'deleting'}
             >
-              {state === 'deleting' ? 'Deleting…' : 'Delete event'}
+              {state === 'deleting' ? t('event.deleting') : t('event.delete')}
             </button>
-            <span className="draft-note">Cappuccina won&rsquo;t delete it without you</span>
+            <span className="draft-note">{t('event.note')}</span>
           </>
         )}
       </div>
@@ -614,6 +621,7 @@ function EventDeleteCard({ proposal, onDeleted }) {
 }
 
 function ToolCallBlock({ tool, onManualToggle }) {
+  const { t } = useLanguage()
   const [open, setOpen] = useState(false)
   const running = tool.result == null
   const failed = tool.ok === false
@@ -635,15 +643,15 @@ function ToolCallBlock({ tool, onManualToggle }) {
         <span className="tool-title">{tool.display || tool.name}</span>
         {running ? (
           <span className="tool-status running">
-            <StreamingDots label={`${tool.display || tool.name} is running`} />
-            Running
+            <StreamingDots label={t('tool.isRunning', { name: tool.display || tool.name })} />
+            {t('tool.running')}
           </span>
         ) : failed ? (
-          <span className="tool-status failed">Failed</span>
+          <span className="tool-status failed">{t('tool.failed')}</span>
         ) : (
           <span className="tool-status done">
             <CheckIcon />
-            Done
+            {t('tool.done')}
           </span>
         )}
         <ChevronIcon className={`chev${open ? ' open' : ''}`} />
@@ -652,7 +660,7 @@ function ToolCallBlock({ tool, onManualToggle }) {
         <div className="tool-body">
           {argsText && (
             <div className="tool-section">
-              <div className="tool-section-label">Input</div>
+              <div className="tool-section-label">{t('tool.input')}</div>
               <pre
                 className="tool-args"
                 dangerouslySetInnerHTML={{ __html: highlightJson(argsText) }}
@@ -660,11 +668,11 @@ function ToolCallBlock({ tool, onManualToggle }) {
             </div>
           )}
           <div className="tool-section">
-            <div className="tool-section-label">Result</div>
+            <div className="tool-section-label">{t('tool.result')}</div>
             <div className="tool-result">
-              {imageResultSummary(tool) ??
-                webpageResultSummary(tool) ??
-                <EmojiText text={tool.result ?? 'Running…'} />}
+              {imageResultSummary(tool, t) ??
+                webpageResultSummary(tool, t) ??
+                <EmojiText text={tool.result ?? t('tool.runningEllipsis')} />}
             </div>
           </div>
         </div>
@@ -674,6 +682,7 @@ function ToolCallBlock({ tool, onManualToggle }) {
 }
 
 function ThinkingBlock({ parts: segmentParts, streaming, fallbackSeconds = null }) {
+  const { t } = useLanguage()
   // Draft and deletion calls are surfaced as their own cards below the
   // message, so hide the raw tool blocks to avoid showing them twice.
   const parts = segmentParts.filter(
@@ -689,10 +698,10 @@ function ThinkingBlock({ parts: segmentParts, streaming, fallbackSeconds = null 
   const seconds = stamped?.seconds ?? fallbackSeconds
   const done = seconds != null || !streaming
   const label = !done
-    ? 'Thinking...'
+    ? t('chat.thinking')
     : seconds != null
-      ? formatThought(seconds)
-      : 'Thought'
+      ? formatThought(seconds, t)
+      : t('chat.thoughtPlain')
 
   // Auto-expand while thinking runs, auto-close once it's done. Any manual
   // click on the block head or on a tool call inside it takes over for good.
@@ -740,6 +749,7 @@ function ThinkingBlock({ parts: segmentParts, streaming, fallbackSeconds = null 
 }
 
 function CopyMessageButton({ text }) {
+  const { t } = useLanguage()
   const [copied, setCopied] = useState(false)
   const timer = useRef(null)
 
@@ -772,52 +782,55 @@ function CopyMessageButton({ text }) {
       type="button"
       className={`copy-msg${copied ? ' copied' : ''}`}
       onClick={copy}
-      aria-label={copied ? 'Copied' : 'Copy message'}
+      aria-label={copied ? t('chat.copiedLabel') : t('chat.copy')}
     >
       {copied ? <CheckIcon /> : <CopyIcon />}
-      <span aria-live="polite">{copied ? 'Copied!' : 'Copy message'}</span>
+      <span aria-live="polite">{copied ? t('chat.copied') : t('chat.copy')}</span>
     </button>
   )
 }
 
 function RetryMessageButton({ onRetry }) {
+  const { t } = useLanguage()
   return (
     <button
       type="button"
       className="copy-msg"
       onClick={onRetry}
-      aria-label="Try again now"
+      aria-label={t('chat.retry')}
     >
       <RetryIcon />
-      <span>Try again now</span>
+      <span>{t('chat.retry')}</span>
     </button>
   )
 }
 
 function RegenerateMessageButton({ onRegenerate }) {
+  const { t } = useLanguage()
   return (
     <button
       type="button"
       className="copy-msg"
       onClick={onRegenerate}
-      aria-label="Regenerate"
+      aria-label={t('chat.regenerate')}
     >
       <RetryIcon />
-      <span>Regenerate</span>
+      <span>{t('chat.regenerate')}</span>
     </button>
   )
 }
 
 // Arrows + "x/y" version switcher, shown only when a message has branches.
 function BranchNav({ index, total, onPrev, onNext }) {
+  const { t } = useLanguage()
   return (
-    <div className="branch-nav" role="group" aria-label={`Version ${index + 1} of ${total}`}>
+    <div className="branch-nav" role="group" aria-label={t('chat.versionOf', { n: index + 1, total })}>
       <button
         type="button"
         className="branch-arrow prev"
         onClick={onPrev}
         disabled={index <= 0}
-        aria-label="Previous version"
+        aria-label={t('chat.prevVersion')}
       >
         <ChevronIcon />
       </button>
@@ -827,7 +840,7 @@ function BranchNav({ index, total, onPrev, onNext }) {
         className="branch-arrow next"
         onClick={onNext}
         disabled={index >= total - 1}
-        aria-label="Next version"
+        aria-label={t('chat.nextVersion')}
       >
         <ChevronIcon />
       </button>
@@ -836,6 +849,7 @@ function BranchNav({ index, total, onPrev, onNext }) {
 }
 
 function EditMessageForm({ value, onChange, onSend, onCancel }) {
+  const { t } = useLanguage()
   const ref = useRef(null)
   useEffect(() => {
     const el = ref.current
@@ -854,7 +868,7 @@ function EditMessageForm({ value, onChange, onSend, onCancel }) {
       />
       <div className="edit-msg-actions">
         <button type="button" className="edit-msg-cancel" onClick={onCancel}>
-          Cancel
+          {t('common.cancel')}
         </button>
         <button
           type="button"
@@ -862,7 +876,7 @@ function EditMessageForm({ value, onChange, onSend, onCancel }) {
           onClick={onSend}
           disabled={!value.trim()}
         >
-          Send
+          {t('chat.send')}
         </button>
       </div>
     </div>
@@ -870,6 +884,7 @@ function EditMessageForm({ value, onChange, onSend, onCancel }) {
 }
 
 function MessageRow({ message, prev, isActiveStream, user, onRetry, onDraftSent, onEventDeleted, onOpenWebpage, branch, onEdit, onRegenerate, onNavigateBranch }) {
+  const { t } = useLanguage()
   const m = message
   const [editing, setEditing] = useState(false)
   const [editText, setEditText] = useState('')
@@ -930,7 +945,7 @@ function MessageRow({ message, prev, isActiveStream, user, onRetry, onDraftSent,
                 fallbackSeconds={thinkingCount === 1 ? m.thoughtSeconds : null}
               />
             ) : (
-              <div key={`text-${si}`} className="bubble">
+              <div key={`text-${si}`} className="bubble" dir="auto">
                 <Markdown text={seg.text} />
               </div>
             ),
@@ -995,7 +1010,7 @@ function MessageRow({ message, prev, isActiveStream, user, onRetry, onDraftSent,
               />
             </>
           ) : (
-            <div className="bubble">
+            <div className="bubble" dir="auto">
               {attachmentsBlock}
               {(m.content || userAttachments.length === 0) && (
                 <p>
@@ -1013,10 +1028,10 @@ function MessageRow({ message, prev, isActiveStream, user, onRetry, onDraftSent,
                   setEditText(m.content ?? '')
                   setEditing(true)
                 }}
-                aria-label="Edit message"
+                aria-label={t('chat.editMessage')}
               >
                 <PencilIcon />
-                <span>Edit</span>
+                <span>{t('chat.edit')}</span>
               </button>
               {canBranch && (
                 <BranchNav
@@ -1050,6 +1065,7 @@ function Composer({
   onEffort,
   inputRef,
 }) {
+  const { t } = useLanguage()
   const composerRef = useRef(null)
   const fileRef = useRef(null)
   const setComposer = useCallback((el) => {
@@ -1078,7 +1094,7 @@ function Composer({
   )
   const voice = useVoiceInput({ onTranscript: appendTranscript, disabled: isStreaming || uploading })
 
-  useEffect(() => {
+  const autosize = useCallback(() => {
     const el = composerRef.current
     if (!el) return
     el.style.height = 'auto'
@@ -1086,7 +1102,22 @@ function Composer({
     const line = parseFloat(getComputedStyle(el).lineHeight) || 24
     const multi = el.scrollHeight > line * 1.5 || el.value.includes('\n')
     el.parentElement?.classList.toggle('expanded', multi)
-  }, [draft, voice.interim])
+  }, [])
+
+  useEffect(() => {
+    autosize()
+  }, [autosize, draft, voice.interim])
+
+  // The measurement depends on width and fonts, which can settle after the
+  // first render (web fonts loading, a language/direction switch), so re-measure.
+  useEffect(() => {
+    const el = composerRef.current
+    if (!el || typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(autosize)
+    observer.observe(el.parentElement ?? el)
+    document.fonts?.ready.then(autosize)
+    return () => observer.disconnect()
+  }, [autosize])
 
   const voiceSuffix = voice.listening && voice.interim ? voice.interim : ''
   const composerValue = voiceSuffix
@@ -1132,7 +1163,7 @@ function Composer({
             {attachments.map((a) => (
               <AttachmentChip key={a.id} attachment={a} onRemove={onRemoveAttachment} />
             ))}
-            {uploading && <span className="attach-uploading">Uploading…</span>}
+            {uploading && <span className="attach-uploading">{t('chat.uploading')}</span>}
           </div>
         )}
         {attachError && <p className="attach-error" role="alert">{attachError}</p>}
@@ -1141,8 +1172,8 @@ function Composer({
           <div className={`input${voice.listening ? ' listening' : ''}`}>
             <textarea
               rows={1}
-              placeholder={mode === 'tutor' ? 'What shall we learn today?' : 'Ask me anything...'}
-              aria-label="Message Cappuccina"
+              placeholder={mode === 'tutor' ? t('chat.placeholderTutor') : t('chat.placeholder')}
+              aria-label={t('chat.messageLabel')}
               value={composerValue}
               onChange={(e) => handleDraftChange(e.target.value)}
               onKeyDown={handleComposerKeyDown}
@@ -1162,8 +1193,8 @@ function Composer({
             <button
               type="button"
               className={`mic has-tip tip-up${voice.listening ? ' rec' : ''}`}
-              data-tip={voice.listening ? 'Listening… tap to stop' : 'Speak your message'}
-              aria-label={voice.listening ? 'Stop voice input' : 'Speak your message'}
+              data-tip={voice.listening ? t('chat.listening') : t('chat.speak')}
+              aria-label={voice.listening ? t('chat.stopVoice') : t('chat.speak')}
               aria-pressed={voice.listening}
               onClick={voice.toggle}
               disabled={isStreaming || uploading}
@@ -1174,8 +1205,8 @@ function Composer({
           <button
             type="button"
             className="attach has-tip tip-up"
-            data-tip="Attach files..."
-            aria-label="Attach files..."
+            data-tip={t('chat.attach')}
+            aria-label={t('chat.attach')}
             onClick={() => fileRef.current?.click()}
             disabled={isStreaming || uploading}
           >
@@ -1184,7 +1215,7 @@ function Composer({
           <button
             className="send"
             type="submit"
-            aria-label="Send message"
+            aria-label={t('chat.sendMessage')}
             disabled={(!draft.trim() && attachments.length === 0) || isStreaming || uploading}
           >
             <SendIcon />
@@ -1199,6 +1230,7 @@ function Composer({
 }
 
 export function ChatWindow({ chat, user, isStreaming, draft, onDraft, onSend, onRetry, onEdit, onRegenerate, onNavigateBranch, onDraftSent, onEventDeleted, onOpenWebpage, inputRef, effort, onEffort, mode, onMode, attachments = [], uploading = false, attachError = '', onAttach, onRemoveAttachment }) {
+  const { t } = useLanguage()
   const listRef = useRef(null)
 
   const canAttach = !isStreaming && !uploading
@@ -1308,15 +1340,15 @@ export function ChatWindow({ chat, user, isStreaming, draft, onDraft, onSend, on
 
   return (
     <>
-      <div className="message-list" ref={listRef} aria-label={`Conversation: ${chat.title}`}>
+      <div className="message-list" ref={listRef} aria-label={t('chat.conversation', { title: chat.title })}>
         {chat.messages.length === 0 && !isStreaming && (
           <div className="welcome" role="status">
-            <img className="welcome-hero" src="/plates/welcome-hero.webp" alt="Ballerina Cappuccina waving hello" />
-            <h1 className="welcome-title">Hi! I'm Ballerina Cappuccina</h1>
+            <img className="welcome-hero" src="/plates/welcome-hero.webp" alt={t('chat.welcomeAlt')} />
+            <h1 className="welcome-title">{t('landing.title')}</h1>
             {mode === 'tutor' ? (
-              <p className="welcome-sub">Pointe shoes on — tell me what you'd like to learn</p>
+              <p className="welcome-sub">{t('chat.welcomeTutor')}</p>
             ) : (
-              <p className="welcome-sub">Your AI chat friend — ask me anything, or let's learn together</p>
+              <p className="welcome-sub">{t('landing.sub')}</p>
             )}
           </div>
         )}
@@ -1360,7 +1392,7 @@ export function ChatWindow({ chat, user, isStreaming, draft, onDraft, onSend, on
         <div className="drop-overlay" aria-hidden="true">
           <div className="drop-overlay-card">
             <PaperclipIcon />
-            <span>Drop files to attach</span>
+            <span>{t('chat.drop')}</span>
           </div>
         </div>
       )}

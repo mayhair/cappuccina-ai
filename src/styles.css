@@ -152,7 +152,7 @@ input { caret-color: var(--pink-strong); }
   position: fixed;
   inset: 0;
   display: flex;
-  padding: 3vh 2.3vw 2.6vh 1.7vw;
+  padding-block: 3vh 2.6vh; padding-inline: 1.7vw 2.3vw;
   overflow: hidden;
 }
 
@@ -167,7 +167,7 @@ input { caret-color: var(--pink-strong); }
   z-index: 2;
   flex: 0 0 auto;
   width: clamp(264px, 22vw, 360px);
-  margin-right: clamp(18px, 1.8vw, 34px);
+  margin-inline-end: clamp(18px, 1.8vw, 34px);
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -180,7 +180,7 @@ input { caret-color: var(--pink-strong); }
   -webkit-backdrop-filter: blur(14px);
   padding: clamp(20px, 1.8vw, 30px) clamp(16px, 1.3vw, 24px);
   transition: width 280ms cubic-bezier(0.4, 0, 0.2, 1),
-    margin-right 280ms cubic-bezier(0.4, 0, 0.2, 1),
+    margin-inline-end 280ms cubic-bezier(0.4, 0, 0.2, 1),
     padding 280ms cubic-bezier(0.4, 0, 0.2, 1),
     opacity 160ms ease,
     transform 280ms cubic-bezier(0.4, 0, 0.2, 1),
@@ -189,7 +189,7 @@ input { caret-color: var(--pink-strong); }
 
 .app.is-collapsed .sidebar {
   width: 0;
-  margin-right: 0;
+  margin-inline-end: 0;
   padding: 0;
   opacity: 0;
   transform: translateX(-14px);
@@ -378,7 +378,7 @@ input { caret-color: var(--pink-strong); }
   font-family: var(--font-body);
   font-weight: 700;
   font-size: clamp(14px, 1.2vw, 19px);
-  text-align: left;
+  text-align: start;
   cursor: pointer;
   transition: background 130ms ease, color 130ms ease;
 }
@@ -397,7 +397,7 @@ input { caret-color: var(--pink-strong); }
   display: inline-block;
   width: 0.5em;
   height: 1em;
-  margin-left: 1px;
+  margin-inline-start: 1px;
   background: currentColor;
   vertical-align: text-bottom;
   animation: caret-blink 900ms steps(1) infinite;
@@ -413,7 +413,7 @@ input { caret-color: var(--pink-strong); }
   .modal { animation: none; }
 }
 .chat-menu-btn {
-  margin-left: auto;
+  margin-inline-start: auto;
   display: grid;
   place-items: center;
   width: 1.7em;
@@ -439,7 +439,7 @@ input { caret-color: var(--pink-strong); }
 .chat-menu {
   position: absolute;
   top: calc(100% + 6px);
-  right: 0;
+  inset-inline-end: 0;
   z-index: 20;
   min-width: 172px;
   padding: 0.4rem;
@@ -468,7 +468,7 @@ input { caret-color: var(--pink-strong); }
   font-family: var(--font-body);
   font-weight: 700;
   font-size: 15px;
-  text-align: left;
+  text-align: start;
   cursor: pointer;
   transition: background 120ms ease, color 120ms ease;
 }
@@ -491,7 +491,7 @@ input { caret-color: var(--pink-strong); }
 }
 .chat-rename-input:focus-visible { outline: none; }
 .chat-tag {
-  margin-left: 0.35rem;
+  margin-inline-start: 0.35rem;
   font-size: 0.68em;
   font-weight: 800;
   letter-spacing: 0.04em;
@@ -594,7 +594,7 @@ img.user-avatar {
 
 .user-menu {
   position: absolute;
-  right: 0;
+  inset-inline-end: 0;
   bottom: calc(100% - 4px);
   z-index: 30;
   min-width: 190px;
@@ -612,8 +612,8 @@ img.user-avatar {
   content: '';
   position: absolute;
   top: 100%;
-  left: 0;
-  right: 0;
+  inset-inline-start: 0;
+  inset-inline-end: 0;
   height: 6px;
 }
 
@@ -630,7 +630,7 @@ img.user-avatar {
   font-family: var(--font-body);
   font-weight: 700;
   font-size: 15px;
-  text-align: left;
+  text-align: start;
   cursor: pointer;
   transition: background 120ms ease, color 120ms ease;
 }
@@ -663,6 +663,9 @@ img.user-avatar {
   justify-content: space-between;
   gap: 1.25rem;
   padding: 0 0 1.2rem;
+  /* Keeps the top bar's tooltips above the message list's avatars below it. */
+  position: relative;
+  z-index: 10;
 }
 
 .top-bar-left,
@@ -725,7 +728,7 @@ img.user-avatar {
   font-weight: 700;
   font-size: clamp(15px, 1.15vw, 18px);
   line-height: 1.3;
-  text-align: left;
+  text-align: start;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -771,7 +774,7 @@ img.user-avatar {
 .chat-title-mirror {
   position: absolute;
   top: 0;
-  left: 0;
+  inset-inline-start: 0;
   max-width: min(46vw, 520px);
   overflow: hidden;
   visibility: hidden;
@@ -890,15 +893,15 @@ img.user-avatar {
 .msg-row.assistant .bubble {
   background: var(--bubble-ai-bg);
   border: 1px solid var(--bubble-ai-border);
-  border-top-left-radius: 6px;
+  border-start-start-radius: 6px;
   box-shadow: var(--shadow-sm);
 }
-.msg-row.assistant + .msg-row.assistant .bubble { border-top-left-radius: 18px; }
+.msg-row.assistant + .msg-row.assistant .bubble { border-start-start-radius: 18px; }
 .msg-row.user .bubble {
   background: var(--bubble-me-bg);
-  border-top-right-radius: 6px;
+  border-start-end-radius: 6px;
 }
-.msg-row.user + .msg-row.user .bubble { border-top-right-radius: 18px; }
+.msg-row.user + .msg-row.user .bubble { border-start-end-radius: 18px; }
 @keyframes pop {
   from { opacity: 0; transform: translateY(10px) scale(0.97); }
   to { opacity: 1; transform: none; }
@@ -924,15 +927,15 @@ img.user-avatar {
 .bubble > :first-child { margin-top: 0; }
 .bubble > :last-child { margin-bottom: 0; }
 .bubble .md-ul,
-.bubble .md-ol { padding-left: 1.25rem; }
+.bubble .md-ol { padding-inline-start: 1.25rem; }
 .bubble .md-ul { list-style: disc; }
 .bubble .md-ol { list-style: decimal; }
 .bubble li { margin-top: 0.15rem; }
 .bubble .md-h { font-size: 1.05em; font-weight: 700; line-height: 1.3; }
 .bubble .md-hr { border: none; border-top: 1px solid var(--hairline); }
 .bubble .md-quote {
-  padding-left: 0.7rem;
-  border-left: 3px solid var(--pink);
+  padding-inline-start: 0.7rem;
+  border-inline-start: 3px solid var(--pink);
   color: var(--ink-soft);
 }
 .bubble .md-pre {
@@ -998,7 +1001,7 @@ img.user-avatar {
   display: inline-flex;
   align-items: center;
   gap: 0.1rem;
-  margin-left: 0.15rem;
+  margin-inline-start: 0.15rem;
   padding: 0.05rem 0.15rem;
   border-radius: 999px;
 }
@@ -1042,7 +1045,7 @@ img.user-avatar {
   padding: 0.6em 0.85em;
   border: 1px solid var(--pink-strong);
   border-radius: 16px;
-  border-top-right-radius: 6px;
+  border-start-end-radius: 6px;
   background: var(--glass-strong);
   color: var(--ink);
   font-family: var(--font-body);
@@ -1129,7 +1132,7 @@ img.user-avatar {
   font-family: var(--font-body);
   font-size: inherit;
   cursor: pointer;
-  text-align: left;
+  text-align: start;
 }
 .tool-badge {
   display: grid;
@@ -1182,14 +1185,14 @@ img.user-avatar {
   width: 0.95em;
   height: 0.95em;
   flex: none;
-  margin-left: auto;
+  margin-inline-start: auto;
   color: var(--ink-faint);
   transition: transform 150ms ease;
 }
 .tool-call-head .chev.open { transform: rotate(90deg); }
 .tool-body {
   margin-top: 0.5rem;
-  margin-left: 2.1rem;
+  margin-inline-start: 2.1rem;
   animation: pop 220ms cubic-bezier(0.2, 0.9, 0.3, 1.2) both;
 }
 .tool-section + .tool-section { margin-top: 0.45rem; }
@@ -1320,7 +1323,7 @@ img.user-avatar {
   flex-direction: column;
   align-items: stretch;
   gap: 0.4rem;
-  padding: 0.8vh 2.4vw 0.4vh 1vw;
+  padding-block: 0.8vh 0.4vh; padding-inline: 1vw 2.4vw;
 }
 .composer-row {
   display: flex;
@@ -1332,7 +1335,7 @@ img.user-avatar {
   display: flex;
   justify-content: flex-end;
   gap: 0.7rem;
-  padding-right: 0.4rem;
+  padding-inline-end: 0.4rem;
 }
 
 .mode-switch {
@@ -1364,7 +1367,7 @@ img.user-avatar {
   cursor: pointer;
   transition: background 180ms ease, color 180ms ease;
 }
-.mode-seg .seg:first-child { border-right: 1px solid var(--hairline); }
+.mode-seg .seg:first-child { border-inline-end: 1px solid var(--hairline); }
 .mode-seg .seg.active { background: var(--pink-strong); color: #ffffff; }
 .mode-seg .seg:focus-visible { outline: none; box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.65); }
 .mode-seg .seg:disabled { cursor: default; opacity: 0.6; }
@@ -1372,7 +1375,7 @@ img.user-avatar {
   flex: 1;
   display: flex;
   align-items: center;
-  padding: 0.95rem 1rem 0.95rem 1.5rem;
+  padding-block: 0.95rem 0.95rem; padding-inline: 1.5rem 1rem;
   border-radius: 999px;
   border: 1px solid var(--hairline);
   background: var(--field);
@@ -1499,8 +1502,8 @@ img.user-avatar {
 .has-tip.tip-up::after {
   top: auto;
   bottom: calc(100% + 9px);
-  left: auto;
-  right: 0;
+  inset-inline-start: auto;
+  inset-inline-end: 0;
   transform: translate(0, 3px);
 }
 .has-tip.tip-up:hover::after,
@@ -1511,14 +1514,14 @@ img.user-avatar {
   flex-wrap: wrap;
   align-items: center;
   gap: 0.5rem;
-  padding: 0 0.4rem 0.35rem 0.6rem;
+  padding-block: 0 0.35rem; padding-inline: 0.6rem 0.4rem;
 }
 .attach-chip {
   display: inline-flex;
   align-items: center;
   gap: 0.45rem;
   max-width: 15rem;
-  padding: 0.3rem 0.35rem 0.3rem 0.55rem;
+  padding-block: 0.3rem 0.3rem; padding-inline: 0.55rem 0.35rem;
   border-radius: 999px;
   border: 1px solid var(--hairline);
   background: var(--glass-strong);
@@ -1666,7 +1669,7 @@ img.user-avatar {
 }
 .effort-pop {
   position: absolute;
-  right: 0;
+  inset-inline-end: 0;
   bottom: calc(100% + 10px);
   z-index: 30;
   width: 268px;
@@ -1699,7 +1702,8 @@ img.user-avatar {
 .effort-help {
   border: none;
   background: none;
-  padding: 0 0 0 0.3rem;
+  padding: 0;
+  padding-inline-start: 0.3rem;
   font-family: var(--font-body);
   font-size: 14px;
   font-weight: 800;
@@ -1811,7 +1815,7 @@ img.user-avatar {
 .modal-x {
   position: absolute;
   top: 0.7rem;
-  left: 0.7rem;
+  inset-inline-start: 0.7rem;
   width: 32px;
   height: 32px;
   border: none;
@@ -1901,6 +1905,73 @@ img.user-avatar {
   font-size: 17px;
 }
 
+/* ---------- language ---------- */
+.lang-button {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border: 1px solid var(--hairline);
+  border-radius: 12px;
+  background: var(--glass);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  box-shadow: var(--shadow);
+  color: var(--ink-soft);
+  cursor: pointer;
+  transition: background 180ms ease, color 180ms ease;
+}
+.lang-button:hover { background: var(--glass-strong); color: var(--ink); }
+.lang-button svg { width: 20px; height: 20px; }
+.lang-picker {
+  display: grid;
+  gap: 0.5rem;
+  margin: 0 0 1.1rem;
+}
+.lang-option {
+  padding: 0.7rem 1rem;
+  border: 1px solid var(--hairline);
+  border-radius: 14px;
+  background: var(--glass);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: 16px;
+  font-weight: 700;
+  text-align: center;
+  cursor: pointer;
+  transition: background 150ms ease, border-color 150ms ease;
+}
+.lang-option:hover { background: var(--glass-strong); }
+.lang-option.active {
+  border-color: var(--pink-strong);
+  box-shadow: 0 0 0 2px var(--pink-strong) inset;
+}
+
+/* Urdu script: needs a Nastaliq face and extra line height (the Latin fonts have no glyphs). */
+/* Noto Nastaliq Urdu's own punctuation (! " ( ) , . : ; ? « » – — quotes • … and the
+   middle dot), since the Latin fonts' versions look wrong inside Urdu text. Exposed as a
+   separate family limited to those characters. The apostrophe and hyphen are left out
+   on purpose: they mostly appear inside English words. */
+@font-face {
+  font-family: 'Urdu Punctuation';
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url(https://fonts.gstatic.com/s/notonastaliqurdu/v23/LhW4MUPbN-oZdNFcBy1-DJYsEoTq5pu3T_oM.woff2) format('woff2');
+  unicode-range: U+0021-0022, U+0028-0029, U+002C, U+002E, U+003A-003B, U+003F, U+00AB, U+00B7, U+00BB,
+    U+2013-2014, U+2018-201E, U+2022, U+2026, U+2039-203A;
+}
+
+html[lang='ur'] {
+  /* Noto Nastaliq Urdu ships its own Latin glyphs (a serif), so it can't be first:
+     the Latin fonts go first and only lack Arabic-script glyphs, which then fall
+     through to Noto. */
+  --font-body: 'Urdu Punctuation', 'Cabin', 'Nunito', 'Noto Nastaliq Urdu', system-ui, sans-serif;
+  --font-display: 'Urdu Punctuation', 'Jua', 'Cabin', 'Nunito', 'Noto Nastaliq Urdu', system-ui, sans-serif;
+}
+html[lang='ur'] body { line-height: 1.9; }
+.lang-option[lang='ur'] { font-family: 'Urdu Punctuation', 'Cabin', 'Nunito', 'Noto Nastaliq Urdu', system-ui, sans-serif; }
+
 /* Above .canvas-fullscreen (z-index 80), so the save notice shows in fullscreen. */
 .canvas-notice-veil { z-index: 90; }
 .save-notice-check {
@@ -1952,13 +2023,13 @@ img.user-avatar {
   flex-direction: column;
   gap: 2px;
   padding: 0.9rem 0.7rem;
-  border-right: 1px solid var(--hairline);
+  border-inline-end: 1px solid var(--hairline);
 }
 .settings-close {
   align-self: flex-start;
   width: 32px;
   height: 32px;
-  margin: 0 0 0.6rem 0.2rem;
+  margin-block: 0 0.6rem; margin-inline: 0.2rem 0;
   border: none;
   border-radius: 9px;
   background: transparent;
@@ -1983,7 +2054,7 @@ img.user-avatar {
   font-weight: 600;
   font-size: 14px;
   cursor: pointer;
-  text-align: left;
+  text-align: start;
   transition: background 120ms ease, color 120ms ease;
 }
 .settings-nav-item svg { width: 16px; height: 16px; flex: none; }
@@ -2099,7 +2170,10 @@ img.user-avatar {
 
 .landing-top {
   display: flex;
-  justify-content: flex-end;
+  /* Globe stays top-left and theme toggle top-right, even in RTL languages. */
+  direction: ltr;
+  justify-content: space-between;
+  align-items: flex-start;
   padding: 2.6vh 2.3vw 0;
 }
 
@@ -2109,7 +2183,7 @@ img.user-avatar {
   grid-template-columns: minmax(320px, 44%) 1fr;
   align-items: center;
   gap: 2vw;
-  padding: 2vh 4vw 0.5vh 2vw;
+  padding-block: 2vh 0.5vh; padding-inline: 2vw 4vw;
 }
 .landing-hero {
   display: flex;
@@ -2386,7 +2460,7 @@ a.settings-save { text-decoration: none; display: inline-flex; align-items: cent
   font-size: 14px;
   color: var(--ink);
 }
-.draft-fields b { color: var(--ink-faint); font-weight: 700; margin-right: 0.35rem; }
+.draft-fields b { color: var(--ink-faint); font-weight: 700; margin-inline-end: 0.35rem; }
 .draft-body {
   margin: 0.75rem 0 0;
   padding: 0 0.95rem 0.95rem;
@@ -2426,7 +2500,7 @@ a.settings-save { text-decoration: none; display: inline-flex; align-items: cent
 .draft-note.error { color: var(--danger); }
 
 .draft-edit {
-  margin-left: auto;
+  margin-inline-start: auto;
   display: inline-flex;
   align-items: center;
   gap: 0.35rem;
@@ -2553,7 +2627,7 @@ a.settings-save { text-decoration: none; display: inline-flex; align-items: cent
 .image-lightbox-close {
   position: fixed;
   top: 1rem;
-  left: 1.25rem;
+  inset-inline-start: 1.25rem;
   width: 2.5rem;
   height: 2.5rem;
   border: none;
@@ -2594,7 +2668,7 @@ a.settings-save { text-decoration: none; display: inline-flex; align-items: cent
   z-index: 2;
   flex: 0 0 auto;
   width: clamp(340px, 30vw, 600px);
-  margin-left: clamp(14px, 1.6vw, 28px);
+  margin-inline-start: clamp(14px, 1.6vw, 28px);
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -2641,12 +2715,12 @@ a.settings-save { text-decoration: none; display: inline-flex; align-items: cent
   align-items: center;
   justify-content: space-between;
   gap: 0.4rem 0.75rem;
-  padding: 0.7rem 0.8rem 0.7rem 1.1rem;
+  padding-block: 0.7rem 0.7rem; padding-inline: 1.1rem 0.8rem;
   border-bottom: 1px solid var(--hairline);
 }
 /* On a narrow window the actions drop to their own line instead of being
    clipped: the fullscreen exit (and Close) must stay reachable at any width. */
-.canvas-head .canvas-actions { margin-left: auto; }
+.canvas-head .canvas-actions { margin-inline-start: auto; }
 .canvas-title {
   display: inline-flex;
   align-items: center;
@@ -2656,7 +2730,7 @@ a.settings-save { text-decoration: none; display: inline-flex; align-items: cent
   color: var(--ink);
 }
 .canvas-title svg { width: 19px; height: 19px; color: var(--pink-ink); }
-.canvas-heading-dots { display: inline-flex; gap: 3px; margin-left: 0.15rem; }
+.canvas-heading-dots { display: inline-flex; gap: 3px; margin-inline-start: 0.15rem; }
 .canvas-heading-dots i {
   width: 5px; height: 5px; border-radius: 50%;
   background: var(--pink-strong);
@@ -2681,7 +2755,7 @@ a.settings-save { text-decoration: none; display: inline-flex; align-items: cent
   align-items: center;
   gap: 0.15rem;
   padding: 0.2rem;
-  margin-right: 0.15rem;
+  margin-inline-end: 0.15rem;
   border: 1px solid var(--hairline);
   border-radius: 999px;
   background: var(--glass-strong);
@@ -2775,7 +2849,7 @@ a.settings-save { text-decoration: none; display: inline-flex; align-items: cent
   color: var(--ink-soft);
   font: inherit;
   font-size: 13px;
-  text-align: left;
+  text-align: start;
   padding: 0.45rem 0.6rem;
   cursor: pointer;
   transition: background 140ms ease, color 140ms ease;
@@ -2793,7 +2867,7 @@ a.settings-save { text-decoration: none; display: inline-flex; align-items: cent
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  padding: 0.5rem 0.9rem 0.5rem 0.5rem;
+  padding-block: 0.5rem 0.5rem; padding-inline: 0.5rem 0.9rem;
   border-bottom: 1px solid var(--hairline);
   font-size: 13px;
   color: var(--ink);
@@ -2899,8 +2973,8 @@ a.settings-save { text-decoration: none; display: inline-flex; align-items: cent
 .canvas-history-panel {
   position: absolute;
   top: 100%;
-  left: 0.7rem;
-  right: 0.7rem;
+  inset-inline-start: 0.7rem;
+  inset-inline-end: 0.7rem;
   z-index: 6;
   max-height: 320px;
   overflow: auto;
@@ -2933,15 +3007,15 @@ a.settings-save { text-decoration: none; display: inline-flex; align-items: cent
   color: var(--danger-strong);
   font-size: 12.5px;
 }
-.canvas-notice .canvas-icon-btn { width: 24px; height: 24px; margin-left: auto; color: inherit; }
+.canvas-notice .canvas-icon-btn { width: 24px; height: 24px; margin-inline-start: auto; color: inherit; }
 .canvas-notice .canvas-icon-btn svg { width: 15px; height: 15px; }
 
 /* An error the previewed page reported while someone used it, floating over the
    bottom of the page so it never shifts the page's own layout. */
 .canvas-page-error {
   position: absolute;
-  left: 1.4rem;
-  right: 1.4rem;
+  inset-inline-start: 1.4rem;
+  inset-inline-end: 1.4rem;
   bottom: 1.4rem;
   display: flex;
   align-items: center;
@@ -2975,7 +3049,7 @@ a.settings-save { text-decoration: none; display: inline-flex; align-items: cent
 .canvas-page-error .canvas-icon-btn svg { width: 15px; height: 15px; }
 
 /* Manual editing of the active iteration (its own iteration once saved). */
-.canvas-edit-btn { margin-left: auto; width: 28px; height: 28px; }
+.canvas-edit-btn { margin-inline-start: auto; width: 28px; height: 28px; }
 .canvas-edit-btn:disabled { opacity: 0.35; cursor: default; }
 .canvas-edit-btn:disabled:hover { background: transparent; color: var(--ink-faint); }
 /* The edit textarea carries .canvas-code-body too, so the pane keeps the exact
@@ -3080,7 +3154,7 @@ a.settings-save { text-decoration: none; display: inline-flex; align-items: cent
 .canvas-change-list::-webkit-scrollbar-track { background: transparent; }
 .canvas-change-list::-webkit-scrollbar-thumb { border-radius: 999px; background: var(--scrollbar); }
 .canvas-change-list .canvas-file-name { flex: 1 1 auto; }
-.canvas-change-list .canvas-history-meta { flex: none; padding-left: 0.4rem; }
+.canvas-change-list .canvas-history-meta { flex: none; padding-inline-start: 0.4rem; }
 .canvas-diff { display: block; }
 .diff-line { display: block; white-space: pre; }
 .diff-ctx { color: var(--code-ident); }
@@ -3199,11 +3273,13 @@ a.settings-save { text-decoration: none; display: inline-flex; align-items: cent
     position: fixed;
     top: 0;
     bottom: 0;
-    left: 0;
+    inset-inline-start: 0;
     z-index: 35;
     width: min(84vw, 340px);
     margin: 0;
-    border-radius: 0 26px 26px 0;
+    border-radius: 0;
+    border-start-end-radius: 26px;
+    border-end-end-radius: 26px;
     /* Opaque: the chat must not read through a drawer sitting over it. */
     background: var(--panel-solid);
     padding: calc(18px + env(safe-area-inset-top)) 18px
@@ -3225,7 +3301,7 @@ a.settings-save { text-decoration: none; display: inline-flex; align-items: cent
     place-items: center;
     width: 40px;
     height: 40px;
-    margin-left: auto;
+    margin-inline-start: auto;
     padding: 0;
     border: none;
     border-radius: 999px;
@@ -3324,7 +3400,7 @@ a.settings-save { text-decoration: none; display: inline-flex; align-items: cent
   .composer-meta {
     justify-content: space-between;
     gap: 0.5rem;
-    padding-right: 0;
+    padding-inline-end: 0;
   }
   .mode-seg .seg { padding: 0 0.9rem; }
   .effort-pop { width: min(268px, calc(100vw - 2rem)); }
@@ -3377,7 +3453,7 @@ a.settings-save { text-decoration: none; display: inline-flex; align-items: cent
     align-items: center;
     gap: 0.3rem;
     padding: calc(0.5rem + env(safe-area-inset-top)) 0.6rem 0.5rem;
-    border-right: none;
+    border-inline-end: none;
     border-bottom: 1px solid var(--hairline);
     overflow-x: auto;
   }
@@ -3426,3 +3502,64 @@ a.settings-save { text-decoration: none; display: inline-flex; align-items: cent
   .has-tip::after { display: none; }
   .chat-menu-btn { opacity: 1; }
 }
+
+/* ---------- right-to-left (Urdu) ----------
+   Most of the layout mirrors on its own (flex/grid and the logical properties
+   above). What's left is direction-bearing artwork and physical transforms. */
+html[dir='rtl'] .app.is-collapsed .sidebar { transform: translateX(14px); }
+@media (max-width: 900px) {
+  html[dir='rtl'] .app.is-collapsed .sidebar { transform: translateX(100%); }
+}
+
+/* Chevrons: "forward" points left, "back" points right. */
+html[dir='rtl'] .branch-arrow.prev svg { transform: none; }
+html[dir='rtl'] .branch-arrow.next svg { transform: rotate(180deg); }
+html[dir='rtl'] .canvas-history-step:first-child svg { transform: none; }
+html[dir='rtl'] .canvas-history-step:last-of-type svg,
+html[dir='rtl'] .canvas-history-step ~ .canvas-history-step svg { transform: rotate(180deg); }
+html[dir='rtl'] .thinking-head .chev:not(.open),
+html[dir='rtl'] .tool-call-head .chev:not(.open) { transform: scaleX(-1); }
+
+/* Icons that draw a direction. */
+html[dir='rtl'] .canvas-back-btn svg,
+html[dir='rtl'] .send svg,
+html[dir='rtl'] .sidebar-controls .ctrl-btn:first-child svg { transform: scaleX(-1); }
+
+/* Emails and other LTR strings should truncate at their own end. */
+.user-email,
+.chat-title,
+.canvas-file-name { unicode-bidi: plaintext; }
+
+/* Code, diffs and JSON are always left-to-right, whatever the UI language. */
+pre,
+code,
+.tool-args,
+.canvas-code-body,
+.canvas-code-edit {
+  direction: ltr;
+  text-align: left;
+  unicode-bidi: isolate;
+}
+
+.settings-hint + .lang-picker { margin-top: 0.9rem; }
+
+/* Nastaliq needs room above and below the line, and any letter-spacing breaks
+   the joins in connected Arabic-script text. */
+html[lang='ur'] * { letter-spacing: 0 !important; }
+html[lang='ur'] .landing-title,
+html[lang='ur'] .welcome-title { line-height: 1.6; }
+html[lang='ur'] .landing-sub,
+html[lang='ur'] .welcome-sub { line-height: 1.9; }
+html[lang='ur'] .modal h2 { line-height: 1.7; }
+
+/* Urdu hint text is wider and taller than the Latin one: give it room so it
+   isn't ellipsised or clipped by the pill's overflow. */
+html[lang='ur'] .user-hint {
+  max-width: 14rem;
+  font-size: clamp(10.5px, 0.8vw, 12px);
+  line-height: 2;
+  padding-block: 0.2rem;
+}
+
+/* Mirror the sky plates so the scenery matches the mirrored layout. */
+html[dir='rtl'] .sky img { transform: scaleX(-1); }

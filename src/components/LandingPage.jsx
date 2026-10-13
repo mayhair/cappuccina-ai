@@ -1,16 +1,20 @@
+import { useState } from 'react'
 import { ThemeToggle } from './ThemeToggle'
-import { SparkleIcon, ChatIcon, CapIcon, BulbIcon } from './Icons'
+import { SparkleIcon, ChatIcon, CapIcon, BulbIcon, GlobeIcon } from './Icons'
 import { GoogleButton } from './GoogleButton'
+import { LanguageGate } from './LanguageGate'
+import { useLanguage } from '../i18n/LanguageProvider'
 
-const AUTH_ERROR_MESSAGES = {
-  google_not_configured: 'Google sign-in isn\u2019t set up yet.',
-  invalid_state: 'That sign-in link expired. Please try again.',
-  missing_code: 'Google didn\u2019t finish signing you in. Please try again.',
-  exchange_failed: 'We couldn\u2019t reach Google. Please try again.',
-  email_unverified: 'That Google account\u2019s email isn\u2019t verified.',
-  access_denied: 'Sign-in was cancelled.',
-  account_error: 'We couldn\u2019t open your account. Please try again.',
-}
+// Codes the backend can send as ?auth_error=; each has an `auth.<code>` string.
+const AUTH_ERROR_CODES = [
+  'google_not_configured',
+  'invalid_state',
+  'missing_code',
+  'exchange_failed',
+  'email_unverified',
+  'access_denied',
+  'account_error',
+]
 
 export function Sky({ theme }) {
   return (
@@ -22,71 +26,74 @@ export function Sky({ theme }) {
 }
 
 export function LandingPage({ theme, onTheme, error }) {
+  const { t } = useLanguage()
+  const [pickerOpen, setPickerOpen] = useState(false)
+
   return (
     <>
       <header className="landing-top">
+        <button
+          type="button"
+          className="lang-button"
+          aria-label={t('language.label')}
+          title={t('language.label')}
+          onClick={() => setPickerOpen(true)}
+        >
+          <GlobeIcon />
+        </button>
         <ThemeToggle theme={theme} onChange={onTheme} />
       </header>
 
+      {pickerOpen && <LanguageGate forceOpen onClose={() => setPickerOpen(false)} />}
+
       <main className="landing-grid">
         <div className="landing-hero">
-          <img
-            src="/plates/ballerina-hero.webp"
-            alt="Ballerina Cappuccina, a cartoon ballerina with a cappuccino cup for a head, waving hello"
-          />
+          <img src="/plates/ballerina-hero.webp" alt={t('landing.heroAlt')} />
         </div>
 
         <div className="landing-copy">
-          <h1 className="landing-title">Hi! I'm Ballerina Cappuccina</h1>
-          <p className="landing-sub">
-            Your AI chat friend — ask me anything, or let's learn together
-          </p>
+          <h1 className="landing-title">{t('landing.title')}</h1>
+          <p className="landing-sub">{t('landing.sub')}</p>
 
           <div className="landing-actions">
-            <GoogleButton label="Continue with Google" />
+            <GoogleButton label={t('landing.google')} />
           </div>
 
           {error && (
             <p className="auth-error" role="alert">
-              {AUTH_ERROR_MESSAGES[error] ?? 'Sign-in didn\u2019t work. Please try again.'}
+              {AUTH_ERROR_CODES.includes(error) ? t(`auth.${error}`) : t('auth.default')}
             </p>
           )}
 
           <p className="landing-note">
             <SparkleIcon />
-            I'm an AI chatbot, not a person
+            {t('landing.note')}
           </p>
 
           <div className="landing-pills" aria-hidden="true">
-            <span className="landing-pill"><ChatIcon /> Just talking</span>
-            <span className="landing-pill"><CapIcon /> Homework help</span>
-            <span className="landing-pill"><BulbIcon /> Curious questions</span>
+            <span className="landing-pill"><ChatIcon /> {t('landing.pill.talk')}</span>
+            <span className="landing-pill"><CapIcon /> {t('landing.pill.homework')}</span>
+            <span className="landing-pill"><BulbIcon /> {t('landing.pill.curious')}</span>
           </div>
         </div>
       </main>
 
       <footer className="landing-folklore">
         <div className="folklore-card">
-          <p className="folklore-title">Just a heads-up</p>
+          <p className="folklore-title">{t('landing.folklore.title')}</p>
           <p>
+            <span className="folklore-line">{t('landing.folklore.1')}</span>
             <span className="folklore-line">
-              Me, Tralalero Tralala, Espressona Signora and the rest of the crew didn't come from this app.
-              We're AI-generated internet folklore, the Italian Brainrot gang, born from memes and shaped by thousands of hands.
-            </span>
-            <span className="folklore-line">
-              We're in the public domain, which means nobody owns us!
-              Anyone can draw us, remix us, or use us however they like. {' '}
+              {t('landing.folklore.2')}{' '}
               <a
                 href="https://medium.com/@fabianmosele/can-tung-tung-tung-sahur-and-ballerina-cappuccina-have-copyright-a2dc01e850e9"
                 target="_blank"
                 rel="noopener noreferrer"
               >
-                learn more
+                {t('landing.folklore.learn')}
               </a>
             </span>
-            <span className="folklore-line folklore-aside">
-              This is exactly what the creator of this app took advantage of. Fair game.
-            </span>
+            <span className="folklore-line folklore-aside">{t('landing.folklore.3')}</span>
           </p>
         </div>
       </footer>

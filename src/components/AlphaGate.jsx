@@ -1,9 +1,11 @@
 import { useState } from 'react'
+import { useLanguage } from '../i18n/LanguageProvider'
 
 const ACK_KEY = 'cappuccina-alpha-ack'
 const ACK_VERSION = 'v1'
 
 export function AlphaGate() {
+  const { t, hasChosen, pickerOpen } = useLanguage()
   const [open, setOpen] = useState(
     () => localStorage.getItem(ACK_KEY) !== ACK_VERSION,
   )
@@ -13,7 +15,8 @@ export function AlphaGate() {
     setOpen(false)
   }
 
-  if (!open) return null
+  // The language picker comes first so this notice is read in the right language.
+  if (!open || !hasChosen || pickerOpen) return null
 
   return (
     <div
@@ -23,21 +26,18 @@ export function AlphaGate() {
       aria-labelledby="alpha-gate-title"
     >
       <div className="modal alpha-gate">
-        <span className="alpha-gate-tag">Early alpha</span>
+        <span className="alpha-gate-tag">{t('alpha.tag')}</span>
         <h2 className="alpha-gate-title" id="alpha-gate-title">
-          I'm still in early development
+          {t('alpha.title')}
         </h2>
-        <p className="alpha-gate-body">
-          Things might change or break sometimes while I'm being built. I'm an AI,
-          not a person, so please always double-check important stuff.
-        </p>
+        <p className="alpha-gate-body">{t('alpha.body')}</p>
         <p className="alpha-gate-age">
-          Right now I'm only for ages <strong>13 and up</strong>. My safety checks are
-          still being tested in alpha, and I can say surprising or wrong things, so younger
-          kids should wait until I'm ready.
+          {t('alpha.age.before')}
+          <strong>{t('alpha.age.strong')}</strong>
+          {t('alpha.age.after')}
         </p>
         <button type="button" className="landing-cta alpha-gate-button" onClick={acknowledge} autoFocus>
-          Got it
+          {t('alpha.ok')}
         </button>
       </div>
     </div>

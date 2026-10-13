@@ -9,13 +9,16 @@ import { SpeakerToggle } from './components/SpeakerToggle'
 import { SparkleIcon, WindowIcon } from './components/Icons'
 import { Sky, LandingPage } from './components/LandingPage'
 import { AlphaGate } from './components/AlphaGate'
+import { LanguageGate } from './components/LanguageGate'
 import { SettingsDialog } from './components/SettingsDialog'
 import { getMe, logout } from './api/authClient'
 import { useChatController } from './hooks/useChatController'
 import { useMediaQuery } from './hooks/useMediaQuery'
 import tts from './lib/tts'
+import { useLanguage } from './i18n/LanguageProvider'
 
 export default function App() {
+  const { t } = useLanguage()
   const [theme, setTheme] = useState(() => {
     const saved = localStorage.getItem('cappuccina-theme')
     if (saved === 'light' || saved === 'dark') return saved
@@ -169,6 +172,7 @@ export default function App() {
       <div className="landing">
         <Sky theme={theme} />
         <LandingPage theme={theme} onTheme={setTheme} error={authError} />
+        <LanguageGate />
         <AlphaGate />
       </div>
     )
@@ -278,7 +282,7 @@ export default function App() {
               mobile={isMobile}
             />
             <TopBarTitle
-              title={activeChat.pending ? '' : activeChat.title}
+              title={activeChat.pending ? '' : activeChat.title === 'New chat' ? t('sidebar.newChat') : activeChat.title}
               typing={activeChat.id === typingTitleId}
               onTyped={clearTypingTitle}
               onRename={(title) => renameChat(activeChat.id, title)}
@@ -289,8 +293,8 @@ export default function App() {
               <button
                 type="button"
                 className={`ctrl-btn has-tip${canvasOpen ? ' is-on' : ''}`}
-                data-tip={canvasOpen ? 'Hide the webpage' : 'Show the webpage'}
-                aria-label={canvasOpen ? 'Hide the webpage' : 'Show the webpage'}
+                data-tip={canvasOpen ? t('app.hideWebpage') : t('app.showWebpage')}
+                aria-label={canvasOpen ? t('app.hideWebpage') : t('app.showWebpage')}
                 aria-pressed={canvasOpen}
                 onClick={toggleCanvas}
               >
@@ -301,9 +305,9 @@ export default function App() {
             <ThemeToggle theme={theme} onChange={setTheme} />
             <span className="ai-badge">
               <SparkleIcon aria-hidden="true" />
-              <span className="ai-badge-full">I'm an AI</span>
+              <span className="ai-badge-full">{t('app.aiBadge')}</span>
               <span className="ai-badge-short" aria-hidden="true">
-                AI
+                {t('app.aiBadgeShort')}
               </span>
             </span>
           </div>
@@ -362,6 +366,8 @@ export default function App() {
           onClose={closeCanvas}
         />
       )}
+
+      <LanguageGate />
     </div>
   )
 }

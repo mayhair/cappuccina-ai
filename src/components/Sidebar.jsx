@@ -3,8 +3,10 @@ import { ChatIcon, TrashIcon, PlusIcon, SearchIcon, CloseIcon, DotsIcon, PencilI
 import { TypewriterTitle } from './TypewriterTitle'
 import { ChatTitle } from './ChatTitle'
 import { EmojiText } from '../lib/emoji'
+import { useLanguage } from '../i18n/LanguageProvider'
 
 export function Sidebar({ chats, activeChatId, onSelect, onNewChat, onDelete, onRename, query, onQuery, searchInputRef, collapsed, typingTitleId, onTitleTyped, user, onLogout, onSettings, onClose }) {
+  const { t, tr } = useLanguage()
   const [pendingDelete, setPendingDelete] = useState(null)
   const [menuFor, setMenuFor] = useState(null)
   const [menuUp, setMenuUp] = useState(false)
@@ -53,6 +55,9 @@ export function Sidebar({ chats, activeChatId, onSelect, onNewChat, onDelete, on
     return () => window.removeEventListener('mousedown', close)
   }, [menuFor])
 
+  // The untitled placeholder is stored in English; show it in the UI language.
+  const shownTitle = (title) => (title === 'New chat' ? t('sidebar.newChat') : title)
+
   const target = chats.find((c) => c.id === pendingDelete)
 
   const startRename = (c) => {
@@ -96,13 +101,13 @@ export function Sidebar({ chats, activeChatId, onSelect, onNewChat, onDelete, on
     >
       <div className="side-head">
         <div className="side-avatar">
-          <img src="/plates/msg-avatar.webp" alt="Ballerina Cappuccina, an AI character whose head is a coffee cup" />
+          <img src="/plates/msg-avatar.webp" alt={t('sidebar.avatarAlt')} />
         </div>
         <div className="side-name">Cappuccina</div>
         <button
           type="button"
           className="sidebar-close"
-          aria-label="Close sidebar"
+          aria-label={t('sidebar.close')}
           onClick={onClose}
         >
           <CloseIcon />
@@ -111,7 +116,7 @@ export function Sidebar({ chats, activeChatId, onSelect, onNewChat, onDelete, on
 
       <button className="new-chat-btn" type="button" onClick={onNewChat}>
         <PlusIcon />
-        New chat
+        {t('sidebar.newChat')}
       </button>
 
       <label className="search">
@@ -119,16 +124,16 @@ export function Sidebar({ chats, activeChatId, onSelect, onNewChat, onDelete, on
         <input
           ref={searchInputRef}
           type="search"
-          placeholder="Search chats..."
+          placeholder={t('sidebar.searchPlaceholder')}
           value={query}
           onChange={(e) => onQuery(e.target.value)}
-          aria-label="Search chats"
+          aria-label={t('sidebar.search')}
         />
         {query && (
           <button
             type="button"
             className="search-clear"
-            aria-label="Clear search"
+            aria-label={t('sidebar.clearSearch')}
             onClick={() => {
               onQuery('')
               searchInputRef.current?.focus()
@@ -139,7 +144,7 @@ export function Sidebar({ chats, activeChatId, onSelect, onNewChat, onDelete, on
         )}
       </label>
 
-      <nav className="chat-list" aria-label="Chat history" ref={listRef}>
+      <nav className="chat-list" aria-label={t('sidebar.history')} ref={listRef}>
         {chats.map((c) => {
           const editing = renaming === c.id
           return (
@@ -170,21 +175,21 @@ export function Sidebar({ chats, activeChatId, onSelect, onNewChat, onDelete, on
                     if (e.key === 'Escape') setRenaming(null)
                   }}
                   onBlur={() => commitRename(c.id)}
-                  aria-label="Rename chat"
+                  aria-label={t('sidebar.renameChat')}
                 />
               ) : c.id === typingTitleId ? (
-                <TypewriterTitle text={c.title} onDone={onTitleTyped} />
+                <TypewriterTitle text={shownTitle(c.title)} onDone={onTitleTyped} />
               ) : (
-                <ChatTitle text={c.title} />
+                <ChatTitle text={shownTitle(c.title)} />
               )}
               {c.tag && (
-                <span className={`chat-tag${c.tag === 'TUTOR' ? ' tutor' : ''}`}>{c.tag}</span>
+                <span className={`chat-tag${c.tag === 'TUTOR' ? ' tutor' : ''}`}>{c.tag === 'TUTOR' ? t('mode.tutor') : c.tag}</span>
               )}
               {!editing && (
                 <button
                   type="button"
                   className="chat-menu-btn"
-                  aria-label={`Options for ${c.title}`}
+                  aria-label={t('sidebar.chatOptions', { title: c.title })}
                   aria-haspopup="menu"
                   aria-expanded={menuFor === c.id}
                   onClick={(e) => {
@@ -208,7 +213,7 @@ export function Sidebar({ chats, activeChatId, onSelect, onNewChat, onDelete, on
                     onClick={() => startRename(c)}
                   >
                     <PencilIcon />
-                    Rename
+                    {t('sidebar.rename')}
                   </button>
                   <button
                     type="button"
@@ -220,7 +225,7 @@ export function Sidebar({ chats, activeChatId, onSelect, onNewChat, onDelete, on
                     }}
                   >
                     <TrashIcon />
-                    Delete
+                    {t('sidebar.delete')}
                   </button>
                 </div>
               )}
@@ -255,7 +260,7 @@ export function Sidebar({ chats, activeChatId, onSelect, onNewChat, onDelete, on
           className="user-hint"
           aria-haspopup="menu"
           aria-expanded={accountMenu}
-          aria-label="Account options"
+          aria-label={t('sidebar.accountOptions')}
           onFocus={() => {
             if (!isTouch) setAccountMenu(true)
           }}
@@ -266,7 +271,7 @@ export function Sidebar({ chats, activeChatId, onSelect, onNewChat, onDelete, on
             if (isTouch) setAccountMenu((open) => !open)
           }}
         >
-          {isTouch ? 'Tap for options…' : 'Mouse over for options…'}
+          {isTouch ? t('sidebar.tapForOptions') : t('sidebar.hoverForOptions')}
         </button>
         {accountMenu && (
           <div className="user-menu" role="menu">
@@ -280,7 +285,7 @@ export function Sidebar({ chats, activeChatId, onSelect, onNewChat, onDelete, on
               }}
             >
               <GearIcon />
-              Settings
+              {t('settings.title')}
             </button>
             <button
               type="button"
@@ -292,7 +297,7 @@ export function Sidebar({ chats, activeChatId, onSelect, onNewChat, onDelete, on
               }}
             >
               <LogoutIcon />
-              Log out
+              {t('sidebar.logout')}
             </button>
           </div>
         )}
@@ -305,7 +310,7 @@ export function Sidebar({ chats, activeChatId, onSelect, onNewChat, onDelete, on
             <button
               type="button"
               className="modal-x"
-              aria-label="Close"
+              aria-label={t('common.close')}
               onClick={() => setPendingDelete(null)}
             >
               ✕
@@ -314,14 +319,14 @@ export function Sidebar({ chats, activeChatId, onSelect, onNewChat, onDelete, on
               <img src="/plates/msg-avatar.webp" alt="" />
             </div>
             <h2 id="delete-title">
-              <EmojiText text="Sip — one moment! ☕" />
+              <EmojiText text={t('sidebar.deleteModal.title')} />
             </h2>
             <p>
-              Are you <i>sure</i> you want to pour <strong>"{target.title}"</strong> down the drain? That chat will be gone <em>forever</em>, and I won't be able to get it back. <EmojiText text="💔" />
+              {tr('sidebar.deleteModal.body', { title: target.title })} <EmojiText text="💔" />
             </p>
             <div className="modal-actions">
               <button type="button" className="btn-keep" onClick={() => setPendingDelete(null)}>
-                Nope, keep it!
+                {t('sidebar.deleteModal.keep')}
               </button>
               <button
                 type="button"
@@ -331,7 +336,7 @@ export function Sidebar({ chats, activeChatId, onSelect, onNewChat, onDelete, on
                   setPendingDelete(null)
                 }}
               >
-                Toss it, arrivederci!
+                {t('sidebar.deleteModal.toss')}
               </button>
             </div>
           </div>
