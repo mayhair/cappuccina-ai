@@ -33,7 +33,7 @@ Laptop web browser. Sessions are casual and conversational; a user may switch be
 - Chat grammar familiar from modern AI chatbots (bubbles, input box, streaming responses); not radically dumbed down for age
 - Visual flair unique to this app layered on top of the familiar grammar
 - Light and dark mode support (user-confirmed requirement; dark mode = nighttime/stormy sky mood)
-- Optional Adult mode: an 18+ user turns it on from Settings by entering a birthday (checked in the browser, never sent or stored). The account stores one boolean, so it follows the user across devices; when on, the chat prompt drops the young-user safety block and treats adult topics plainly, staying honest and emergency-aware
+- Optional Adult mode: an 18+ user turns it on from Settings by entering a birthday (checked in the browser, never sent or stored). The account stores one boolean, so it follows the user across devices; when on, the chat prompt drops the young-user safety block and treats adult topics plainly, staying honest and emergency-aware. Operators can remove the option entirely with the `ADULT_MODE_ENABLED` env var
 - The app must remain clearly identifiable as an AI chatbot (visible AI disclosure; the default audience is minors, with Adult mode as an explicit 18+ opt-in)
 - This phase: UI mockup/prototype only — frontend before backend
 

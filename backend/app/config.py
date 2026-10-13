@@ -25,6 +25,18 @@ FMHY_MCP_URL = os.getenv("FMHY_MCP_URL", "https://fmhy-mcp.ken.tools/mcp")
 # 1536x1024, 1024x1536); there is no env-configured size.
 IMAGE_MODEL_ID = os.getenv("IMAGE_MODEL_ID", "gpt-image-2.5-flare")
 
+# Adult mode. When on, eligible users can opt into 18+ handling from Settings
+# (their birthday is checked in the browser and only a boolean is stored). Set
+# to 0/false/no/off to remove the option entirely: the Settings section, the
+# PATCH endpoint, and the chat prompt all ignore it.
+ADULT_MODE_ENABLED = os.getenv("ADULT_MODE_ENABLED", "1").strip().lower() not in (
+    "",
+    "0",
+    "false",
+    "no",
+    "off",
+)
+
 # Character reference images. When on, the image tools attach a character's
 # official look from lore/characters/refs/ whenever the model names them in the
 # `characters` argument, routing the call through the edit endpoint. Set to

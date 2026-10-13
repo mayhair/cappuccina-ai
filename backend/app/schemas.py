@@ -66,6 +66,7 @@ class UserResponse(BaseModel):
     gmail_connected: bool = Field(default=False, alias="gmailConnected")
     calendar_connected: bool = Field(default=False, alias="calendarConnected")
     adult_mode: bool = Field(default=False, alias="adultMode")
+    adult_mode_enabled: bool = Field(default=True, alias="adultModeEnabled")
 
     model_config = {"populate_by_name": True}
 

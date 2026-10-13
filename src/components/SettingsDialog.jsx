@@ -298,6 +298,7 @@ export function SettingsDialog({
 }) {
   const { lang, setLang, t } = useLanguage()
   const [section, setSection] = useState('account')
+  const adultEnabled = user.adultModeEnabled !== false
 
   // Reset to the first section only when the dialog opens. `onClose` is a new
   // function on every parent render, so keying this off it would also fire on
@@ -353,14 +354,16 @@ export function SettingsDialog({
             <MailIcon />
             {t('settings.nav.connections')}
           </button>
-          <button
-            type="button"
-            className={`settings-nav-item${section === 'adult' ? ' active' : ''}`}
-            onClick={() => setSection('adult')}
-          >
-            <ShieldIcon />
-            {t('settings.nav.adult')}
-          </button>
+          {adultEnabled && (
+            <button
+              type="button"
+              className={`settings-nav-item${section === 'adult' ? ' active' : ''}`}
+              onClick={() => setSection('adult')}
+            >
+              <ShieldIcon />
+              {t('settings.nav.adult')}
+            </button>
+          )}
           <button
             type="button"
             className={`settings-nav-item${section === 'language' ? ' active' : ''}`}
@@ -418,7 +421,7 @@ export function SettingsDialog({
               </section>
             </>
           )}
-          {section === 'adult' && (
+          {adultEnabled && section === 'adult' && (
             <>
               <h3 className="settings-heading">{t('settings.nav.adult')}</h3>
               <section className="settings-section">

@@ -134,6 +134,7 @@ def test_schema_allows_oauth_only_users(isolated_db):
 
 def test_adult_mode_defaults_off_and_round_trips(signed_in):
     assert signed_in.get("/api/v1/auth/me").json()["adultMode"] is False
+    assert signed_in.get("/api/v1/auth/me").json()["adultModeEnabled"] is True
 
     res = signed_in.patch("/api/v1/auth/me", json={"adultMode": True})
     assert res.status_code == 200
@@ -154,3 +155,31 @@ def test_state_carries_adult_mode(signed_in):
     signed_in.patch("/api/v1/auth/me", json={"adultMode": True})
     user = db.get_user_by_id(signed_in.get("/api/v1/auth/me").json()["id"])
     assert main._state(ChatRequest(chatId="x", messages=[]), user)["adult"] is True
+
+
+def test_adult_mode_disabled_hides_option(signed_in, monkeypatch):
+    from app import main
+
+    monkeypatch.setattr(main, "ADULT_MODE_ENABLED", False)
+
+    me = signed_in.get("/api/v1/auth/me").json()
+    assert me["adultModeEnabled"] is False
+    assert me["adultMode"] is False
+
+    # PATCHing the flag is ignored while the option is off
+    res = signed_in.patch("/api/v1/auth/me", json={"adultMode": True})
+    assert res.status_code == 200
+    assert res.json()["adultMode"] is False
+
+
+def test_disabled_adult_mode_suppresses_stored_flag(signed_in, monkeypatch):
+    from app import db, main
+    from app.schemas import ChatRequest
+
+    signed_in.patch("/api/v1/auth/me", json={"adultMode": True})
+    user = db.get_user_by_id(signed_in.get("/api/v1/auth/me").json()["id"])
+    assert main._state(ChatRequest(chatId="x", messages=[]), user)["adult"] is True
+
+    # An operator flips the env off: the stored flag stops counting.
+    monkeypatch.setattr(main, "ADULT_MODE_ENABLED", False)
+    assert main._state(ChatRequest(chatId="x", messages=[]), user)["adult"] is False

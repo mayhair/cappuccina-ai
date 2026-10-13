@@ -8,7 +8,7 @@ page.on("pageerror", (e) => errors.push(String(e)));
 
 // mutable server state: the flag lives on the user row, so a PATCH is visible
 // on the next GET (this is what proves persistence across a reload)
-let user = { id: "check", email: "check@example.com", displayName: "Check", adultMode: false };
+let user = { id: "check", email: "check@example.com", displayName: "Check", adultMode: false, adultModeEnabled: true };
 let patched = null;
 await page.route("**/api/v1/auth/me", async (route) => {
   if (route.request().method() === "PATCH") {

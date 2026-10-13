@@ -36,6 +36,7 @@ from app.auth import (
     set_session_cookie,
 )
 from app.config import (
+    ADULT_MODE_ENABLED,
     APP_ORIGIN,
     FISH_API_KEY,
     GOOGLE_CALENDAR_SCOPES,
@@ -563,7 +564,7 @@ def _state(req: ChatRequest, user) -> dict:
         "mode": req.mode,
         "subject": req.subject,
         "timezone": _resolve_timezone(req, user),
-        "adult": bool(user["adult_mode"]),
+        "adult": ADULT_MODE_ENABLED and bool(user["adult_mode"]),
         "gmail": db.get_google_grant(user["id"], "gmail") is not None,
         "calendar": db.get_google_grant(user["id"], "calendar") is not None,
     }
@@ -579,7 +580,8 @@ def _user_response(user) -> UserResponse:
         avatarUrl=user["avatar_url"] if "avatar_url" in user.keys() else None,
         gmailConnected=db.get_google_grant(user["id"], "gmail") is not None,
         calendarConnected=db.get_google_grant(user["id"], "calendar") is not None,
-        adultMode=bool(user["adult_mode"]),
+        adultMode=ADULT_MODE_ENABLED and bool(user["adult_mode"]),
+        adultModeEnabled=ADULT_MODE_ENABLED,
     )
 
 
@@ -657,7 +659,7 @@ async def update_me(
         if not name:
             raise HTTPException(status_code=400, detail="Display name can't be empty")
         db.update_user_display_name(user["id"], name)
-    if req.adult_mode is not None:
+    if req.adult_mode is not None and ADULT_MODE_ENABLED:
         db.update_user_adult_mode(user["id"], req.adult_mode)
     return _user_response(db.get_user_by_id(user["id"]))
 
