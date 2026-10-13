@@ -1807,6 +1807,10 @@ img.user-avatar {
   inset: 0;
   z-index: 40;
   display: grid;
+  /* One column capped at the veil's width (minus padding). Without this the
+     column grows to fit a card wider than the space, and the card shifts off
+     centre (common on phones, where 92vw is wider than the padded veil). */
+  grid-template-columns: minmax(0, 1fr);
   place-items: center;
   background: rgba(24, 26, 46, 0.45);
   -webkit-backdrop-filter: blur(4px);
@@ -1816,6 +1820,7 @@ img.user-avatar {
 .modal {
   position: relative;
   width: min(400px, 92vw);
+  max-width: 100%;
   background: var(--glass-strong);
   border: 1px solid var(--hairline);
   border-radius: 22px;
@@ -1984,7 +1989,8 @@ html[lang='ur'] {
 html[lang='ur'] body { line-height: 1.9; }
 .lang-option[lang='ur'] { font-family: 'Urdu Punctuation', 'Cabin', 'Nunito', 'Noto Nastaliq Urdu', system-ui, sans-serif; }
 
-/* Above .canvas-fullscreen (z-index 80), so the save notice shows in fullscreen. */
+/* Above .canvas-fullscreen (z-index 80), so the save notice shows in fullscreen.
+   The canvas has a backdrop-filter, so this veil is sized to the canvas, not the window. */
 .canvas-notice-veil { z-index: 90; }
 .save-notice-check {
   display: flex;
