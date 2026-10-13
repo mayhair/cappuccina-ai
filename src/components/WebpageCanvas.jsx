@@ -619,16 +619,17 @@ export function WebpageCanvas({
     area.setSelectionRange(area.value.length, area.value.length)
   }, [draft?.path])
 
-  // Escape leaves fullscreen. While a draft is open Escape belongs to the
-  // editor (it cancels the edit), so fullscreen stays put.
+  // Escape leaves fullscreen. While a draft or the save notice is open Escape
+  // belongs to that dialog (it cancels the edit / closes the notice), so
+  // fullscreen stays put.
   useEffect(() => {
     if (!fullscreen) return
     const onKeyDown = (e) => {
-      if (e.key === 'Escape' && !draft) setFullscreen(false)
+      if (e.key === 'Escape' && !draft && !saveNoticeOpen) setFullscreen(false)
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [fullscreen, draft])
+  }, [fullscreen, draft, saveNoticeOpen])
 
   // On phones the canvas is already full-bleed and its fullscreen toggle is
   // hidden, so leave fullscreen if the viewport shrinks into that range.

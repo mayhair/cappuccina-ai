@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useLanguage } from '../i18n/LanguageProvider'
 
 const HIDE_KEY = 'cappuccina-save-webpage-notice'
@@ -17,6 +17,15 @@ export function shouldShowSaveNotice() {
 export function SaveWebpageNotice({ onConfirm, onCancel }) {
   const { t } = useLanguage()
   const [hideNext, setHideNext] = useState(false)
+
+  // Escape closes the notice without downloading, same as the X and a click outside.
+  useEffect(() => {
+    const onKeyDown = (e) => {
+      if (e.key === 'Escape') onCancel()
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [onCancel])
 
   function confirm() {
     if (hideNext) {
@@ -38,6 +47,14 @@ export function SaveWebpageNotice({ onConfirm, onCancel }) {
       onMouseDown={(e) => e.target === e.currentTarget && onCancel()}
     >
       <div className="modal alpha-gate">
+        <button
+          type="button"
+          className="modal-x"
+          aria-label={t('common.close')}
+          onClick={onCancel}
+        >
+          ✕
+        </button>
         <h2 className="alpha-gate-title" id="save-notice-title">
           {t('saveNotice.title')}
         </h2>
