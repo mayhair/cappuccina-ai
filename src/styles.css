@@ -19,6 +19,9 @@
   --danger: #c8405e;
   --danger-strong: #a82845;
   --danger-soak: rgba(200, 64, 94, 0.12);
+  --danger-panel: #fbe3e9;
+  --danger-panel-border: rgba(168, 40, 69, 0.28);
+  --danger-panel-ink: #a82845;
 
   --ok-ink: #1f7a4c;
 
@@ -89,6 +92,9 @@
   --danger: #ff8fa3;
   --danger-strong: #ffb0bf;
   --danger-soak: rgba(255, 143, 163, 0.16);
+  --danger-panel: #fbe3e9;
+  --danger-panel-border: rgba(168, 40, 69, 0.28);
+  --danger-panel-ink: #a82845;
 
   --ok-ink: #8fe3b8;
 
@@ -3011,8 +3017,8 @@ a.settings-save { text-decoration: none; display: inline-flex; align-items: cent
   margin: 0 0.7rem 0.4rem;
   padding: 0.4rem 0.6rem;
   border-radius: 8px;
-  background: var(--danger-soak);
-  color: var(--danger-strong);
+  background: var(--danger-panel);
+  color: var(--danger-panel-ink);
   font-size: 12.5px;
 }
 .canvas-notice .canvas-icon-btn { width: 24px; height: 24px; margin-inline-start: auto; color: inherit; }
@@ -3030,8 +3036,9 @@ a.settings-save { text-decoration: none; display: inline-flex; align-items: cent
   gap: 0.5rem;
   padding: 0.45rem 0.6rem;
   border-radius: 8px;
-  background: var(--danger-soak);
-  color: var(--danger-strong);
+  background: var(--danger-panel);
+  border: 1px solid var(--danger-panel-border);
+  color: var(--danger-panel-ink);
   font-size: 12.5px;
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);
 }
