@@ -513,6 +513,7 @@ input { caret-color: var(--pink-strong); }
   margin-top: auto;
   padding-top: 1rem;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 0.55rem;
   min-width: 0;
@@ -554,23 +555,28 @@ img.user-avatar {
 .user-name {
   font-weight: 700;
   font-size: clamp(13px, 1vw, 15px);
+  line-height: 1.25;
   color: var(--ink);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 
 .user-email {
   font-size: clamp(11px, 0.82vw, 12.5px);
   color: var(--ink-faint);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+}
+
+.user-hint-wrap {
+  position: relative;
+  flex: 1 0 100%;
+  min-width: 0;
 }
 
 .user-hint {
-  flex: none;
-  max-width: 11rem;
+  display: block;
+  width: 100%;
+  flex: 1 0 100%;
+  max-width: none;
   padding: 0.4rem 0.7rem;
   border-radius: 999px;
   border: 1px solid var(--hairline);
@@ -579,9 +585,9 @@ img.user-avatar {
   font-family: var(--font-body);
   font-weight: 700;
   font-size: clamp(11px, 0.85vw, 13px);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-align: center;
   cursor: pointer;
   box-shadow: var(--shadow-sm);
   transition: background 130ms ease, color 130ms ease, border-color 130ms ease;
@@ -595,7 +601,7 @@ img.user-avatar {
 .user-menu {
   position: absolute;
   inset-inline-end: 0;
-  bottom: calc(100% - 4px);
+  bottom: calc(100% + 6px);
   z-index: 30;
   min-width: 190px;
   padding: 0.4rem;
@@ -3555,7 +3561,6 @@ html[lang='ur'] .modal h2 { line-height: 1.7; }
 /* Urdu hint text is wider and taller than the Latin one: give it room so it
    isn't ellipsised or clipped by the pill's overflow. */
 html[lang='ur'] .user-hint {
-  max-width: 14rem;
   font-size: clamp(10.5px, 0.8vw, 12px);
   line-height: 2;
   padding-block: 0.2rem;

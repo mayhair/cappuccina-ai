@@ -255,52 +255,54 @@ export function Sidebar({ chats, activeChatId, onSelect, onNewChat, onDelete, on
             <span className="user-email">{user.email}</span>
           </span>
         </div>
-        <button
-          type="button"
-          className="user-hint"
-          aria-haspopup="menu"
-          aria-expanded={accountMenu}
-          aria-label={t('sidebar.accountOptions')}
-          onFocus={() => {
-            if (!isTouch) setAccountMenu(true)
-          }}
-          onBlur={(e) => {
-            if (!userBarRef.current?.contains(e.relatedTarget)) setAccountMenu(false)
-          }}
-          onClick={() => {
-            if (isTouch) setAccountMenu((open) => !open)
-          }}
-        >
-          {isTouch ? t('sidebar.tapForOptions') : t('sidebar.hoverForOptions')}
-        </button>
-        {accountMenu && (
-          <div className="user-menu" role="menu">
-            <button
-              type="button"
-              role="menuitem"
-              className="user-menu-item"
-              onClick={() => {
-                setAccountMenu(false)
-                onSettings()
-              }}
-            >
-              <GearIcon />
-              {t('settings.title')}
-            </button>
-            <button
-              type="button"
-              role="menuitem"
-              className="user-menu-item danger"
-              onClick={() => {
-                setAccountMenu(false)
-                onLogout()
-              }}
-            >
-              <LogoutIcon />
-              {t('sidebar.logout')}
-            </button>
-          </div>
-        )}
+        <div className="user-hint-wrap">
+          <button
+            type="button"
+            className="user-hint"
+            aria-haspopup="menu"
+            aria-expanded={accountMenu}
+            aria-label={t('sidebar.accountOptions')}
+            onFocus={() => {
+              if (!isTouch) setAccountMenu(true)
+            }}
+            onBlur={(e) => {
+              if (!userBarRef.current?.contains(e.relatedTarget)) setAccountMenu(false)
+            }}
+            onClick={() => {
+              if (isTouch) setAccountMenu((open) => !open)
+            }}
+          >
+            {isTouch ? t('sidebar.tapForOptions') : t('sidebar.hoverForOptions')}
+          </button>
+          {accountMenu && (
+            <div className="user-menu" role="menu">
+              <button
+                type="button"
+                role="menuitem"
+                className="user-menu-item"
+                onClick={() => {
+                  setAccountMenu(false)
+                  onSettings()
+                }}
+              >
+                <GearIcon />
+                {t('settings.title')}
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                className="user-menu-item danger"
+                onClick={() => {
+                  setAccountMenu(false)
+                  onLogout()
+                }}
+              >
+                <LogoutIcon />
+                {t('sidebar.logout')}
+              </button>
+            </div>
+          )}
+        </div>
       </div>
     </aside>
 
