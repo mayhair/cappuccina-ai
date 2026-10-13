@@ -15,7 +15,20 @@ export default defineConfig({
     // emit both the prefixed and standard declarations.
     cssTarget: ['chrome100', 'edge100', 'firefox103', 'safari16'],
   },
+  // Only scan the app's own entry: by default Vite crawls every **/*.html, which
+  // includes backend/.venv and the generated sites under backend/data.
+  optimizeDeps: {
+    entries: ['index.html'],
+  },
   server: {
+    // Pre-transform the entry files so the browser doesn't wait on a request waterfall.
+    warmup: {
+      clientFiles: ['./src/main.jsx', './src/App.jsx', './src/i18n/LanguageProvider.*', './src/styles.css'],
+    },
+    // The backend (venv, generated sites, their dist/) is not frontend source.
+    watch: {
+      ignored: ['**/backend/**', '**/dist/**'],
+    },
     proxy: {
       '/api': {
         target: 'http://localhost:8000',
