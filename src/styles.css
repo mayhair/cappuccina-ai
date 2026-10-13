@@ -1965,6 +1965,20 @@ img.user-avatar {
 }
 
 /* Urdu script: needs a Nastaliq face and extra line height (the Latin fonts have no glyphs). */
+/* Noto Nastaliq Urdu's own punctuation (! " ( ) , . : ; ? « » – — quotes • … and the
+   middle dot), since the Latin fonts' versions look wrong inside Urdu text. Exposed as a
+   separate family limited to those characters. The apostrophe and hyphen are left out
+   on purpose: they mostly appear inside English words. */
+@font-face {
+  font-family: 'Urdu Punctuation';
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url(https://fonts.gstatic.com/s/notonastaliqurdu/v23/LhW4MUPbN-oZdNFcBy1-DJYsEoTq5pu3T_oM.woff2) format('woff2');
+  unicode-range: U+0021-0022, U+0028-0029, U+002C, U+002E, U+003A-003B, U+003F, U+00AB, U+00B7, U+00BB,
+    U+2013-2014, U+2018-201E, U+2022, U+2026, U+2039-203A;
+}
+
 html[lang='ur'] {
   /* Noto Nastaliq Urdu ships its own Latin glyphs (a serif), so it can't be first:
      the Latin fonts go first and only lack Arabic-script glyphs, which then fall

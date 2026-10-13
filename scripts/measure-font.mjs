@@ -1,25 +1,6 @@
 import { chromium } from "playwright";
-import { readFileSync } from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 
 const fam = process.argv[2] || "Cabin";
-
-// Inline the self-hosted woff2 faces for this family (weight 400) as data URIs,
-// since setContent runs on about:blank and cannot load files from disk.
-const fontsDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "../src");
-const faces = readFileSync(path.join(fontsDir, "fonts.css"), "utf8")
-  .split("@font-face")
-  .slice(1)
-  .filter((b) => b.includes(`font-family: '${fam}'`) && /font-weight: 400;/.test(b))
-  .map((b) =>
-    b.replace(/url\(\.\/fonts\/([^)]+)\)/, (_, file) => {
-      const data = readFileSync(path.join(fontsDir, "fonts", file)).toString("base64");
-      return `url(data:font/woff2;base64,${data})`;
-    })
-  )
-  .map((b) => `@font-face${b}`)
-  .join("\n");
 const sizes = [22, 23, 24, 25, 26, 27];
 const S = {
   A: "Ciao! I'm Cappuccina \u2014 an AI who loves",
@@ -38,7 +19,9 @@ const keys = Object.keys(S);
 
 const browser = await chromium.launch();
 const page = await browser.newPage();
-await page.setContent(`<style>${faces}</style><body></body>`);
+await page.setContent(
+  `<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=${fam.replace(/ /g, "+")}:wght@400&display=swap"><body></body>`
+);
 await page.waitForTimeout(1200);
 const out = await page.evaluate(
   async ([fam, sizes, S, keys]) => {
