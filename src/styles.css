@@ -2001,7 +2001,32 @@ html[lang='ur'] body { line-height: 1.9; }
   font-size: 15px;
   cursor: pointer;
 }
-.save-notice-check input { width: 1.05rem; height: 1.05rem; accent-color: var(--pink-strong); }
+/* Custom box so the tick can follow the theme; a native checkbox draws a fixed white tick. */
+.save-notice-check input {
+  appearance: none;
+  flex: none;
+  width: 1.05rem;
+  height: 1.05rem;
+  margin: 0;
+  border: 2px solid var(--pink-strong);
+  border-radius: 5px;
+  background: var(--field);
+  display: grid;
+  place-content: center;
+  cursor: pointer;
+}
+.save-notice-check input::before {
+  content: '';
+  width: 0.55rem;
+  height: 0.55rem;
+  transform: scale(0);
+  transition: transform 120ms ease;
+  background: var(--panel-solid);
+  clip-path: polygon(14% 44%, 0 65%, 50% 100%, 100% 16%, 80% 0%, 43% 62%);
+}
+.save-notice-check input:checked { background: var(--pink-strong); }
+.save-notice-check input:checked::before { transform: scale(1); }
+.save-notice-check input:focus-visible { outline: 2px solid var(--pink-ink); outline-offset: 2px; }
 
 .emoji {
   width: 1em;
