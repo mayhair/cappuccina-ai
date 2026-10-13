@@ -83,6 +83,7 @@ export function LanguageProvider({ children }) {
   useEffect(() => {
     document.documentElement.lang = lang
     document.documentElement.dir = dir
+    document.title = translate(lang, 'app.title')
   }, [lang, dir])
 
   const setLang = useCallback((code) => {

@@ -262,4 +262,6 @@ export default {
   'voiceError.blocked': "Microphone is blocked — allow mic access in your browser, then try again.",
   'voiceError.noMic': "No microphone found — plug one in and try again.",
   'voiceError.noHear': "Couldn’t hear that — please try again.",
+
+  'app.title': "Ballerina Cappuccina — your AI chat friend",
 }

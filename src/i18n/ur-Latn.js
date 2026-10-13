@@ -261,4 +261,6 @@ export default {
   'voiceError.blocked': "Microphone block hai — apne browser mein mic ki ijazat dein, phir dobara koshish karein.",
   'voiceError.noMic': "Koi microphone nahi mila — aik lagayein aur dobara koshish karein.",
   'voiceError.noHear': "Main sun nahi saki — baraye meherbani dobara koshish karein.",
+
+  'app.title': "Ballerina Cappuccina — aap ki AI chat dost",
 }
