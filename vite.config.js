@@ -1,8 +1,11 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
+import webfontDownload from 'vite-plugin-webfont-dl'
 
 export default defineConfig({
-  plugins: [react()],
+  // Zero config: the Google Fonts <link> tags in index.html are replaced at build
+  // time with self-hosted @font-face rules and the font files are downloaded.
+  plugins: [react(), webfontDownload()],
   publicDir: 'assets',
   build: {
     // lightningcss (Vite 8's default CSS minifier) dedupes `backdrop-filter`
