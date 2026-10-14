@@ -69,6 +69,7 @@ export default {
 
   'common.close': "بند کریں",
   'sidebar.avatarAlt': "بیلرینا کیپوچینا، ایک اے آئی کردار جس کا سر کافی کا کپ ہے",
+  'sidebar.brand': 'کیپوچینا',
   'sidebar.close': "سائیڈ بار بند کریں",
   'sidebar.newChat': "نئی چیٹ",
   'sidebar.searchPlaceholder': "چیٹس تلاش کریں...",

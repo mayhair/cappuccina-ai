@@ -103,7 +103,7 @@ export function Sidebar({ chats, activeChatId, onSelect, onNewChat, onDelete, on
         <div className="side-avatar">
           <img src="/plates/msg-avatar.webp" alt={t('sidebar.avatarAlt')} />
         </div>
-        <div className="side-name">Cappuccina</div>
+        <div className="side-name">{t('sidebar.brand')}</div>
         <button
           type="button"
           className="sidebar-close"

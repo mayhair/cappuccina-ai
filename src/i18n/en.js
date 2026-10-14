@@ -70,6 +70,7 @@ export default {
 
   'common.close': "Close",
   'sidebar.avatarAlt': "Ballerina Cappuccina, an AI character whose head is a coffee cup",
+  'sidebar.brand': 'Cappuccina',
   'sidebar.close': "Close sidebar",
   'sidebar.newChat': "New chat",
   'sidebar.searchPlaceholder': "Search chats...",
