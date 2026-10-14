@@ -84,6 +84,7 @@ Desktop.ini
 
 # ─── Tooling scratch output ───
 .impeccable/build/
+.impeccable/review/
 
 # Wrangler temporary directories
 .wrangler/*
