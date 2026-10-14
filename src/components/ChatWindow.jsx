@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { SendIcon, ChevronIcon, WrenchIcon, CopyIcon, CheckIcon, RetryIcon, MailIcon, PencilIcon, PaperclipIcon, FileIcon, CalendarIcon, MicIcon, WindowIcon } from './Icons'
+import { SendIcon, ChevronIcon, WrenchIcon, CopyIcon, CheckIcon, RetryIcon, MailIcon, PencilIcon, PaperclipIcon, FileIcon, CalendarIcon, MicIcon, WindowIcon, BrainIcon } from './Icons'
 import { EffortSelector } from './EffortSelector'
 import { ModeSwitch } from './ModeSwitch'
 import { Markdown } from '../lib/markdown'
@@ -10,6 +10,7 @@ import { branchPosition } from '../lib/branching'
 import { useVoiceInput } from '../hooks/useVoiceInput'
 import { sendDraft, updateDraft } from '../api/gmailClient'
 import { deleteEvent } from '../api/calendarClient'
+import { createMemory, deleteMemory, updateMemory } from '../api/memoryClient'
 import { useLanguage } from '../i18n/LanguageProvider'
 
 const isTouchKeyboard = () =>
@@ -124,6 +125,24 @@ function deleteFromTool(tool) {
     // `deleted` is stamped by the server on reload and by the client after
     // confirming.
     return { ...data, deleted: tool.deleted === true || data.deleted === true }
+  } catch {
+    return null
+  }
+}
+
+// A successful save/update/delete memory call carries JSON the UI turns into a
+// small card ("Remembered: …") with an Undo button, so every change the
+// assistant makes to the user's memory is visible and reversible.
+const MEMORY_TOOLS = ['save_memory', 'update_memory', 'delete_memory']
+const MEMORY_STATUSES = ['saved', 'updated', 'deleted']
+
+function memoryFromTool(tool) {
+  if (!MEMORY_TOOLS.includes(tool?.name) || typeof tool.result !== 'string') return null
+  try {
+    const data = JSON.parse(tool.result)
+    if (!(MEMORY_STATUSES.includes(data?.status) && data.id)) return null
+    // `undone` is stamped locally after the user presses Undo.
+    return { ...data, tool: tool.name, undone: tool.undone === true }
   } catch {
     return null
   }
@@ -620,6 +639,64 @@ function EventDeleteCard({ proposal, onDeleted }) {
   )
 }
 
+const MEMORY_SUMMARY_KEYS = {
+  saved: 'chat.memorySaved',
+  updated: 'chat.memoryUpdated',
+  deleted: 'chat.memoryDeleted',
+}
+
+function MemoryCard({ memory, onUndone, onManage }) {
+  const { t } = useLanguage()
+  const [state, setState] = useState(memory.undone ? 'undone' : 'idle')
+
+  const undo = async () => {
+    if (state === 'undoing' || state === 'undone') return
+    setState('undoing')
+    try {
+      if (memory.status === 'saved') await deleteMemory(memory.id)
+      else if (memory.status === 'updated') await updateMemory(memory.id, memory.previous)
+      else await createMemory(memory.content)
+      setState('undone')
+      onUndone?.(memory.tool, memory.id)
+    } catch (err) {
+      if (err.status === 404) {
+        // The memory is already gone (removed in Settings), which is what Undo wanted.
+        setState('undone')
+        onUndone?.(memory.tool, memory.id)
+        return
+      }
+      setState('error')
+    }
+  }
+
+  return (
+    <div className="memory-card">
+      <BrainIcon aria-hidden="true" />
+      <span className="memory-card-text">
+        {t(MEMORY_SUMMARY_KEYS[memory.status], { content: memory.content })}
+      </span>
+      {state === 'undone' ? (
+        <span className="draft-note ok"><CheckIcon /> {t('chat.memoryUndone')}</span>
+      ) : (
+        <button
+          type="button"
+          className="memory-card-undo"
+          onClick={undo}
+          disabled={state === 'undoing'}
+        >
+          {state === 'undoing' ? t('chat.memoryUndoing') : t('chat.memoryUndo')}
+        </button>
+      )}
+      <button type="button" className="memory-card-manage" onClick={onManage}>
+        {t('chat.memoryManage')}
+      </button>
+      {state === 'error' && (
+        <p className="draft-note error memory-card-error" role="alert">{t('chat.memoryUndoFailed')}</p>
+      )}
+    </div>
+  )
+}
+
 function ToolCallBlock({ tool, onManualToggle }) {
   const { t } = useLanguage()
   const [open, setOpen] = useState(false)
@@ -683,10 +760,10 @@ function ToolCallBlock({ tool, onManualToggle }) {
 
 function ThinkingBlock({ parts: segmentParts, streaming, fallbackSeconds = null }) {
   const { t } = useLanguage()
-  // Draft and deletion calls are surfaced as their own cards below the
-  // message, so hide the raw tool blocks to avoid showing them twice.
+  // Draft, deletion and memory-change calls are surfaced as their own cards
+  // below the message, so hide the raw tool blocks to avoid showing them twice.
   const parts = segmentParts.filter(
-    (p) => !(p.type === 'tool' && (draftFromTool(p) || deleteFromTool(p))),
+    (p) => !(p.type === 'tool' && (draftFromTool(p) || deleteFromTool(p) || memoryFromTool(p))),
   )
 
   // Each thinking block carries its own duration (stamped on its parts when
@@ -883,7 +960,7 @@ function EditMessageForm({ value, onChange, onSend, onCancel }) {
   )
 }
 
-function MessageRow({ message, prev, isActiveStream, user, onRetry, onDraftSent, onEventDeleted, onOpenWebpage, branch, onEdit, onRegenerate, onNavigateBranch }) {
+function MessageRow({ message, prev, isActiveStream, user, onRetry, onDraftSent, onEventDeleted, onMemoryUndone, onManageMemory, onOpenWebpage, branch, onEdit, onRegenerate, onNavigateBranch }) {
   const { t } = useLanguage()
   const m = message
   const [editing, setEditing] = useState(false)
@@ -899,6 +976,7 @@ function MessageRow({ message, prev, isActiveStream, user, onRetry, onDraftSent,
       : []
   const drafts = toolParts.map(draftFromTool).filter(Boolean)
   const proposals = toolParts.map(deleteFromTool).filter(Boolean)
+  const memories = toolParts.map(memoryFromTool).filter(Boolean)
   const images = toolParts.map(imageFromPart).filter(Boolean)
   const webpages = webpagesFromParts(toolParts)
   const userAttachments =
@@ -989,6 +1067,14 @@ function MessageRow({ message, prev, isActiveStream, user, onRetry, onDraftSent,
               key={p.event_id ?? pi}
               proposal={p}
               onDeleted={onEventDeleted}
+            />
+          ))}
+          {!isActiveStream && memories.map((mem, mi) => (
+            <MemoryCard
+              key={`${mem.tool}-${mem.id}-${mi}`}
+              memory={mem}
+              onUndone={onMemoryUndone}
+              onManage={onManageMemory}
             />
           ))}
         </div>
@@ -1229,7 +1315,7 @@ function Composer({
   )
 }
 
-export function ChatWindow({ chat, user, isStreaming, draft, onDraft, onSend, onRetry, onEdit, onRegenerate, onNavigateBranch, onDraftSent, onEventDeleted, onOpenWebpage, inputRef, effort, onEffort, mode, onMode, attachments = [], uploading = false, attachError = '', onAttach, onRemoveAttachment }) {
+export function ChatWindow({ chat, user, isStreaming, draft, onDraft, onSend, onRetry, onEdit, onRegenerate, onNavigateBranch, onDraftSent, onEventDeleted, onMemoryUndone, onManageMemory, onOpenWebpage, inputRef, effort, onEffort, mode, onMode, attachments = [], uploading = false, attachError = '', onAttach, onRemoveAttachment }) {
   const { t } = useLanguage()
   const listRef = useRef(null)
 
@@ -1366,6 +1452,8 @@ export function ChatWindow({ chat, user, isStreaming, draft, onDraft, onSend, on
             onNavigateBranch={onNavigateBranch}
             onDraftSent={onDraftSent}
             onEventDeleted={onEventDeleted}
+            onMemoryUndone={onMemoryUndone}
+            onManageMemory={onManageMemory}
             onOpenWebpage={onOpenWebpage}
           />
         ))}

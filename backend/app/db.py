@@ -270,6 +270,18 @@ def _init_schema(conn: sqlite3.Connection) -> None:
             updated_at TEXT NOT NULL
         );
 
+        -- Memories belong to the user, not a chat, so deleting a chat keeps them.
+        -- source_chat_id is plain text on purpose (no foreign key).
+        CREATE TABLE IF NOT EXISTS memories (
+            id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            content TEXT NOT NULL,
+            source_chat_id TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_memories_user ON memories(user_id, updated_at DESC);
         CREATE INDEX IF NOT EXISTS idx_chats_user ON chats(user_id, created_at);
         CREATE INDEX IF NOT EXISTS idx_messages_chat ON messages(chat_id, id);
         CREATE INDEX IF NOT EXISTS idx_images_chat ON images(chat_id);
@@ -309,6 +321,7 @@ def _init_schema(conn: sqlite3.Connection) -> None:
     _migrate_users_for_oauth(conn)
     _migrate_grants_for_services(conn)
     _migrate_users_for_adult_mode(conn)
+    _migrate_users_for_memory(conn)
     conn.commit()
 
 
@@ -317,6 +330,13 @@ def _migrate_users_for_adult_mode(conn: sqlite3.Connection) -> None:
     info = {row["name"] for row in conn.execute("PRAGMA table_info(users)").fetchall()}
     if info and "adult_mode" not in info:
         conn.execute("ALTER TABLE users ADD COLUMN adult_mode INTEGER NOT NULL DEFAULT 0")
+
+
+def _migrate_users_for_memory(conn: sqlite3.Connection) -> None:
+    """Add the memory on/off flag (default on) to databases created before it existed."""
+    info = {row["name"] for row in conn.execute("PRAGMA table_info(users)").fetchall()}
+    if info and "memory_enabled" not in info:
+        conn.execute("ALTER TABLE users ADD COLUMN memory_enabled INTEGER NOT NULL DEFAULT 1")
 
 
 def _migrate_messages_for_branching(conn: sqlite3.Connection) -> None:
@@ -498,6 +518,100 @@ def update_user_adult_mode(user_id: str, enabled: bool) -> None:
         {"v": 1 if enabled else 0, "id": user_id},
     )
     conn.commit()
+
+
+def set_memory_enabled(user_id: str, enabled: bool) -> None:
+    conn = get_conn()
+    conn.execute(
+        "UPDATE users SET memory_enabled = :v WHERE id = :id",
+        {"v": 1 if enabled else 0, "id": user_id},
+    )
+    conn.commit()
+
+
+# ---------- memories ----------
+
+def list_memories(user_id: str, limit: int | None = None) -> list[sqlite3.Row]:
+    """The user's memories, most recently touched first."""
+    sql = "SELECT * FROM memories WHERE user_id = :uid ORDER BY updated_at DESC, id"
+    params: dict[str, Any] = {"uid": user_id}
+    if limit is not None:
+        sql += " LIMIT :limit"
+        params["limit"] = limit
+    return get_conn().execute(sql, params).fetchall()
+
+
+def get_memory(user_id: str, memory_id: str) -> sqlite3.Row | None:
+    return get_conn().execute(
+        "SELECT * FROM memories WHERE id = :id AND user_id = :uid",
+        {"id": memory_id, "uid": user_id},
+    ).fetchone()
+
+
+def count_memories(user_id: str) -> int:
+    row = get_conn().execute(
+        "SELECT COUNT(*) AS n FROM memories WHERE user_id = :uid", {"uid": user_id}
+    ).fetchone()
+    return int(row["n"])
+
+
+def create_memory(
+    user_id: str, content: str, source_chat_id: str | None = None
+) -> sqlite3.Row:
+    """Insert a memory; an identical one (ignoring case) is touched and returned instead."""
+    with _conn_lock:
+        conn = get_conn()
+        existing = conn.execute(
+            "SELECT * FROM memories WHERE user_id = :uid AND lower(content) = lower(:c)",
+            {"uid": user_id, "c": content},
+        ).fetchone()
+        if existing is not None:
+            conn.execute(
+                "UPDATE memories SET updated_at = :now WHERE id = :id",
+                {"now": _now(), "id": existing["id"]},
+            )
+            conn.commit()
+            found = get_memory(user_id, existing["id"])
+            assert found is not None
+            return found
+        now = _now()
+        memory_id = uuid.uuid4().hex
+        conn.execute(
+            "INSERT INTO memories (id, user_id, content, source_chat_id, created_at, updated_at)"
+            " VALUES (:id, :uid, :c, :chat, :now, :now)",
+            {"id": memory_id, "uid": user_id, "c": content, "chat": source_chat_id or None, "now": now},
+        )
+        conn.commit()
+    created = get_memory(user_id, memory_id)
+    assert created is not None
+    return created
+
+
+def update_memory(user_id: str, memory_id: str, content: str) -> sqlite3.Row | None:
+    conn = get_conn()
+    cur = conn.execute(
+        "UPDATE memories SET content = :c, updated_at = :now WHERE id = :id AND user_id = :uid",
+        {"c": content, "now": _now(), "id": memory_id, "uid": user_id},
+    )
+    conn.commit()
+    return get_memory(user_id, memory_id) if cur.rowcount else None
+
+
+def delete_memory(user_id: str, memory_id: str) -> bool:
+    conn = get_conn()
+    cur = conn.execute(
+        "DELETE FROM memories WHERE id = :id AND user_id = :uid",
+        {"id": memory_id, "uid": user_id},
+    )
+    conn.commit()
+    return bool(cur.rowcount)
+
+
+def delete_all_memories(user_id: str) -> int:
+    conn = get_conn()
+    cur = conn.execute("DELETE FROM memories WHERE user_id = :uid", {"uid": user_id})
+    conn.commit()
+    return cur.rowcount
 
 
 # ---------- Google grants (per-service OAuth tokens) ----------

@@ -54,6 +54,7 @@ class ChatResponse(BaseModel):
 class UpdateProfileRequest(BaseModel):
     display_name: str | None = Field(default=None, alias="displayName")
     adult_mode: bool | None = Field(default=None, alias="adultMode")
+    memory_enabled: bool | None = Field(default=None, alias="memoryEnabled")
 
     model_config = {"populate_by_name": True}
 
@@ -67,8 +68,13 @@ class UserResponse(BaseModel):
     calendar_connected: bool = Field(default=False, alias="calendarConnected")
     adult_mode: bool = Field(default=False, alias="adultMode")
     adult_mode_enabled: bool = Field(default=True, alias="adultModeEnabled")
+    memory_enabled: bool = Field(default=True, alias="memoryEnabled")
 
     model_config = {"populate_by_name": True}
+
+
+class MemoryRequest(BaseModel):
+    content: str
 
 
 class GmailStatusResponse(BaseModel):

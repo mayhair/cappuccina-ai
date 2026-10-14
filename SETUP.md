@@ -647,7 +647,10 @@ cd / && sudo -u cappuccina podman ps --filter name=capweb
    one file at a time, Save sends `baseVersionId`, and "open in a new tab" loads
    the preview directly; reload restore),
    `scripts/webpage-versions-check.mjs` (iteration history, activation, Changes
-   tab, in-canvas editing), `scripts/capture.mjs`.
+   tab, in-canvas editing), `scripts/memory-check.mjs` (the chat's "Remembered"
+   card with Undo/Manage, and Settings → Memory: list, edit, delete confirm,
+   add, on/off, delete all; `SHOTS_DIR=<dir>` saves screenshots, `THEME=dark`
+   checks the dark theme), `scripts/capture.mjs`.
 
 4. **CLI smoke test** (optional, needs a running backend + keys in `.env`):
 
@@ -686,7 +689,8 @@ cd / && sudo -u cappuccina podman ps --filter name=capweb
 
 ## 10. Repo map (for orientation)
 
-- `src/` — React UI (`components/ChatWindow.jsx`, `hooks/useChatController.js`)
+- `src/` — React UI (`components/ChatWindow.jsx`, `hooks/useChatController.js`,
+  `components/MemoryManager.jsx` for Settings → Memory)
 - `backend/app/` — FastAPI routes (`main.py`), OAuth (`google_oauth.py`), Gmail
   client (`gmail.py`), schemas, SQLite (`db.py`), config
 - `backend/agent/` — LangGraph (`graph.py`), model factory, tools

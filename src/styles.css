@@ -2109,6 +2109,14 @@ html[lang='ur'] body { line-height: 1.9; }
   flex: 1 1 auto;
   overflow-y: auto;
   padding: 1.6rem 1.8rem 2rem;
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar) transparent;
+}
+.settings-pane::-webkit-scrollbar { width: 8px; }
+.settings-pane::-webkit-scrollbar-track { background: transparent; }
+.settings-pane::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: var(--scrollbar);
 }
 .settings-heading {
   margin: 0 0 1.3rem;
@@ -2619,6 +2627,183 @@ a.settings-save { text-decoration: none; display: inline-flex; align-items: cent
 .draft-secondary:disabled { opacity: 0.5; cursor: default; }
 
 .draft-error { margin: 0.7rem 0.95rem 0; }
+
+/* ---------- memory: settings manager ---------- */
+.memory-switch {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.7rem;
+  align-self: flex-start;
+  margin-top: 0.9rem;
+  font-size: 14.5px;
+  font-weight: 600;
+  color: var(--ink);
+  cursor: pointer;
+}
+.memory-switch input {
+  position: absolute;
+  opacity: 0;
+  width: 1px;
+  height: 1px;
+}
+.memory-switch-track {
+  position: relative;
+  flex: none;
+  width: 40px;
+  height: 24px;
+  border-radius: 999px;
+  background: var(--ink-faint);
+  transition: background 140ms ease;
+}
+.memory-switch-track::after {
+  content: '';
+  position: absolute;
+  top: 3px;
+  inset-inline-start: 3px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: var(--shadow-sm);
+  transition: inset-inline-start 140ms ease;
+}
+.memory-switch input:checked + .memory-switch-track { background: var(--pink-strong); }
+.memory-switch input:checked + .memory-switch-track::after { inset-inline-start: 19px; }
+.memory-switch input:focus-visible + .memory-switch-track {
+  outline: 2px solid var(--pink-strong);
+  outline-offset: 2px;
+}
+.memory-switch input:disabled + .memory-switch-track { opacity: 0.5; }
+
+.memory-count { margin-top: 0.3rem; }
+.memory-list {
+  list-style: none;
+  margin: 0.8rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.memory-list.paused { opacity: 0.6; }
+.memory-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem 0.8rem;
+  padding: 0.6rem 0.8rem;
+  border: 1px solid var(--hairline);
+  border-radius: 12px;
+  background: var(--glass);
+}
+.memory-text {
+  flex: 1 1 12rem;
+  min-width: 0;
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+.memory-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.4rem;
+  margin-inline-start: auto;
+}
+.memory-all { margin-top: 0.9rem; margin-inline-start: 0; justify-content: flex-start; }
+.memory-edit {
+  display: flex;
+  flex: 1 1 100%;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+.memory-edit .memory-actions { justify-content: flex-start; margin-inline-start: 0; }
+.memory-input { width: 100%; }
+.memory-add { display: flex; align-items: center; gap: 0.6rem; margin-top: 0.7rem; }
+.memory-add .memory-input { flex: 1 1 auto; min-width: 0; }
+.memory-icon-btn {
+  display: inline-grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink-soft);
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+.memory-icon-btn svg { width: 15px; height: 15px; }
+.memory-icon-btn:hover { background: var(--hover-tint); color: var(--ink); }
+.memory-icon-btn.danger:hover { background: var(--danger-soak); color: var(--danger); }
+.memory-quiet,
+.memory-danger {
+  border: 1px solid var(--hairline);
+  border-radius: 9px;
+  padding: 0.45rem 0.85rem;
+  background: transparent;
+  color: var(--ink-soft);
+  font-family: var(--font-body);
+  font-weight: 700;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease, filter 120ms ease;
+}
+.memory-quiet:hover { background: var(--hover-tint); color: var(--ink); }
+.memory-quiet.danger { color: var(--danger); }
+/* --danger is a light pink in the dark theme, so the confirm button uses tinted
+   fill with danger-colored text instead of white-on-danger. */
+.memory-danger { border-color: var(--danger); background: var(--danger-soak); color: var(--danger); }
+.memory-danger:hover { filter: brightness(1.08); }
+.memory-confirm { font-size: 13px; font-weight: 600; color: var(--ink-soft); }
+
+/* ---------- memory: chat card ---------- */
+.memory-card {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem 0.7rem;
+  max-width: 540px;
+  margin-top: 0.7rem;
+  padding: 0.55rem 0.85rem;
+  border: 1px solid var(--hairline);
+  border-radius: 14px;
+  background: var(--glass);
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+  box-shadow: var(--shadow-sm);
+  font-size: 13.5px;
+}
+.memory-card > svg { width: 16px; height: 16px; flex: none; color: var(--lilac); }
+.memory-card-text {
+  flex: 1 1 9rem;
+  min-width: 0;
+  font-weight: 600;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+.memory-card-undo,
+.memory-card-manage {
+  border: 1px solid var(--hairline);
+  border-radius: 999px;
+  padding: 0.25rem 0.75rem;
+  background: transparent;
+  color: var(--ink-soft);
+  font-family: var(--font-body);
+  font-weight: 700;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+.memory-card-undo:hover,
+.memory-card-manage:hover { background: var(--glass-strong); color: var(--ink); }
+.memory-card-undo:disabled { opacity: 0.5; cursor: default; }
+.memory-card-manage { border-color: transparent; text-decoration: underline; }
+.memory-card-error { flex-basis: 100%; margin: 0; }
 
 /* ---------- generated image card ---------- */
 .image-card {
@@ -3601,6 +3786,7 @@ html[dir='rtl'] .settings-pane { animation-name: settings-push-rtl; }
   .attach-chip-remove { width: 28px; height: 28px; }
   .chat-menu-btn { width: 2.2em; height: 2.2em; }
   .settings-close { width: 40px; height: 40px; }
+  .memory-icon-btn { width: 40px; height: 40px; }
 
   .input textarea,
   .search,

@@ -3,6 +3,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from agent import lorebook
+from agent.memory import format_for_prompt
 from app.config import TUTOR_FOR_SUBJECT, TUTOR_SUFFIX
 
 LORE_DIR = Path(__file__).resolve().parent / "lore"
@@ -56,7 +57,11 @@ ADULT_SAFETY = _read("safety-adult.md")
 
 # The young-user safety block lives in the boundaries file under this heading;
 # adult mode swaps it for the adult safety section.
-_YOUNG_USER_SAFETY = {"Safety for young users"}
+_YOUNG_USER_SAFETY = {"Safety for young users", "Memory for young users"}
+
+# The memory rules live in the boundaries file under one heading. They are cut
+# when the user has turned memory off, since she then has no memory tools.
+_MEMORY_RULES = {"Memory", "Memory for young users"}
 
 # Each Google service's rules live in the boundaries file under one heading.
 # Until the user links that service its tools are not offered, so its rules are
@@ -129,6 +134,7 @@ def build_system_prompt(
     adult: bool = False,
     gmail: bool = True,
     calendar: bool = True,
+    memory: bool = True,
 ) -> str:
     if mode == "tutor":
         persona = _without_sections(PERSONA, _TUTOR_PERSONA_TRIM)
@@ -146,6 +152,8 @@ def build_system_prompt(
         boundaries = f"{boundaries}\n\n{ADULT_SAFETY}"
     else:
         boundaries = BOUNDARIES
+    if not memory:
+        boundaries = _without_sections(boundaries, _MEMORY_RULES)
     unlinked: list[str] = []
     if not gmail:
         boundaries = _without_sections(boundaries, _GMAIL_RULES)
@@ -178,16 +186,27 @@ def build_messages(
     adult: bool = False,
     gmail: bool = True,
     calendar: bool = True,
+    memory: bool = True,
+    memories=None,
+    memory_total: int | None = None,
 ):
     """One model call's full message list.
 
     The system prompt leads (stable, so it stays cache-friendly), the chat
-    history follows, and a trailing system note carries the current date. The
-    date sits *after* the history so a long-running chat reads the live value
-    instead of a date frozen at the top of the conversation.
+    history follows, and trailing system notes carry the user's memories and
+    the current date. Both sit *after* the history: memories change between
+    chats and would otherwise break the cached prefix, and a long-running chat
+    should read the live date instead of one frozen at the top.
     """
-    return [
-        {"role": "system", "content": build_system_prompt(mode, subject, adult, gmail, calendar)},
+    messages = [
+        {
+            "role": "system",
+            "content": build_system_prompt(mode, subject, adult, gmail, calendar, memory),
+        },
         *history,
-        {"role": "system", "content": date_line(timezone)},
     ]
+    note = format_for_prompt(memories or [], memory_total) if memory else ""
+    if note:
+        messages.append({"role": "system", "content": note})
+    messages.append({"role": "system", "content": date_line(timezone)})
+    return messages

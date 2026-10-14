@@ -490,6 +490,13 @@ export function useChatController(enabled) {
     [markToolFlagged],
   )
 
+  // Remember that the user pressed Undo on a memory card, so the card stays
+  // "Undone" when the chat re-renders (e.g. after switching chats).
+  const markMemoryUndone = useCallback(
+    (chatId, toolName, memoryId) => markToolFlagged(chatId, toolName, 'id', memoryId, 'undone'),
+    [markToolFlagged],
+  )
+
   // Persist the chat if needed, then stream the model's reply. `pathMessages`
   // is the visible chain the model should see (ending at the message being
   // replied to); the streamed reply node is parented to its last entry.
@@ -955,6 +962,7 @@ export function useChatController(enabled) {
     clearTypingTitle,
     markDraftSent,
     markEventDeleted,
+    markMemoryUndone,
     selectChat: selectChatAndCanvas,
     attachments,
     uploading,

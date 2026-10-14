@@ -1,6 +1,16 @@
-import { useEffect, useRef, useState } from 'react'
-import { PersonIcon, MailIcon, CalendarIcon, ShieldIcon, GlobeIcon, ChevronIcon, ArrowLeftIcon } from './Icons'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import {
+  PersonIcon,
+  MailIcon,
+  CalendarIcon,
+  ShieldIcon,
+  GlobeIcon,
+  BrainIcon,
+  ChevronIcon,
+  ArrowLeftIcon,
+} from './Icons'
 import { LanguagePicker } from './LanguagePicker'
+import { MemoryManager } from './MemoryManager'
 import { useLanguage } from '../i18n/LanguageProvider'
 import { useMediaQuery } from '../hooks/useMediaQuery'
 import { updateProfile, setAdultMode } from '../api/authClient'
@@ -292,6 +302,8 @@ export function SettingsDialog({
   open,
   onClose,
   onUserUpdated,
+  // Section to land on when the dialog opens (e.g. 'memory' from a chat card).
+  initialSection = '',
   gmailNotice = '',
   onGmailNoticeClear = () => {},
   calendarNotice = '',
@@ -357,6 +369,17 @@ export function SettingsDialog({
         </>
       ),
     },
+    {
+      key: 'memory',
+      icon: <BrainIcon />,
+      label: t('settings.nav.memory'),
+      content: (
+        <>
+          <h3 className="settings-heading">{t('settings.nav.memory')}</h3>
+          <MemoryManager user={user} onUserUpdated={onUserUpdated} />
+        </>
+      ),
+    },
     ...(adultEnabled
       ? [
           {
@@ -398,11 +421,12 @@ export function SettingsDialog({
   // Reset to the first section only when the dialog opens. `onClose` is a new
   // function on every parent render, so keying this off it would also fire on
   // an unrelated user update (e.g. saving the adult-mode flag) and yank the
-  // pane back to Account.
-  useEffect(() => {
+  // pane back to Account. A layout effect, so opening straight onto a section
+  // never paints the previous one first.
+  useLayoutEffect(() => {
     if (!open) return
-    setSection('account')
-    setView('index')
+    setSection(initialSection || 'account')
+    setView(initialSection ? 'detail' : 'index')
   }, [open])
 
   useEffect(() => {

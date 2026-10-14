@@ -10,7 +10,7 @@ from agent.fmhy import safety_note_for
 from agent.model import make_model
 from agent.prompts import build_messages
 from agent import tools as agent_tools
-from agent.tools import ALL_TOOLS, CALENDAR_TOOL_NAMES, GMAIL_TOOL_NAMES
+from agent.tools import ALL_TOOLS, CALENDAR_TOOL_NAMES, GMAIL_TOOL_NAMES, MEMORY_TOOL_NAMES
 
 logger = logging.getLogger(__name__)
 
@@ -23,15 +23,21 @@ class AgentState(MessagesState):
     adult: bool
     gmail: bool
     calendar: bool
+    memory: bool
+    memories: list[dict]
+    memory_total: int
 
 
-def _tools_for(tool_list: list, gmail: bool, calendar: bool) -> list:
-    """The tools the model is offered: Google tools only when that service is linked."""
+def _tools_for(tool_list: list, gmail: bool, calendar: bool, memory: bool = True) -> list:
+    """The tools the model is offered: Google tools only when that service is
+    linked, memory tools only while the user has memory on."""
     hidden: set[str] = set()
     if not gmail:
         hidden |= GMAIL_TOOL_NAMES
     if not calendar:
         hidden |= CALENDAR_TOOL_NAMES
+    if not memory:
+        hidden |= MEMORY_TOOL_NAMES
     return [t for t in tool_list if t.name not in hidden]
 
 
@@ -118,7 +124,8 @@ def build_graph(tools=None):
         # keep the full tool set.
         gmail = state.get("gmail", True)
         calendar = state.get("calendar", True)
-        model = make_model(state["reasoning"], _tools_for(tool_list, gmail, calendar))
+        memory = state.get("memory", True)
+        model = make_model(state["reasoning"], _tools_for(tool_list, gmail, calendar, memory))
         messages = build_messages(
             state["mode"],
             state.get("subject"),
@@ -127,6 +134,9 @@ def build_graph(tools=None):
             state.get("adult", False),
             gmail=gmail,
             calendar=calendar,
+            memory=memory,
+            memories=state.get("memories"),
+            memory_total=state.get("memory_total"),
         )
         return {"messages": [model.invoke(messages)]}
 

@@ -21,6 +21,7 @@ from sse_starlette.sse import EventSourceResponse
 from agent.content import flatten_content
 from agent.fmhy import load_fmhy_tools
 from agent.graph import build_graph
+from agent import memory as memory_rules
 from agent.title import generate_title
 from agent.tools import (
     ALL_TOOLS,
@@ -42,6 +43,9 @@ from app.config import (
     GOOGLE_CALENDAR_SCOPES,
     GOOGLE_GMAIL_SCOPES,
     GOOGLE_LOGIN_SCOPES,
+    MEMORY_INJECT_LIMIT,
+    MEMORY_MAX_CHARS,
+    MEMORY_MAX_PER_USER,
 )
 from app.google_oauth import ServiceNotConnected
 from app.webpage_preview import (
@@ -59,6 +63,7 @@ from app.schemas import (
     ChatResponse,
     CreateChatRequest,
     GmailStatusResponse,
+    MemoryRequest,
     RenameChatRequest,
     SaveWebpageFileRequest,
     SetActiveBranchRequest,
@@ -558,6 +563,7 @@ def _state(req: ChatRequest, user) -> dict:
             content.append({"type": "text", "text": m.content})
         content.extend(blocks)
         messages.append(HumanMessage(content=content))
+    memory = bool(user["memory_enabled"])
     return {
         "messages": messages,
         "reasoning": req.reasoning,
@@ -567,6 +573,14 @@ def _state(req: ChatRequest, user) -> dict:
         "adult": ADULT_MODE_ENABLED and bool(user["adult_mode"]),
         "gmail": db.get_google_grant(user["id"], "gmail") is not None,
         "calendar": db.get_google_grant(user["id"], "calendar") is not None,
+        "memory": memory,
+        # The newest few ride along in the prompt; search_memories reaches the rest.
+        "memories": (
+            [dict(row) for row in db.list_memories(user["id"], MEMORY_INJECT_LIMIT)]
+            if memory
+            else []
+        ),
+        "memory_total": db.count_memories(user["id"]) if memory else 0,
     }
 
 
@@ -582,6 +596,7 @@ def _user_response(user) -> UserResponse:
         calendarConnected=db.get_google_grant(user["id"], "calendar") is not None,
         adultMode=ADULT_MODE_ENABLED and bool(user["adult_mode"]),
         adultModeEnabled=ADULT_MODE_ENABLED,
+        memoryEnabled=bool(user["memory_enabled"]),
     )
 
 
@@ -661,7 +676,70 @@ async def update_me(
         db.update_user_display_name(user["id"], name)
     if req.adult_mode is not None and ADULT_MODE_ENABLED:
         db.update_user_adult_mode(user["id"], req.adult_mode)
+    if req.memory_enabled is not None:
+        db.set_memory_enabled(user["id"], req.memory_enabled)
     return _user_response(db.get_user_by_id(user["id"]))
+
+
+# ---------- memories (the Settings > Memory manager) ----------
+# The agent's memory tools write the same rows; both go through
+# memory_rules.validate, so the content rules are identical either way.
+
+def _memory_json(row) -> dict:
+    return {
+        "id": row["id"],
+        "content": row["content"],
+        "createdAt": row["created_at"],
+        "updatedAt": row["updated_at"],
+    }
+
+
+@app.get("/api/v1/memories")
+async def list_user_memories(user=Depends(current_user)) -> dict:
+    return {
+        "memories": [_memory_json(row) for row in db.list_memories(user["id"])],
+        "enabled": bool(user["memory_enabled"]),
+        "limit": MEMORY_MAX_PER_USER,
+        "maxChars": MEMORY_MAX_CHARS,
+    }
+
+
+@app.post("/api/v1/memories", status_code=201)
+async def create_user_memory(req: MemoryRequest, user=Depends(current_user)) -> dict:
+    text, problem = memory_rules.validate(req.content, memory_rules.is_adult(user))
+    if problem:
+        raise HTTPException(status_code=400, detail=problem)
+    if db.count_memories(user["id"]) >= MEMORY_MAX_PER_USER:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Memory is full ({MEMORY_MAX_PER_USER} saved). Delete one to make room.",
+        )
+    return _memory_json(db.create_memory(user["id"], text))
+
+
+@app.patch("/api/v1/memories/{memory_id}")
+async def update_user_memory(
+    memory_id: str, req: MemoryRequest, user=Depends(current_user)
+) -> dict:
+    text, problem = memory_rules.validate(req.content, memory_rules.is_adult(user))
+    if problem:
+        raise HTTPException(status_code=400, detail=problem)
+    updated = db.update_memory(user["id"], memory_id, text)
+    if updated is None:
+        raise HTTPException(status_code=404, detail="That memory is already gone.")
+    return _memory_json(updated)
+
+
+@app.delete("/api/v1/memories/{memory_id}")
+async def delete_user_memory(memory_id: str, user=Depends(current_user)) -> dict:
+    if not db.delete_memory(user["id"], memory_id):
+        raise HTTPException(status_code=404, detail="That memory is already gone.")
+    return {"ok": True}
+
+
+@app.delete("/api/v1/memories")
+async def delete_all_user_memories(user=Depends(current_user)) -> dict:
+    return {"ok": True, "deleted": db.delete_all_memories(user["id"])}
 
 
 # ---------- Gmail (incremental consent) ----------

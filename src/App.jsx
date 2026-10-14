@@ -110,6 +110,9 @@ export default function App() {
   const [authPhase, setAuthPhase] = useState('checking') // checking | landing
   const [authError, setAuthError] = useState('')
   const [settingsOpen, setSettingsOpen] = useState(false)
+  // Section Settings opens on; empty means the first one. Set to 'memory' by
+  // the chat's memory card.
+  const [settingsSection, setSettingsSection] = useState('')
   const [gmailNotice, setGmailNotice] = useState('')
   const [calendarNotice, setCalendarNotice] = useState('')
 
@@ -203,6 +206,7 @@ export default function App() {
     clearTypingTitle,
     markDraftSent,
     markEventDeleted,
+    markMemoryUndone,
     selectChat,
     attachments,
     uploading,
@@ -259,8 +263,10 @@ export default function App() {
       <SettingsDialog
         user={user}
         open={settingsOpen}
+        initialSection={settingsSection}
         onClose={() => {
           setSettingsOpen(false)
+          setSettingsSection('')
           setGmailNotice('')
           setCalendarNotice('')
         }}
@@ -326,6 +332,11 @@ export default function App() {
           onNavigateBranch={navigateBranch}
           onDraftSent={(draftId) => markDraftSent(activeChatId, draftId)}
           onEventDeleted={(eventId) => markEventDeleted(activeChatId, eventId)}
+          onMemoryUndone={(toolName, memoryId) => markMemoryUndone(activeChatId, toolName, memoryId)}
+          onManageMemory={() => {
+            setSettingsSection('memory')
+            setSettingsOpen(true)
+          }}
           onOpenWebpage={openCanvas}
           inputRef={inputRef}
           effort={effort}

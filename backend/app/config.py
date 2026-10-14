@@ -94,6 +94,16 @@ SITE_EXEC_TIMEOUT = int(os.getenv("SITE_EXEC_TIMEOUT", "120"))
 # install plus a framework build routinely takes minutes.
 SITE_BUILD_TIMEOUT = int(os.getenv("SITE_BUILD_TIMEOUT", "300"))
 
+# ---------- Memory ----------
+# Long-term facts about the user that the agent saves through its memory tools
+# and the user manages from Settings. The caps apply to everyone; the content
+# filters in agent/memory.py apply only while adult mode is off.
+MEMORY_MAX_CHARS = 300
+MEMORY_MAX_PER_USER = 200
+# How many of the newest memories ride along in every prompt; the rest are
+# reachable through the search_memories tool.
+MEMORY_INJECT_LIMIT = 25
+
 REASONING_LEVELS = {"low", "high", "max"}
 
 TUTOR_SUFFIX = """
