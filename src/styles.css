@@ -672,22 +672,30 @@ img.user-avatar {
 .top-bar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 1.25rem;
+  gap: 0.65rem;
   padding: 0 0 1.2rem;
   /* Keeps the top bar's tooltips above the message list's avatars below it. */
   position: relative;
   z-index: 10;
 }
 
-.top-bar-left,
+/* DOM order is title-first (the view's heading); the sidebar pill is pulled
+   ahead of it visually so the title keeps hugging it as before. */
+.top-bar > .sidebar-controls { order: -1; }
+
+.top-bar-title {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
 .top-bar-right {
   display: flex;
   align-items: center;
   gap: 1.25rem;
   min-width: 0;
+  margin-inline-start: auto;
 }
-.top-bar-left { gap: 0.65rem; }
 
 .sidebar-controls {
   display: inline-flex;
@@ -3559,13 +3567,19 @@ a.settings-save { text-decoration: none; display: inline-flex; align-items: cent
 
 @media (max-width: 768px) {
   /* ---- top bar ---- */
+  /* Two rows: the title takes a full-width row of its own above the controls,
+     so the control cluster can never squeeze it into a truncated ellipsis. */
   .top-bar {
-    gap: 0.5rem;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    row-gap: 0.5rem;
+    column-gap: 0.4rem;
     padding-bottom: 0.7rem;
   }
-  .top-bar-left {
-    flex: 1 1 auto;
-    gap: 0.4rem;
+  .top-bar > .sidebar-controls { order: 0; }
+  .top-bar-title {
+    flex: 1 0 100%;
+    justify-content: center;
   }
   .top-bar-right {
     flex: none;
@@ -3580,6 +3594,8 @@ a.settings-save { text-decoration: none; display: inline-flex; align-items: cent
     height: 38px;
   }
   .ctrl-btn svg { width: 18px; height: 18px; }
+  /* The chip keeps its glass treatment (it is what stays legible on the sky);
+     only the width cap lifts so the title can use the whole row. */
   .chat-title-btn,
   .chat-title-input,
   .chat-title-mirror {
@@ -3589,7 +3605,7 @@ a.settings-save { text-decoration: none; display: inline-flex; align-items: cent
     padding: 0.28rem 0.65rem;
     font-size: 15px;
   }
-  .chat-title-edit { min-width: 0; }
+  .chat-title-edit { min-width: 0; max-width: 100%; }
   .theme-toggle {
     width: 54px;
     height: 36px;

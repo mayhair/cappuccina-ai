@@ -279,14 +279,9 @@ export default function App() {
 
       <main className="main">
         <header className="top-bar">
-          <div className="top-bar-left">
-            <SidebarControls
-              collapsed={collapsed}
-              onToggle={toggleSidebar}
-              onSearch={openSidebarAndSearch}
-              onNewChat={handleNewChat}
-              mobile={isMobile}
-            />
+          {/* DOM order is title-first: it is the view's heading, it matches the
+              mobile two-row reading order, and CSS places it mid-row on desktop. */}
+          <div className="top-bar-title">
             <TopBarTitle
               title={activeChat.pending ? '' : activeChat.title === 'New chat' ? t('sidebar.newChat') : activeChat.title}
               typing={activeChat.id === typingTitleId}
@@ -294,6 +289,13 @@ export default function App() {
               onRename={(title) => renameChat(activeChat.id, title)}
             />
           </div>
+          <SidebarControls
+            collapsed={collapsed}
+            onToggle={toggleSidebar}
+            onSearch={openSidebarAndSearch}
+            onNewChat={handleNewChat}
+            mobile={isMobile}
+          />
           <div className="top-bar-right">
             {hasWebpage && (
               <button
