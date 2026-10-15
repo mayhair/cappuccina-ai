@@ -3963,5 +3963,12 @@ html[lang='ur'] .user-hint {
   padding-block: 0.2rem;
 }
 
+/* The sidebar search input is only one line tall by default, which clips Nastaliq's
+   tall letters at the top and bottom of the placeholder. */
+html[lang='ur'] .search input {
+  line-height: 2;
+  padding-block: 0.2rem;
+}
+
 /* Mirror the sky plates so the scenery matches the mirrored layout. */
 html[dir='rtl'] .sky img { transform: scaleX(-1); }
