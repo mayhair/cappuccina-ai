@@ -40,6 +40,21 @@ function isImage(name) {
   return IMAGE_EXTENSIONS.includes(ext)
 }
 
+const AUDIO_EXTENSIONS = ['mp3', 'wav', 'ogg', 'oga', 'm4a', 'aac', 'flac', 'opus', 'weba']
+const VIDEO_EXTENSIONS = ['mp4', 'webm', 'mov', 'm4v', 'ogv']
+
+// A sound or a clip is played, not listed as a binary. The mime the API
+// reported wins (an .ogg may be either); the extension covers the rest.
+function mediaKind(name, mime) {
+  const type = String(mime ?? '').toLowerCase()
+  if (type.startsWith('audio/')) return 'audio'
+  if (type.startsWith('video/')) return 'video'
+  const ext = String(name ?? '').split('.').pop().toLowerCase()
+  if (AUDIO_EXTENSIONS.includes(ext)) return 'audio'
+  if (VIDEO_EXTENSIONS.includes(ext)) return 'video'
+  return null
+}
+
 // How a file's size reads: "812 KB".
 function formatBytes(bytes) {
   const size = Number(bytes) || 0
@@ -350,6 +365,28 @@ function AssetPane({ name, url, mime, size }) {
   )
 }
 
+// A sound or a clip in the folder: played in place from the preview route.
+function MediaPane({ name, url, mime, size, media }) {
+  const { t } = useLanguage()
+  const shown = formatBytes(size)
+  return (
+    <div className="canvas-asset">
+      {!url ? (
+        <p className="canvas-empty-hint">{t('canvas.loadingFile', { name })}</p>
+      ) : media === 'video' ? (
+        <video className="canvas-asset-preview" src={url} controls playsInline preload="metadata" />
+      ) : (
+        <audio className="canvas-asset-audio" src={url} controls preload="metadata" />
+      )}
+      <p className="canvas-empty-hint">
+        {name}
+        {shown ? ` · ${shown}` : ''}
+        {mime ? ` · ${mime}` : ''}
+      </p>
+    </div>
+  )
+}
+
 // A binary with nothing to show as text: no editor, just what it is.
 function BinaryPane({ name, mime, size }) {
   const shown = formatBytes(size)
@@ -483,6 +520,14 @@ function CodeTab({
             </div>
           ) : kind === 'image' ? (
             <AssetPane name={shownFile} url={imageUrl} mime={binary?.mime} size={binary?.size} />
+          ) : kind === 'audio' || kind === 'video' ? (
+            <MediaPane
+              name={shownFile}
+              url={imageUrl}
+              mime={binary?.mime}
+              size={binary?.size}
+              media={kind}
+            />
           ) : kind === 'binary' ? (
             <BinaryPane name={shownFile} mime={binary?.mime} size={binary?.size} />
           ) : draft ? (
@@ -566,9 +611,16 @@ export function WebpageCanvas({
   const shownFile = activeFile && names.includes(activeFile) ? activeFile : names[0] ?? null
   // A picture is shown as a picture; a binary the API reports as such has no
   // text to show or edit; anything else opens in the viewer/editor.
-  const shownKind = !shownFile ? null : isImage(shownFile) ? 'image' : binary ? 'binary' : 'text'
+  const media = shownFile && binary ? mediaKind(shownFile, binary.mime) : null
+  const shownKind = !shownFile
+    ? null
+    : isImage(shownFile)
+      ? 'image'
+      : media ?? (binary ? 'binary' : 'text')
   const imageUrl =
-    shownKind === 'image' && previewBase ? previewFileUrl({ previewBase }, shownFile) : null
+    (shownKind === 'image' || media) && previewBase
+      ? previewFileUrl({ previewBase }, shownFile)
+      : null
   const highlighted = useMemo(() => highlightCode(code, shownFile), [code, shownFile])
   // The same highlighting for the text being edited, rendered behind the
   // textarea. A trailing newline is padded so the pre keeps exactly as many

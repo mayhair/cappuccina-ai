@@ -3454,6 +3454,9 @@ a.settings-save { text-decoration: none; display: inline-flex; align-items: cent
   border-radius: 10px;
   background: var(--code-bg);
 }
+.canvas-asset-audio {
+  width: min(100%, 420px);
+}
 .canvas-edit-bar {
   display: flex;
   align-items: center;
