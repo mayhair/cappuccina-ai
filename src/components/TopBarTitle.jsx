@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { TypewriterTitle } from './TypewriterTitle'
 import { useLanguage } from '../i18n/LanguageProvider'
 
@@ -6,21 +6,11 @@ export function TopBarTitle({ title, typing, onTyped, onRename }) {
   const { t } = useLanguage()
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(title)
-  const inputRef = useRef(null)
-  const mirrorRef = useRef(null)
   const skip = useRef(false)
 
   useEffect(() => {
     if (!editing) setDraft(title)
   }, [title, editing])
-
-  useLayoutEffect(() => {
-    if (!editing) return
-    const input = inputRef.current
-    const mirror = mirrorRef.current
-    if (!input || !mirror) return
-    input.style.width = `${mirror.offsetWidth}px`
-  }, [editing, draft])
 
   if (!title) return null
 
@@ -44,7 +34,6 @@ export function TopBarTitle({ title, typing, onTyped, onRename }) {
     return (
       <span className="chat-title-edit">
         <input
-          ref={inputRef}
           className="chat-title-input"
           value={draft}
           autoFocus
@@ -66,7 +55,7 @@ export function TopBarTitle({ title, typing, onTyped, onRename }) {
           }}
           onBlur={commit}
         />
-        <span ref={mirrorRef} className="chat-title-mirror" aria-hidden="true">
+        <span className="chat-title-mirror" aria-hidden="true">
           {draft || ' '}
         </span>
       </span>

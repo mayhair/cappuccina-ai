@@ -764,9 +764,20 @@ img.user-avatar {
 }
 .chat-title-btn:focus-visible { outline: 2px solid var(--pink-strong); outline-offset: 1px; }
 
-.chat-title-edit { position: relative; display: inline-flex; min-width: 0; }
+/* The hidden mirror sits in the same grid cell as the input and sizes the
+   cell to the draft text; the input just fills it. No JS-measured width, so
+   the field can never end up narrower than its text (or than the chip it
+   replaced). */
+.chat-title-edit {
+  display: inline-grid;
+  grid-template-columns: minmax(0, 1fr);
+  min-width: 0;
+  max-width: min(46vw, 520px);
+}
 .chat-title-input,
 .chat-title-mirror {
+  grid-area: 1 / 1;
+  min-width: 2ch;
   padding: 0.3rem 0.7rem;
   border: 1px solid transparent;
   border-radius: 999px;
@@ -777,8 +788,9 @@ img.user-avatar {
   white-space: pre;
 }
 .chat-title-input {
-  min-width: 2ch;
-  max-width: min(46vw, 520px);
+  /* Zero intrinsic width so only the mirror sizes the cell; min-width fills it. */
+  width: 0;
+  min-width: 100%;
   border-color: var(--pink-strong);
   background:
     linear-gradient(135deg, var(--title-chip-tint), transparent 74%),
@@ -792,10 +804,6 @@ img.user-avatar {
 }
 .chat-title-input:focus-visible { outline: none; }
 .chat-title-mirror {
-  position: absolute;
-  top: 0;
-  inset-inline-start: 0;
-  max-width: min(46vw, 520px);
   overflow: hidden;
   visibility: hidden;
   pointer-events: none;
@@ -3508,7 +3516,25 @@ a.settings-save { text-decoration: none; display: inline-flex; align-items: cent
 
 .ai-badge { flex: none; }
 .ai-badge-short { display: none; }
+.theme-toggle { flex: none; }
 .sidebar-scrim { display: none; }
+
+/* Sidebar and webpage canvas open together leave the chat column narrow: the
+   badge shrinks to "AI" (as on phones) so the controls are never squeezed. */
+.app:not(.is-collapsed).canvas-open .top-bar-right { gap: 0.6rem; }
+.app:not(.is-collapsed).canvas-open .ai-badge { padding: 0.52rem 0.7rem; }
+.app:not(.is-collapsed).canvas-open .ai-badge-full {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+.app:not(.is-collapsed).canvas-open .ai-badge-short { display: inline; }
 
 @media (max-width: 900px) {
   .app {
@@ -3610,12 +3636,12 @@ a.settings-save { text-decoration: none; display: inline-flex; align-items: cent
   .chat-title-input,
   .chat-title-mirror {
     flex: 0 1 auto;
-    min-width: 0;
     max-width: 100%;
     padding: 0.28rem 0.65rem;
     font-size: 15px;
   }
-  .chat-title-edit { min-width: 0; max-width: 100%; }
+  .chat-title-btn { min-width: 0; }
+  .chat-title-edit { max-width: 100%; }
   .theme-toggle {
     width: 54px;
     height: 36px;
@@ -3817,6 +3843,7 @@ html[dir='rtl'] .settings-pane { animation-name: settings-push-rtl; }
   .input textarea,
   .search,
   .chat-title-input,
+  .chat-title-mirror,
   .chat-rename-input,
   .settings-input,
   .edit-msg-input,
