@@ -29,6 +29,9 @@ export default function App() {
   useEffect(() => {
     document.documentElement.dataset.theme = theme
     localStorage.setItem('cappuccina-theme', theme)
+    // Browser chrome (mobile address bar, installed-app title bar) follows the page background.
+    const pageBg = getComputedStyle(document.documentElement).getPropertyValue('--page-bg').trim()
+    if (pageBg) document.querySelector('meta[name="theme-color"]')?.setAttribute('content', pageBg)
   }, [theme])
 
   // Voice replies (TTS) are off until the user opts in.
