@@ -2212,6 +2212,7 @@ html[lang='ur'] body { line-height: 1.9; }
 }
 .settings-msg.ok { color: #2e9e63; }
 .settings-msg.error { color: var(--danger); }
+.settings-msg.neutral { color: var(--ink-soft); }
 
 /* ---------- landing ---------- */
 .landing {
@@ -2488,6 +2489,15 @@ html[lang='ur'] body { line-height: 1.9; }
 }
 .settings-status svg { width: 17px; height: 17px; color: var(--lilac); flex: none; }
 a.settings-save { text-decoration: none; display: inline-flex; align-items: center; }
+.settings-steps {
+  margin: 0.5rem 0 0;
+  padding-inline-start: 1.3rem;
+  font-size: 13.5px;
+  line-height: 1.45;
+  color: var(--ink-soft);
+  max-width: 46ch;
+}
+.settings-steps li + li { margin-top: 0.35rem; }
 
 /* ---------- email draft card ---------- */
 .draft-card {

@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react'
 import {
   PersonIcon,
   MailIcon,
@@ -8,6 +8,8 @@ import {
   BrainIcon,
   ChevronIcon,
   ArrowLeftIcon,
+  CheckIcon,
+  DownloadIcon,
 } from './Icons'
 import { LanguagePicker } from './LanguagePicker'
 import { MemoryManager } from './MemoryManager'
@@ -15,6 +17,12 @@ import { useLanguage } from '../i18n/LanguageProvider'
 import { useMediaQuery } from '../hooks/useMediaQuery'
 import { updateProfile, setAdultMode } from '../api/authClient'
 import { isAdultBirthday } from '../lib/adultMode'
+import {
+  subscribe as subscribeInstall,
+  getSnapshot as getInstallSnapshot,
+  promptInstall,
+  platformHint,
+} from '../lib/pwa'
 import { connectGmailUrl, disconnectGmail, gmailStatus } from '../api/gmailClient'
 import {
   connectCalendarUrl,
@@ -297,6 +305,88 @@ function CalendarForm({ user, notice, onNoticeClear, onUserUpdated }) {
   )
 }
 
+function InstallForm() {
+  const { t } = useLanguage()
+  const { installed, canPrompt } = useSyncExternalStore(subscribeInstall, getInstallSnapshot)
+  const [busy, setBusy] = useState(false)
+  const [outcome, setOutcome] = useState('')
+  const platform = platformHint()
+
+  const install = async () => {
+    if (busy) return
+    setBusy(true)
+    setOutcome('')
+    try {
+      setOutcome(await promptInstall())
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  if (installed) {
+    return (
+      <div className="settings-form">
+        <p className="settings-status">
+          <CheckIcon />
+          {t('settings.install.installed')}
+        </p>
+      </div>
+    )
+  }
+
+  if (outcome === 'accepted') {
+    return (
+      <div className="settings-form">
+        <p className="settings-msg ok" role="status">
+          {t('settings.install.accepted')}
+        </p>
+      </div>
+    )
+  }
+
+  let guidance
+  if (canPrompt) {
+    guidance = (
+      <>
+        <p className="settings-hint">{t('settings.install.hint')}</p>
+        <div className="settings-actions">
+          <button type="button" className="settings-save" onClick={install} disabled={busy}>
+            {busy ? t('settings.install.installing') : t('settings.install.button')}
+          </button>
+        </div>
+      </>
+    )
+  } else if (platform === 'ios') {
+    guidance = (
+      <>
+        <p className="settings-hint">{t('settings.install.iosIntro')}</p>
+        <ol className="settings-steps">
+          <li>{t('settings.install.iosStep1')}</li>
+          <li>{t('settings.install.iosStep2')}</li>
+          <li>{t('settings.install.iosStep3')}</li>
+        </ol>
+      </>
+    )
+  } else if (platform === 'safari-desktop') {
+    guidance = <p className="settings-hint">{t('settings.install.safari')}</p>
+  } else if (platform === 'firefox') {
+    guidance = <p className="settings-hint">{t('settings.install.firefox')}</p>
+  } else {
+    guidance = <p className="settings-hint">{t('settings.install.generic')}</p>
+  }
+
+  return (
+    <div className="settings-form">
+      {guidance}
+      {outcome === 'dismissed' && (
+        <p className="settings-msg neutral" role="status">
+          {t('settings.install.dismissed')}
+        </p>
+      )}
+    </div>
+  )
+}
+
 export function SettingsDialog({
   user,
   open,
@@ -408,6 +498,20 @@ export function SettingsDialog({
           <section className="settings-section">
             <p className="settings-hint">{t('language.settings.hint')}</p>
             <LanguagePicker value={lang} onChange={setLang} />
+          </section>
+        </>
+      ),
+    },
+    {
+      key: 'install',
+      icon: <DownloadIcon />,
+      label: t('settings.nav.install'),
+      content: (
+        <>
+          <h3 className="settings-heading">{t('settings.nav.install')}</h3>
+          <section className="settings-section">
+            <h4>{t('settings.install.section')}</h4>
+            <InstallForm />
           </section>
         </>
       ),

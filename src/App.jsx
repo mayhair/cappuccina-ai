@@ -15,6 +15,7 @@ import { getMe, logout } from './api/authClient'
 import { useChatController } from './hooks/useChatController'
 import { useMediaQuery } from './hooks/useMediaQuery'
 import tts from './lib/tts'
+import { setManifestEnabled } from './lib/pwa'
 import { useLanguage } from './i18n/LanguageProvider'
 
 export default function App() {
@@ -153,6 +154,11 @@ export default function App() {
       canceled = true
     }
   }, [])
+
+  // The app is installable only for signed-in users, so the manifest link follows the session.
+  useEffect(() => {
+    setManifestEnabled(Boolean(user))
+  }, [user])
 
   const chat = useChatController(Boolean(user))
 
