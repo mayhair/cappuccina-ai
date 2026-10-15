@@ -4,9 +4,8 @@ import { SidebarControls } from './components/SidebarControls'
 import { TopBarTitle } from './components/TopBarTitle'
 import { ChatWindow } from './components/ChatWindow'
 import { WebpageCanvas } from './components/WebpageCanvas'
-import { ThemeToggle } from './components/ThemeToggle'
-import { SpeakerToggle } from './components/SpeakerToggle'
-import { SparkleIcon, WindowIcon } from './components/Icons'
+import { TopBarMenu } from './components/TopBarMenu'
+import { WindowIcon } from './components/Icons'
 import { Sky, LandingPage } from './components/LandingPage'
 import { AlphaGate } from './components/AlphaGate'
 import { LanguageGate } from './components/LanguageGate'
@@ -20,15 +19,20 @@ import { useLanguage } from './i18n/LanguageProvider'
 
 export default function App() {
   const { t } = useLanguage()
-  const [theme, setTheme] = useState(() => {
+  // The stored preference: 'light', 'dark' or 'system' (follow the OS).
+  const [themePref, setThemePref] = useState(() => {
     const saved = localStorage.getItem('cappuccina-theme')
-    if (saved === 'light' || saved === 'dark') return saved
-    return window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+    return saved === 'light' || saved === 'dark' ? saved : 'system'
   })
+  const systemDark = useMediaQuery('(prefers-color-scheme: dark)')
+  const theme = themePref === 'system' ? (systemDark ? 'dark' : 'light') : themePref
+
+  useEffect(() => {
+    localStorage.setItem('cappuccina-theme', themePref)
+  }, [themePref])
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme
-    localStorage.setItem('cappuccina-theme', theme)
     // Browser chrome (mobile address bar, installed-app title bar) follows the page background.
     const pageBg = getComputedStyle(document.documentElement).getPropertyValue('--page-bg').trim()
     if (pageBg) document.querySelector('meta[name="theme-color"]')?.setAttribute('content', pageBg)
@@ -183,7 +187,7 @@ export default function App() {
     return (
       <div className="landing">
         <Sky theme={theme} />
-        <LandingPage theme={theme} onTheme={setTheme} error={authError} />
+        <LandingPage theme={theme} onTheme={setThemePref} error={authError} />
         <LanguageGate />
         <AlphaGate />
       </div>
@@ -284,12 +288,16 @@ export default function App() {
         onGmailNoticeClear={() => setGmailNotice('')}
         calendarNotice={calendarNotice}
         onCalendarNoticeClear={() => setCalendarNotice('')}
+        theme={themePref}
+        onTheme={setThemePref}
+        voice={voice}
+        onVoice={setVoice}
       />
 
       <main className="main">
         <header className="top-bar">
-          {/* DOM order is title-first: it is the view's heading, it matches the
-              mobile two-row reading order, and CSS places it mid-row on desktop. */}
+          {/* DOM order is title-first (it is the view's heading); CSS places it
+              after the sidebar pill. */}
           <div className="top-bar-title">
             <TopBarTitle
               title={activeChat.pending ? '' : activeChat.title === 'New chat' ? t('sidebar.newChat') : activeChat.title}
@@ -318,15 +326,13 @@ export default function App() {
                 <WindowIcon />
               </button>
             )}
-            <SpeakerToggle enabled={voice} onChange={setVoice} />
-            <ThemeToggle theme={theme} onChange={setTheme} />
-            <span className="ai-badge">
-              <SparkleIcon aria-hidden="true" />
-              <span className="ai-badge-full">{t('app.aiBadge')}</span>
-              <span className="ai-badge-short" aria-hidden="true">
-                {t('app.aiBadgeShort')}
-              </span>
-            </span>
+            <TopBarMenu
+              theme={themePref}
+              onTheme={setThemePref}
+              voice={voice}
+              onVoice={setVoice}
+              onSettings={() => setSettingsOpen(true)}
+            />
           </div>
         </header>
 

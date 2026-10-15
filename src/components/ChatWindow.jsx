@@ -1185,9 +1185,6 @@ function Composer({
     if (!el) return
     el.style.height = 'auto'
     el.style.height = `${Math.min(el.scrollHeight, 200)}px`
-    const line = parseFloat(getComputedStyle(el).lineHeight) || 24
-    const multi = el.scrollHeight > line * 1.5 || el.value.includes('\n')
-    el.parentElement?.classList.toggle('expanded', multi)
   }, [])
 
   useEffect(() => {
@@ -1236,6 +1233,9 @@ function Composer({
     if ((draft.trim() || attachments.length > 0) && !isStreaming && !uploading) submit()
   }
 
+  const hasContent = Boolean(draft.trim()) || attachments.length > 0
+  const showMic = voice.supported && (voice.listening || !hasContent)
+
   return (
       <form
         className="composer"
@@ -1254,8 +1254,8 @@ function Composer({
         )}
         {attachError && <p className="attach-error" role="alert">{attachError}</p>}
         {voice.error && <p className="attach-error" role="alert">{voice.error}</p>}
-        <div className="composer-row">
-          <div className={`input${voice.listening ? ' listening' : ''}`}>
+        <div className={`composer-box${voice.listening ? ' listening' : ''}`}>
+          <div className="input">
             <textarea
               rows={1}
               placeholder={mode === 'tutor' ? t('chat.placeholderTutor') : t('chat.placeholder')}
@@ -1275,42 +1275,46 @@ function Composer({
             onChange={handleFiles}
             tabIndex={-1}
           />
-          {voice.supported && (
+          <div className="composer-tools">
             <button
               type="button"
-              className={`mic has-tip tip-up${voice.listening ? ' rec' : ''}`}
-              data-tip={voice.listening ? t('chat.listening') : t('chat.speak')}
-              aria-label={voice.listening ? t('chat.stopVoice') : t('chat.speak')}
-              aria-pressed={voice.listening}
-              onClick={voice.toggle}
+              className="attach has-tip tip-up tip-start"
+              data-tip={t('chat.attach')}
+              aria-label={t('chat.attach')}
+              onClick={() => fileRef.current?.click()}
               disabled={isStreaming || uploading}
             >
-              <MicIcon />
+              <PaperclipIcon />
             </button>
-          )}
-          <button
-            type="button"
-            className="attach has-tip tip-up"
-            data-tip={t('chat.attach')}
-            aria-label={t('chat.attach')}
-            onClick={() => fileRef.current?.click()}
-            disabled={isStreaming || uploading}
-          >
-            <PaperclipIcon />
-          </button>
-          <button
-            className="send"
-            type="submit"
-            aria-label={t('chat.sendMessage')}
-            disabled={(!draft.trim() && attachments.length === 0) || isStreaming || uploading}
-          >
-            <SendIcon />
-          </button>
+            <ModeSwitch mode={mode} onMode={onMode} disabled={isStreaming} />
+            <EffortSelector effort={effort} onChange={onEffort} disabled={isStreaming} />
+            {/* Mic and send share one spot: the mic while there is nothing to
+                send (or while dictating), send once there is. */}
+            {showMic ? (
+              <button
+                type="button"
+                className={`mic has-tip tip-up${voice.listening ? ' rec' : ''}`}
+                data-tip={voice.listening ? t('chat.listening') : t('chat.speak')}
+                aria-label={voice.listening ? t('chat.stopVoice') : t('chat.speak')}
+                aria-pressed={voice.listening}
+                onClick={voice.toggle}
+                disabled={isStreaming || uploading}
+              >
+                <MicIcon />
+              </button>
+            ) : (
+              <button
+                className="send"
+                type="submit"
+                aria-label={t('chat.sendMessage')}
+                disabled={!hasContent || isStreaming || uploading}
+              >
+                <SendIcon />
+              </button>
+            )}
+          </div>
         </div>
-        <div className="composer-meta">
-          <ModeSwitch mode={mode} onMode={onMode} disabled={isStreaming} />
-          <EffortSelector effort={effort} onChange={onEffort} disabled={isStreaming} />
-        </div>
+        <p className="composer-hint">{t('chat.aiHint')}</p>
       </form>
   )
 }

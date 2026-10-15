@@ -669,6 +669,12 @@ img.user-avatar {
   min-height: 0;
 }
 
+/* The chat column sits below the sidebar and webpage canvas (z-index 2), so a
+   top-bar tooltip that spills sideways would slide under them. Lift the
+   column only while one of its top-bar tooltips is showing. */
+.main:has(.top-bar .has-tip:hover),
+.main:has(.top-bar .has-tip:focus-visible) { z-index: 3; }
+
 .top-bar {
   display: flex;
   align-items: center;
@@ -692,9 +698,16 @@ img.user-avatar {
 .top-bar-right {
   display: flex;
   align-items: center;
-  gap: 1.25rem;
+  gap: 0.15rem;
   min-width: 0;
   margin-inline-start: auto;
+  padding: 0.3rem;
+  border: 1px solid var(--hairline);
+  border-radius: 999px;
+  background: var(--glass-strong);
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+  box-shadow: var(--shadow);
 }
 
 .sidebar-controls {
@@ -834,33 +847,84 @@ img.user-avatar {
 .theme-toggle .seg.active { background: #d0559c; color: #ffffff; }
 .theme-toggle .seg svg { width: 17px; height: 17px; }
 
-.ai-badge {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  padding: 0.52rem 0.9rem;
-  border-radius: 999px;
-  border: 1px solid var(--hairline);
-  background: var(--glass-strong);
-  color: var(--ink-soft);
-  font-weight: 700;
-  font-size: 14px;
-  -webkit-backdrop-filter: blur(10px);
-  backdrop-filter: blur(10px);
+/* ---------- top-bar overflow menu ---------- */
+.top-menu { position: relative; }
+.top-menu-pop {
+  position: absolute;
+  inset-inline-end: 0;
+  top: calc(100% + 8px);
+  z-index: 30;
+  width: 260px;
+  padding: 0.75rem 0.6rem 0.45rem;
+  border-radius: 16px;
+  border: 1px solid var(--popover-border);
+  background: var(--popover-bg);
+  color: var(--ink);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
   box-shadow: var(--shadow);
+  animation: pop 170ms cubic-bezier(0.2, 0.9, 0.3, 1.2) both;
 }
-.ai-badge svg { width: 15px; height: 15px; color: var(--lilac); }
+.top-menu-label {
+  margin: 0 0.25rem 0.45rem;
+  font-size: 12.5px;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  color: var(--ink-faint);
+}
+.top-menu-row { padding: 0.75rem 0.3rem 0.35rem; }
+.top-menu-sep {
+  height: 1px;
+  margin: 0.45rem 0.2rem;
+  background: var(--hairline);
+}
+
+/* Light / Dark / System picker (top-bar menu and Settings). */
+.theme-choice {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.25rem;
+  padding: 0.25rem;
+  border-radius: 12px;
+  border: 1px solid var(--hairline);
+  background: var(--field);
+}
+.theme-choice button {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.2rem;
+  padding: 0.45rem 0.2rem;
+  border: none;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--ink-soft);
+  font-family: var(--font-body);
+  font-weight: 700;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 150ms ease, color 150ms ease;
+}
+.theme-choice button svg { width: 18px; height: 18px; }
+.theme-choice button:hover { background: var(--hover-tint); color: var(--ink); }
+.theme-choice button.active { background: var(--pink-strong); color: #ffffff; }
+.theme-choice button:focus-visible { outline: 2px solid var(--pink-strong); outline-offset: 1px; }
 
 /* ---------- messages ---------- */
 .message-list {
+  --list-fade: 44px;
   overflow-y: auto;
   min-height: 0;
-  padding: 1vh 1vw 2vh;
-  margin: -6px 0;
+  padding: var(--list-fade) 1vw 2vh;
+  /* Tucks into the top bar's empty bottom gap, so the top fade happens there
+     and the first message still starts right under the bar. */
+  margin: calc(-1 * var(--top-gap, 1.2rem)) 0 -6px;
   scrollbar-width: thin;
   scrollbar-color: var(--scrollbar) transparent;
-  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 16px, #000 calc(100% - 16px), transparent 100%);
-  mask-image: linear-gradient(to bottom, transparent 0, #000 16px, #000 calc(100% - 16px), transparent 100%);
+  /* A long, soft fade at the top so messages dissolve into the sky as they
+     scroll up toward the top bar, instead of being cut off at a hard edge. */
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 var(--list-fade), #000 calc(100% - 16px), transparent 100%);
+  mask-image: linear-gradient(to bottom, transparent 0, #000 var(--list-fade), #000 calc(100% - 16px), transparent 100%);
 }
 
 .msg-row {
@@ -874,6 +938,15 @@ img.user-avatar {
 }
 .msg-row.user {
   flex-direction: row-reverse;
+}
+/* Consecutive messages from the same speaker show the avatar once; the rest
+   keep its width as a spacer so the bubbles stay aligned. */
+.msg-row:not(.starts) { margin-top: -0.6rem; }
+.msg-row:not(.starts) .msg-avatar {
+  height: 0;
+  border-width: 0;
+  box-shadow: none;
+  visibility: hidden;
 }
 
 .msg-avatar {
@@ -1346,79 +1419,93 @@ img.user-avatar {
 }
 
 /* ---------- composer ---------- */
+/* One rounded box: the text on top, a slim tool row inside it below. */
 .composer {
   display: flex;
   flex-direction: column;
   align-items: stretch;
   gap: 0.4rem;
-  padding-block: 0.8vh 0.4vh; padding-inline: 1vw 2.4vw;
+  padding-block: 0.8vh 0.2vh; padding-inline: 1vw 2.4vw;
 }
-.composer-row {
+.composer-box {
   display: flex;
-  align-items: center;
-  gap: 1.1rem;
-}
-.composer-row:has(.input.expanded) { align-items: flex-end; }
-.composer-meta {
-  display: flex;
-  justify-content: flex-end;
-  gap: 0.7rem;
-  padding-inline-end: 0.4rem;
-}
-
-.mode-switch {
-  display: flex;
-  align-items: center;
-  gap: 0.55rem;
-  min-width: 0;
-}
-.mode-seg {
-  display: flex;
-  height: 40px;
-  border-radius: 999px;
-  border: 1px solid var(--hairline);
-  background: var(--glass-strong);
-  -webkit-backdrop-filter: blur(10px);
-  backdrop-filter: blur(10px);
-  overflow: hidden;
-  box-shadow: var(--shadow-sm);
-}
-.mode-seg .seg {
-  padding: 0 1.1rem;
-  border: none;
-  background: transparent;
-  color: var(--ink-faint);
-  font-family: var(--font-body);
-  font-weight: 800;
-  font-size: 14px;
-  letter-spacing: 0.02em;
-  cursor: pointer;
-  transition: background 180ms ease, color 180ms ease;
-}
-.mode-seg .seg:first-child { border-inline-end: 1px solid var(--hairline); }
-.mode-seg .seg.active { background: var(--pink-strong); color: #ffffff; }
-.mode-seg .seg:focus-visible { outline: none; box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.65); }
-.mode-seg .seg:disabled { cursor: default; opacity: 0.6; }
-.input {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  padding-block: 0.95rem 0.95rem; padding-inline: 1.5rem 1rem;
-  border-radius: 999px;
+  flex-direction: column;
+  border-radius: 1.6rem;
   border: 1px solid var(--hairline);
   background: var(--field);
   box-shadow: var(--shadow);
-  overflow: hidden;
-  transition: border-radius 160ms ease;
+  transition: border-color 160ms ease;
 }
-.input.expanded { border-radius: 1.5rem; }
+.composer-box:focus-within,
+.composer-box.listening { border-color: var(--pink); }
+.composer-tools {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0 0.5rem 0.5rem 0.55rem;
+}
+/* The mode and effort pickers open from the box's start edge, so they never
+   run off a phone screen. */
+.composer-tools { position: relative; }
+.composer-tools .effort,
+.composer-tools .mode-switch { position: static; }
+.composer-tools > .send,
+.composer-tools > .mic { margin-inline-start: auto; }
+.composer-hint {
+  margin: 0;
+  text-align: center;
+  font-size: 12px;
+  line-height: 1.3;
+  color: var(--ink-soft);
+  /* The line sits straight on the sky; a soft halo of the page colour keeps it
+     legible over the bright nebula and cloud patches in either theme. */
+  text-shadow:
+    0 0 1px var(--page-bg),
+    0 0 3px var(--page-bg),
+    0 0 6px var(--page-bg),
+    0 0 10px var(--page-bg),
+    0 0 16px var(--page-bg),
+    0 0 24px var(--page-bg);
+}
+
+.mode-switch { position: relative; min-width: 0; }
+.mode-chip .mode-chip-icon { width: 1.05em; height: 1.05em; }
+.mode-chip.is-tutor { color: var(--pink-ink); border-color: var(--pink); }
+.mode-pop { width: 280px; padding: 0.4rem; }
+.mode-option {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  width: 100%;
+  padding: 0.6rem 0.65rem;
+  border: none;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--ink);
+  font-family: var(--font-body);
+  text-align: start;
+  cursor: pointer;
+  transition: background 120ms ease;
+}
+.mode-option:hover { background: var(--hover-tint); }
+.mode-option.on { background: var(--pink-soak); }
+.mode-option-icon { width: 20px; height: 20px; flex: none; color: var(--pink-strong); }
+.mode-option-text { display: flex; flex-direction: column; gap: 0.1rem; min-width: 0; flex: 1; }
+.mode-option-text strong { font-size: 15px; font-weight: 800; }
+.mode-option-text span { font-size: 13px; color: var(--ink-soft); line-height: 1.35; }
+.mode-option-check { width: 18px; height: 18px; flex: none; color: var(--pink-strong); }
+.input {
+  display: flex;
+  align-items: center;
+  padding-block: 0.85rem 0.45rem; padding-inline: 1.2rem 1rem;
+}
 .input textarea {
   border: none;
   outline: none;
   background: transparent;
   width: 100%;
   font-family: var(--font-body);
-  font-size: clamp(15px, 1.35vw, 21px);
+  font-size: clamp(15px, 1.1vw, 18px);
   font-weight: 600;
   line-height: 1.35;
   color: var(--ink);
@@ -1440,7 +1527,7 @@ img.user-avatar {
 .input textarea::placeholder { color: var(--ink-faint); }
 .send {
   flex: none;
-  width: clamp(56px, 4.3vw, 88px);
+  width: 40px;
   aspect-ratio: 1;
   border-radius: 50%;
   border: none;
@@ -1454,40 +1541,40 @@ img.user-avatar {
 }
 .send:hover { transform: scale(1.06) rotate(-6deg); filter: brightness(1.05); }
 .send:active { transform: scale(0.98); }
-.send:disabled { cursor: default; opacity: 1; filter: none; }
+.send:disabled { cursor: default; opacity: 0.55; filter: none; box-shadow: none; }
 .send svg { width: 52%; height: 52%; }
 
 /* ---------- attachments ---------- */
 .attach-input { display: none; }
 .attach {
+  position: relative;
   flex: none;
-  width: clamp(42px, 3.1vw, 54px);
+  width: 34px;
   aspect-ratio: 1;
   border-radius: 50%;
-  border: 1px solid var(--hairline);
-  background: var(--glass-strong);
-  color: var(--ink-faint);
+  border: none;
+  background: transparent;
+  color: var(--ink-soft);
   display: grid;
   place-items: center;
   cursor: pointer;
-  box-shadow: var(--shadow-sm);
-  transition: color 160ms ease, transform 140ms ease;
+  transition: color 160ms ease, background 160ms ease;
 }
-.attach:hover { color: var(--ink); transform: scale(1.06); }
+.attach:hover { color: var(--ink); background: var(--hover-tint); }
 .attach:active { transform: scale(0.97); }
 .attach:disabled { cursor: default; opacity: 0.45; transform: none; }
-.attach svg { width: 46%; height: 46%; }
+.attach svg { width: 56%; height: 56%; }
 
 /* ---------- voice input ---------- */
 .mic {
   position: relative;
   flex: none;
-  width: clamp(42px, 3.1vw, 54px);
+  width: 40px;
   aspect-ratio: 1;
   border-radius: 50%;
   border: 1px solid var(--hairline);
   background: var(--glass-strong);
-  color: var(--ink-faint);
+  color: var(--ink-soft);
   display: grid;
   place-items: center;
   cursor: pointer;
@@ -1517,7 +1604,6 @@ img.user-avatar {
   70% { transform: scale(1.35); opacity: 0; }
   100% { transform: scale(1.35); opacity: 0; }
 }
-.input.listening { border-color: var(--pink); }
 
 @media (prefers-reduced-motion: reduce) {
   .mic { transition: none; }
@@ -1533,6 +1619,10 @@ img.user-avatar {
   inset-inline-start: auto;
   inset-inline-end: 0;
   transform: translate(0, 3px);
+}
+.has-tip.tip-up.tip-start::after {
+  inset-inline-start: 0;
+  inset-inline-end: auto;
 }
 .has-tip.tip-up:hover::after,
 .has-tip.tip-up:focus-visible::after { transform: translate(0, 0); }
@@ -1676,14 +1766,14 @@ img.user-avatar {
   border-radius: 999px;
   border: 1px solid var(--hairline);
   background: var(--glass-strong);
-  color: var(--ink-faint);
+  color: var(--ink-soft);
   font-family: var(--font-body);
   font-weight: 700;
   font-size: 13px;
   cursor: pointer;
-  box-shadow: var(--shadow);
+  white-space: nowrap;
 }
-.effort-pill:hover { color: var(--ink-soft); }
+.effort-pill:hover { color: var(--ink); background: var(--hover-tint); }
 .effort-pill:disabled { opacity: 0.6; cursor: default; }
 .effort-pill .chev { width: 0.95em; height: 0.95em; transition: transform 150ms ease; }
 .effort-pill .chev.open { transform: rotate(-90deg); }
@@ -1697,7 +1787,7 @@ img.user-avatar {
 }
 .effort-pop {
   position: absolute;
-  inset-inline-end: 0;
+  inset-inline-start: 0;
   bottom: calc(100% + 10px);
   z-index: 30;
   width: 268px;
@@ -3514,27 +3604,8 @@ a.settings-save { text-decoration: none; display: inline-flex; align-items: cent
    the fallback everywhere else. */
 .app { height: var(--app-height, 100dvh); }
 
-.ai-badge { flex: none; }
-.ai-badge-short { display: none; }
 .theme-toggle { flex: none; }
 .sidebar-scrim { display: none; }
-
-/* Sidebar and webpage canvas open together leave the chat column narrow: the
-   badge shrinks to "AI" (as on phones) so the controls are never squeezed. */
-.app:not(.is-collapsed).canvas-open .top-bar-right { gap: 0.6rem; }
-.app:not(.is-collapsed).canvas-open .ai-badge { padding: 0.52rem 0.7rem; }
-.app:not(.is-collapsed).canvas-open .ai-badge-full {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  margin: -1px;
-  overflow: hidden;
-  clip: rect(0 0 0 0);
-  white-space: nowrap;
-  border: 0;
-}
-.app:not(.is-collapsed).canvas-open .ai-badge-short { display: inline; }
 
 @media (max-width: 900px) {
   .app {
@@ -3603,23 +3674,14 @@ a.settings-save { text-decoration: none; display: inline-flex; align-items: cent
 
 @media (max-width: 768px) {
   /* ---- top bar ---- */
-  /* Two rows: the title takes a full-width row of its own above the controls,
-     so the control cluster can never squeeze it into a truncated ellipsis. */
   .top-bar {
-    flex-wrap: wrap;
-    justify-content: space-between;
-    row-gap: 0.5rem;
-    column-gap: 0.4rem;
+    gap: 0.4rem;
     padding-bottom: 0.7rem;
   }
-  .top-bar > .sidebar-controls { order: 0; }
-  .top-bar-title {
-    flex: 1 0 100%;
-    justify-content: center;
-  }
+  .top-bar-title { flex: 1 1 auto; }
   .top-bar-right {
     flex: none;
-    gap: 0.35rem;
+    padding: 0.22rem;
   }
   .sidebar-controls {
     flex: none;
@@ -3642,54 +3704,28 @@ a.settings-save { text-decoration: none; display: inline-flex; align-items: cent
   }
   .chat-title-btn { min-width: 0; }
   .chat-title-edit { max-width: 100%; }
-  .theme-toggle {
-    width: 54px;
-    height: 36px;
-  }
-  .theme-toggle .seg svg { width: 16px; height: 16px; }
-  .ai-badge {
-    gap: 0.3rem;
-    padding: 0.42rem 0.6rem;
-    font-size: 13px;
-  }
-  .ai-badge svg { width: 14px; height: 14px; }
-  .ai-badge-full {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    padding: 0;
-    margin: -1px;
-    overflow: hidden;
-    clip: rect(0 0 0 0);
-    white-space: nowrap;
-    border: 0;
-  }
-  .ai-badge-short { display: inline; }
 
   /* ---- composer ---- */
   .composer {
     padding: 0.55rem 0.1rem calc(0.35rem + env(safe-area-inset-bottom));
     gap: 0.35rem;
   }
-  .composer-row { gap: 0.5rem; }
-  .input { padding: 0.65rem 0.7rem 0.65rem 1.1rem; }
+  .input { padding: 0.7rem 0.9rem 0.35rem 1rem; }
   .input textarea {
     font-size: 16px;
     max-height: 140px;
   }
-  .send { width: 48px; }
-  .mic,
-  .attach { width: 44px; }
-  .composer-meta {
-    justify-content: space-between;
-    gap: 0.5rem;
-    padding-inline-end: 0;
-  }
-  .mode-seg .seg { padding: 0 0.9rem; }
+  .composer-tools { gap: 0.25rem; padding: 0 0.4rem 0.4rem; }
+  .composer-hint { font-size: 11px; }
   .effort-pop { width: min(268px, calc(100vw - 2rem)); }
+  .mode-pop { width: min(280px, calc(100vw - 2rem)); }
 
   /* ---- messages ---- */
-  .message-list { padding: 0.5rem 0.2rem 0.8rem; }
+  .message-list {
+    --list-fade: 36px;
+    --top-gap: 0.7rem;
+    padding: var(--list-fade) 0.2rem 0.8rem;
+  }
   .msg-row {
     gap: 0.5rem;
     margin-bottom: 0.85rem;
@@ -3701,6 +3737,8 @@ a.settings-save { text-decoration: none; display: inline-flex; align-items: cent
   }
   .bubble,
   .user-col { max-width: min(86%, 56ch); }
+  /* Replies get nearly the whole row; the user's own stay narrower. */
+  .assistant-col { max-width: min(94%, 64ch); }
   .welcome { padding: 1rem 0.8rem 2rem; }
   .welcome-hero { width: clamp(160px, 30vh, 240px); }
 
@@ -3910,6 +3948,12 @@ html[lang='ur'] .welcome-title { line-height: 1.6; }
 html[lang='ur'] .landing-sub,
 html[lang='ur'] .welcome-sub { line-height: 1.9; }
 html[lang='ur'] .modal h2 { line-height: 1.7; }
+/* The disclaimer's tight Latin line height lets Nastaliq's tall letters climb
+   into the composer box above it. */
+html[lang='ur'] .composer-hint {
+  line-height: 2.1;
+  padding-top: 0.2rem;
+}
 
 /* Urdu hint text is wider and taller than the Latin one: give it room so it
    isn't ellipsized or clipped by the pill's overflow. */

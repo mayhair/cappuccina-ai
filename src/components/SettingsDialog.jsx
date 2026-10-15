@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react'
 import {
+  SunIcon,
   PersonIcon,
   MailIcon,
   CalendarIcon,
@@ -12,6 +13,7 @@ import {
   DownloadIcon,
 } from './Icons'
 import { LanguagePicker } from './LanguagePicker'
+import { ThemeChoice, VoiceSwitch } from './AppearanceControls'
 import { MemoryManager } from './MemoryManager'
 import { useLanguage } from '../i18n/LanguageProvider'
 import { useMediaQuery } from '../hooks/useMediaQuery'
@@ -398,6 +400,10 @@ export function SettingsDialog({
   onGmailNoticeClear = () => {},
   calendarNotice = '',
   onCalendarNoticeClear = () => {},
+  theme = 'system',
+  onTheme = () => {},
+  voice = false,
+  onVoice = () => {},
 }) {
   const { lang, setLang, t } = useLanguage()
   const [section, setSection] = useState('account')
@@ -488,6 +494,30 @@ export function SettingsDialog({
           },
         ]
       : []),
+    {
+      key: 'appearance',
+      icon: <SunIcon />,
+      label: t('settings.nav.appearance'),
+      content: (
+        <>
+          <h3 className="settings-heading">{t('settings.nav.appearance')}</h3>
+          <section className="settings-section">
+            <h4>{t('theme.group')}</h4>
+            <div className="settings-form">
+              <ThemeChoice value={theme} onChange={onTheme} />
+              <p className="settings-hint">{t('settings.appearance.themeHint')}</p>
+            </div>
+          </section>
+          <section className="settings-section">
+            <h4>{t('settings.appearance.voice')}</h4>
+            <div className="settings-form">
+              <VoiceSwitch enabled={voice} onChange={onVoice} />
+              <p className="settings-hint">{t('settings.appearance.voiceHint')}</p>
+            </div>
+          </section>
+        </>
+      ),
+    },
     {
       key: 'language',
       icon: <GlobeIcon />,
