@@ -18,7 +18,7 @@ export default {
   'alpha.age.before': 'Filhal main sirf ',
   'alpha.age.strong': '13 saal aur us se zyada umar',
   'alpha.age.after':
-    ' walon ke liye hoon. Meri hifazati jaanch abhi alpha mein aazmai ja rahi hai aur main hairan kun ya ghalat baatein keh sakti hoon, is liye chhote bachay mere tayyar hone tak intezar karein.',
+    ' ke liye hoon. Meri hifazati jaanch abhi alpha mein aazmai ja rahi hai aur main hairan kun ya ghalat baatein keh sakti hoon, is liye chhote bachay mere tayyar hone tak intezar karein.',
   'alpha.ok': 'Samajh gayi',
 
   'landing.heroAlt':
@@ -121,7 +121,7 @@ export default {
   'mode.tutorDesc': 'Woh aap ko koi bhi mazmoon qadam ba qadam parhati hai',
   'saveNotice.title': "Apna webpage mehfooz karein",
   'saveNotice.body': "Yeh aap ki site ko aik .zip file ke taur par download karta hai jis mein sab kuch maujood hai. Isay kahin aur host karne ya kisi ko bhejne ke liye istemal karein. Isay unzip kar ke dekhne ke liye index.html kholein.",
-  'saveNotice.host': "Host karne ke liye unzip ki hui files site ki root mein upload karein, kyunke kuch pages domain ke sab se oopar hone ki tawaqqo rakhte hain.",
+  'saveNotice.host': "Host karne ke liye unzip files site ki root mein upload karein, kyunke kuch pages domain ke sab se oopar hone ki tawaqqo rakhte hain.",
   'saveNotice.dontShow': "Dobara na dikhayein",
 
   'settings.error.generic': "Kuch garbar ho gayi — dobara koshish karein",
@@ -147,7 +147,7 @@ export default {
   'settings.connections.disconnecting': "Disconnect ho raha hai…",
   'settings.connections.disconnect': "{service} ko disconnect karein",
   'settings.connections.connect': "{service} ko connect karein",
-  'settings.connections.gmailDesc': "Cappuccina ko apna inbox parhne aur email ke musawwaday likhne dein. Woh kabhi email bhej nahi sakti — har musawwada aap ke Send dabane ka intezar karta hai.",
+  'settings.connections.gmailDesc': "Cappuccina ko apna inbox parhne aur email ke musawwaday likhne dein. Woh kabhi email bhej nahi sakti — har musawwada aap ke Bhejein dabane ka intezar karta hai.",
   'settings.connections.calendarDesc': "Cappuccina ko apna schedule dekhne aur aap ke liye events shamil ya tarmeem karne dein. Woh apne tor par koi event delete nahi kar sakti — pehle aap se tasdeeq mangti hai.",
 
   'settings.memory.useMemory': "Yaaddasht istemal karein",
@@ -178,7 +178,7 @@ export default {
   'settings.memory.togglingFailed': "Yeh setting tabdeel nahi ho saki. Dobara koshish karein.",
 
   'settings.install.section': 'Is device par',
-  'settings.install.installed': 'Cappuccina is device par install ho chuka hai.',
+  'settings.install.installed': 'Cappuccina is device par install hai.',
   'settings.install.hint': 'Cappuccina ko install karein taake yeh apni alag window mein khulay aur aap ki home screen ya dock se seedha shuru ho.',
   'settings.install.button': 'App install karein',
   'settings.install.installing': 'Install ho raha hai…',
