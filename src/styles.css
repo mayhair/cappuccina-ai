@@ -29,6 +29,9 @@
   /* Opaque surface for the canvas in fullscreen, where the chat behind it must
      not show through the glass. */
   --panel-solid: #ffffff;
+  /* Settings dialog surface: near-opaque so the page behind the veil doesn't
+     show through and wash out the text. */
+  --settings-bg: rgba(250, 251, 255, 0.96);
   --glass-strong: rgba(255, 255, 255, 0.78);
   --field: rgba(255, 255, 255, 0.85);
   --hairline: rgba(44, 49, 81, 0.18);
@@ -100,6 +103,7 @@
 
   --glass: rgba(19, 24, 40, 0.62);
   --panel-solid: #131828;
+  --settings-bg: rgba(19, 24, 40, 0.96);
   --glass-strong: rgba(22, 28, 46, 0.76);
   --field: rgba(38, 46, 66, 0.85);
   --hairline: rgba(238, 240, 246, 0.16);
@@ -2159,7 +2163,7 @@ html[lang='ur'] body { line-height: 1.9; }
   display: flex;
   width: min(880px, 95vw);
   height: min(600px, 88vh);
-  background: var(--glass);
+  background: var(--settings-bg);
   -webkit-backdrop-filter: blur(28px) saturate(160%);
   backdrop-filter: blur(28px) saturate(160%);
   border: 1px solid var(--hairline);
@@ -2191,7 +2195,7 @@ html[lang='ur'] body { line-height: 1.9; }
   place-items: center;
   transition: background 120ms ease, color 120ms ease;
 }
-.settings-close:hover { background: var(--glass); color: var(--ink); }
+.settings-close:hover { background: var(--hover-tint); color: var(--ink); }
 .settings-nav-item {
   display: flex;
   align-items: center;
@@ -2209,8 +2213,8 @@ html[lang='ur'] body { line-height: 1.9; }
   transition: background 120ms ease, color 120ms ease;
 }
 .settings-nav-item svg { width: 16px; height: 16px; flex: none; }
-.settings-nav-item:hover { background: var(--glass); color: var(--ink); }
-.settings-nav-item.active { background: var(--glass); color: var(--ink); }
+.settings-nav-item:hover { background: var(--hover-tint); color: var(--ink); }
+.settings-nav-item.active { background: var(--hover-tint); color: var(--ink); }
 .settings-pane {
   flex: 1 1 auto;
   overflow-y: auto;
