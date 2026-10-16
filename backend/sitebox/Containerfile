@@ -1,4 +1,4 @@
-FROM docker.io/library/node:22-bookworm-slim
+FROM docker.io/library/node:24-trixie-slim
 # curl so the model can fetch things without a node package; sudo so a missing
 # non-node tool can be installed with apt-get. The one sudoers rule allows
 # exactly apt-get/apt/dpkg (NOPASSWD, nothing else), and app/sitebox.py grants
