@@ -1,4 +1,5 @@
-import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react'
+import { createPortal } from 'react-dom'
 import {
   SunIcon,
   PersonIcon,
@@ -11,7 +12,9 @@ import {
   ArrowLeftIcon,
   CheckIcon,
   DownloadIcon,
+  TrashIcon,
 } from './Icons'
+import { EmojiText } from '../lib/emoji'
 import { LanguagePicker } from './LanguagePicker'
 import { ThemeChoice, VoiceSwitch } from './AppearanceControls'
 import { MemoryManager } from './MemoryManager'
@@ -175,16 +178,30 @@ function AdultModeForm({ user, onUpdated }) {
   )
 }
 
-// Two steps, like "Delete all memories": the button only arms an inline
-// confirm, and only the confirm calls the server.
-function DeleteAccountForm({ onDeleted }) {
-  const { t } = useLanguage()
-  const [confirming, setConfirming] = useState(false)
+// The last stop before the account is gone. The red button stays disabled until
+// the user types their own email, so it can't be confirmed by reflex.
+function DeleteAccountModal({ email, onCancel, onDeleted }) {
+  const { t, tr } = useLanguage()
+  const [typed, setTyped] = useState('')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
+  const matches = typed.trim().toLowerCase() === email.trim().toLowerCase()
 
-  const confirmDelete = async () => {
-    if (busy) return
+  // Capture phase, so Escape closes only this pop-up and never reaches the
+  // Settings dialog's own (bubbling) Escape handler underneath.
+  useEffect(() => {
+    const esc = (e) => {
+      if (e.key !== 'Escape') return
+      e.stopPropagation()
+      if (!busy) onCancel()
+    }
+    window.addEventListener('keydown', esc, true)
+    return () => window.removeEventListener('keydown', esc, true)
+  }, [busy, onCancel])
+
+  const submit = async (e) => {
+    e.preventDefault()
+    if (busy || !matches) return
     setBusy(true)
     setError('')
     try {
@@ -196,43 +213,127 @@ function DeleteAccountForm({ onDeleted }) {
     }
   }
 
-  return (
-    <div className="settings-form">
-      <p className="settings-hint">{t('settings.account.deleteHint')}</p>
-      {error && (
-        <p className="settings-msg error" role="alert">
-          {error}
-        </p>
-      )}
-      {confirming ? (
-        <div className="memory-actions memory-all" role="group">
-          <span className="memory-confirm">{t('settings.account.deleteConfirm')}</span>
-          <button type="button" className="memory-danger" onClick={confirmDelete} disabled={busy}>
-            {busy ? t('settings.account.deleting') : t('settings.account.deleteYes')}
-          </button>
-          <button
-            type="button"
-            className="memory-quiet"
-            onClick={() => setConfirming(false)}
-            disabled={busy}
-          >
+  // Portaled to <body>: .settings has a backdrop-filter, which would otherwise
+  // pin this fixed-position veil inside the settings box.
+  return createPortal(
+    <div
+      className="modal-veil danger-veil"
+      role="alertdialog"
+      aria-modal="true"
+      aria-labelledby="delete-account-title"
+      aria-describedby="delete-account-body"
+      onMouseDown={(e) => e.target === e.currentTarget && !busy && onCancel()}
+    >
+      <form className="modal modal-danger" onSubmit={submit}>
+        <button
+          type="button"
+          className="modal-x"
+          aria-label={t('common.close')}
+          onClick={onCancel}
+          disabled={busy}
+        >
+          ✕
+        </button>
+        <div className="modal-avatar">
+          <img src="/plates/msg-avatar.webp" alt="" />
+        </div>
+        <h2 id="delete-account-title">
+          <EmojiText text={t('settings.account.deleteModal.title')} />
+        </h2>
+        <p id="delete-account-body">{tr('settings.account.deleteModal.body')}</p>
+        <ul className="modal-danger-list">
+          <li>{t('settings.account.deleteModal.listChats')}</li>
+          <li>{t('settings.account.deleteModal.listFiles')}</li>
+          <li>{t('settings.account.deleteModal.listPages')}</li>
+          <li>{t('settings.account.deleteModal.listMemories')}</li>
+          <li>{t('settings.account.deleteModal.listConnections')}</li>
+        </ul>
+        <p className="modal-danger-warning">{tr('settings.account.deleteModal.warning')}</p>
+        <label className="modal-danger-label" htmlFor="delete-account-email">
+          {tr('settings.account.deleteModal.confirmLabel', { email })}
+        </label>
+        <input
+          id="delete-account-email"
+          className="modal-danger-input"
+          type="text"
+          inputMode="email"
+          value={typed}
+          onChange={(e) => setTyped(e.target.value)}
+          placeholder={email}
+          autoComplete="off"
+          autoCapitalize="off"
+          spellCheck={false}
+          autoFocus
+          disabled={busy}
+        />
+        {error && (
+          <p className="settings-msg error" role="alert">
+            {error}
+          </p>
+        )}
+        <div className="modal-actions">
+          <button type="button" className="btn-keep" onClick={onCancel} disabled={busy}>
             {t('settings.account.deleteNo')}
           </button>
-          {/* Removing webpage containers can first have to start the container
-              engine, so the request may take a while. */}
-          {busy && (
-            <p className="settings-hint settings-wait" role="status">
-              {t('settings.account.deleteWait')}
-            </p>
-          )}
-        </div>
-      ) : (
-        <div className="settings-actions">
-          <button type="button" className="memory-quiet danger" onClick={() => setConfirming(true)}>
-            {t('settings.account.delete')}
+          <button type="submit" className="btn-toss" disabled={busy || !matches}>
+            {busy ? t('settings.account.deleting') : t('settings.account.deleteModal.confirm')}
           </button>
         </div>
+        {/* Removing webpage containers can first have to start the container
+            engine, so the request may take a while. */}
+        {busy && (
+          <p className="settings-hint settings-wait" role="status">
+            {t('settings.account.deleteWait')}
+          </p>
+        )}
+      </form>
+    </div>,
+    document.body,
+  )
+}
+
+// Folded away by default so the delete button is never one stray click from
+// the profile form.
+function DeleteAccountForm({ email, onDeleted }) {
+  const { t } = useLanguage()
+  const [open, setOpen] = useState(false)
+  const [confirming, setConfirming] = useState(false)
+  const deleteRef = useRef(null)
+
+  const cancel = useCallback(() => {
+    setConfirming(false)
+    deleteRef.current?.focus()
+  }, [])
+
+  return (
+    <div className={`danger-zone${open ? ' open' : ''}`}>
+      <button
+        type="button"
+        className="danger-zone-head"
+        aria-expanded={open}
+        aria-controls="danger-zone-body"
+        onClick={() => setOpen((o) => !o)}
+      >
+        <ChevronIcon className={`chev${open ? ' open' : ''}`} />
+        {t('settings.account.deleteSection')}
+      </button>
+      {open && (
+        <div id="danger-zone-body" className="danger-zone-body">
+          <p className="settings-hint">{t('settings.account.deleteHint')}</p>
+          <div className="settings-actions">
+            <button
+              ref={deleteRef}
+              type="button"
+              className="danger-zone-delete"
+              onClick={() => setConfirming(true)}
+            >
+              <TrashIcon />
+              {t('settings.account.delete')}
+            </button>
+          </div>
+        </div>
       )}
+      {confirming && <DeleteAccountModal email={email} onCancel={cancel} onDeleted={onDeleted} />}
     </div>
   )
 }
@@ -499,8 +600,7 @@ export function SettingsDialog({
             </p>
           </section>
           <section className="settings-section">
-            <h4>{t('settings.account.deleteSection')}</h4>
-            <DeleteAccountForm onDeleted={onAccountDeleted} />
+            <DeleteAccountForm email={user.email} onDeleted={onAccountDeleted} />
           </section>
         </>
       ),
