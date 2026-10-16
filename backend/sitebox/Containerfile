@@ -3,7 +3,7 @@ FROM docker.io/library/node:22-bookworm-slim
 # non-node tool can be installed with apt-get. The one sudoers rule allows
 # exactly apt-get/apt/dpkg (NOPASSWD, nothing else), and app/sitebox.py grants
 # the six capabilities that make it work for the unprivileged `node` user.
-RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates curl sudo \
+RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates curl python3 python3-pip python3-venv python-is-python3 sudo \
     && rm -rf /var/lib/apt/lists/* \
     && printf 'node ALL=(root) NOPASSWD: /usr/bin/apt-get, /usr/bin/apt, /usr/bin/dpkg\n' > /etc/sudoers.d/node \
     && chmod 0440 /etc/sudoers.d/node
