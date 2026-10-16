@@ -218,6 +218,13 @@ function DeleteAccountForm({ onDeleted }) {
           >
             {t('settings.account.deleteNo')}
           </button>
+          {/* Removing webpage containers can first have to start the container
+              engine, so the request may take a while. */}
+          {busy && (
+            <p className="settings-hint settings-wait" role="status">
+              {t('settings.account.deleteWait')}
+            </p>
+          )}
         </div>
       ) : (
         <div className="settings-actions">

@@ -71,6 +71,7 @@ export default {
   'settings.account.deleteYes': "Yes, delete my account",
   'settings.account.deleteNo': "Keep my account",
   'settings.account.deleting': "Deleting…",
+  'settings.account.deleteWait': "Please wait. This can take up to a minute.",
   'settings.connections.gmail': 'Gmail',
   'settings.connections.calendar': 'Google Calendar',
   'settings.adult.section': '18+ content',

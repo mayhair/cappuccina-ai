@@ -3975,3 +3975,5 @@ html[lang='ur'] .search input {
 
 /* Mirror the sky plates so the scenery matches the mirrored layout. */
 html[dir='rtl'] .sky img { transform: scaleX(-1); }
+/* The caption under the account-deletion confirm takes its own line. */
+.settings-wait { flex: 1 1 100%; margin-top: 0.2rem; }

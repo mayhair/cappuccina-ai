@@ -70,6 +70,7 @@ export default {
   'settings.account.deleteYes': "جی، میرا اکاؤنٹ حذف کریں",
   'settings.account.deleteNo': "میرا اکاؤنٹ رہنے دیں",
   'settings.account.deleting': "حذف ہو رہا ہے…",
+  'settings.account.deleteWait': "براہ کرم انتظار کریں۔ اس میں ایک منٹ تک لگ سکتا ہے۔",
   'settings.connections.gmail': 'جی میل',
   'settings.connections.calendar': 'گوگل کیلنڈر',
   'settings.adult.section': '18+ مواد',

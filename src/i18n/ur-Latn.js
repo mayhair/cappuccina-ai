@@ -70,6 +70,7 @@ export default {
   'settings.account.deleteYes': "Ji, mera account delete karein",
   'settings.account.deleteNo': "Mera account rehne dein",
   'settings.account.deleting': "Delete ho raha hai…",
+  'settings.account.deleteWait': "Baraye meherbani intezar karein. Is mein aik minute tak lag sakta hai.",
   'settings.connections.gmail': 'Gmail',
   'settings.connections.calendar': 'Google Calendar',
   'settings.adult.section': '18+ content',
