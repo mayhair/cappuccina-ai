@@ -17,7 +17,7 @@ import { ThemeChoice, VoiceSwitch } from './AppearanceControls'
 import { MemoryManager } from './MemoryManager'
 import { useLanguage } from '../i18n/LanguageProvider'
 import { useMediaQuery } from '../hooks/useMediaQuery'
-import { updateProfile, setAdultMode } from '../api/authClient'
+import { updateProfile, setAdultMode, deleteAccount } from '../api/authClient'
 import { isAdultBirthday } from '../lib/adultMode'
 import {
   subscribe as subscribeInstall,
@@ -172,6 +172,61 @@ function AdultModeForm({ user, onUpdated }) {
         </button>
       </div>
     </form>
+  )
+}
+
+// Two steps, like "Delete all memories": the button only arms an inline
+// confirm, and only the confirm calls the server.
+function DeleteAccountForm({ onDeleted }) {
+  const { t } = useLanguage()
+  const [confirming, setConfirming] = useState(false)
+  const [error, setError] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  const confirmDelete = async () => {
+    if (busy) return
+    setBusy(true)
+    setError('')
+    try {
+      await deleteAccount()
+      onDeleted()
+    } catch (err) {
+      setError(err.message || t('settings.error.generic'))
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="settings-form">
+      <p className="settings-hint">{t('settings.account.deleteHint')}</p>
+      {error && (
+        <p className="settings-msg error" role="alert">
+          {error}
+        </p>
+      )}
+      {confirming ? (
+        <div className="memory-actions memory-all" role="group">
+          <span className="memory-confirm">{t('settings.account.deleteConfirm')}</span>
+          <button type="button" className="memory-danger" onClick={confirmDelete} disabled={busy}>
+            {busy ? t('settings.account.deleting') : t('settings.account.deleteYes')}
+          </button>
+          <button
+            type="button"
+            className="memory-quiet"
+            onClick={() => setConfirming(false)}
+            disabled={busy}
+          >
+            {t('settings.account.deleteNo')}
+          </button>
+        </div>
+      ) : (
+        <div className="settings-actions">
+          <button type="button" className="memory-quiet danger" onClick={() => setConfirming(true)}>
+            {t('settings.account.delete')}
+          </button>
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -394,6 +449,8 @@ export function SettingsDialog({
   open,
   onClose,
   onUserUpdated,
+  // Called once the account is gone (the server has already cleared the cookie).
+  onAccountDeleted = () => {},
   // Section to land on when the dialog opens (e.g. 'memory' from a chat card).
   initialSection = '',
   gmailNotice = '',
@@ -433,6 +490,10 @@ export function SettingsDialog({
             <p className="settings-hint">
               {t('settings.account.signinHint', { email: user.email })}
             </p>
+          </section>
+          <section className="settings-section">
+            <h4>{t('settings.account.deleteSection')}</h4>
+            <DeleteAccountForm onDeleted={onAccountDeleted} />
           </section>
         </>
       ),

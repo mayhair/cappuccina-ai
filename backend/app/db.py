@@ -662,6 +662,13 @@ def get_google_grant(user_id: str, service: str) -> sqlite3.Row | None:
     ).fetchone()
 
 
+def list_google_grants(user_id: str) -> list[sqlite3.Row]:
+    return get_conn().execute(
+        "SELECT * FROM google_grants WHERE user_id = :user_id",
+        {"user_id": user_id},
+    ).fetchall()
+
+
 def delete_google_grant(user_id: str, service: str) -> None:
     conn = get_conn()
     conn.execute(
@@ -904,35 +911,80 @@ def set_chat_active_leaf(user_id: str, chat_id: str, leaf_uid: str | None) -> bo
     return cur.rowcount > 0
 
 
-def delete_chat(user_id: str, chat_id: str) -> bool:
+def _doomed_files(where: str, params: dict) -> tuple[list, list, list]:
+    """Image, attachment and webpage-site rows matching `where`, read before a delete."""
     conn = get_conn()
-    doomed = conn.execute(
-        "SELECT id, mime FROM images WHERE chat_id = :chat_id AND user_id = :user_id",
-        {"chat_id": chat_id, "user_id": user_id},
-    ).fetchall()
-    doomed_attachments = conn.execute(
-        "SELECT id, filename FROM attachments"
-        " WHERE chat_id = :chat_id AND user_id = :user_id",
-        {"chat_id": chat_id, "user_id": user_id},
-    ).fetchall()
-    cur = conn.execute(
-        "DELETE FROM chats WHERE id = :id AND user_id = :user_id",
-        {"id": chat_id, "user_id": user_id},
+    return (
+        conn.execute(f"SELECT id, mime FROM images WHERE {where}", params).fetchall(),
+        conn.execute(f"SELECT id, filename FROM attachments WHERE {where}", params).fetchall(),
+        conn.execute(f"SELECT id FROM webpage_sites WHERE {where}", params).fetchall(),
     )
-    conn.commit()
+
+
+def _remove_files(images: list, attachments: list, sites: list) -> None:
+    """Delete the on-disk side of rows that ON DELETE CASCADE already dropped.
+
+    The rows go with their chat or user; the files, site folders and site
+    containers need explicit cleanup so a deletion leaves no orphan bytes.
+    """
+    for row in images:
+        try:
+            image_file_path(row["id"], row["mime"]).unlink(missing_ok=True)
+        except OSError:
+            pass
+    for row in attachments:
+        try:
+            attachment_file_path(row["id"], row["filename"]).unlink(missing_ok=True)
+        except OSError:
+            pass
+    if sites:
+        # Imported here: sitebox imports this module, so a module-level import
+        # would be circular.
+        from app import sitebox
+
+        for row in sites:
+            sitebox.destroy_site(row["id"])
+
+
+def delete_chat(user_id: str, chat_id: str) -> bool:
+    """Delete one chat with its messages, files, images and webpage.
+
+    Removing the webpage's container can take a while, so async callers run
+    this in a worker thread.
+    """
+    conn = get_conn()
+    with _conn_lock:
+        doomed = _doomed_files(
+            "chat_id = :chat_id AND user_id = :user_id",
+            {"chat_id": chat_id, "user_id": user_id},
+        )
+        cur = conn.execute(
+            "DELETE FROM chats WHERE id = :id AND user_id = :user_id",
+            {"id": chat_id, "user_id": user_id},
+        )
+        conn.commit()
     if cur.rowcount > 0:
-        # Image/attachment rows go with the chat via ON DELETE CASCADE; the
-        # files need explicit cleanup so deleted chats leave no orphan bytes.
-        for row in doomed:
-            try:
-                image_file_path(row["id"], row["mime"]).unlink(missing_ok=True)
-            except OSError:
-                pass
-        for row in doomed_attachments:
-            try:
-                attachment_file_path(row["id"], row["filename"]).unlink(missing_ok=True)
-            except OSError:
-                pass
+        _remove_files(*doomed)
+    return cur.rowcount > 0
+
+
+def delete_user(user_id: str) -> bool:
+    """Delete an account and everything linked to it.
+
+    ON DELETE CASCADE drops the sessions, chats (and their messages), memories,
+    Google grants, sent-draft and deleted-event markers, and the image,
+    attachment and webpage-site rows. oauth_states has no foreign key, so its
+    rows go explicitly. Revoking the Google tokens with Google is the caller's
+    job (google_oauth.revoke_grants), since it needs the tokens this deletes.
+    """
+    conn = get_conn()
+    with _conn_lock:
+        doomed = _doomed_files("user_id = :user_id", {"user_id": user_id})
+        conn.execute("DELETE FROM oauth_states WHERE user_id = :user_id", {"user_id": user_id})
+        cur = conn.execute("DELETE FROM users WHERE id = :user_id", {"user_id": user_id})
+        conn.commit()
+    if cur.rowcount > 0:
+        _remove_files(*doomed)
     return cur.rowcount > 0
 
 

@@ -168,3 +168,18 @@ def test_container_symlinks_are_dropped_so_git_can_stage(site):
     # the file tree, the preview and the commit never meet it.
     assert not os.path.lexists(workspace / "CLAUDE.md")
     assert webpage_git.commit_workspace(site, origin="ai", label="", message_uid="r1")
+
+
+def test_destroy_site_removes_container_volume_and_folder(site):
+    """What chat and account deletion rely on: nothing of the site survives."""
+    workspace = sitebox.workspace_dir(site["id"])
+    code, output = sitebox.run_command(site, "printf hi > index.html", 60)
+    assert code == 0, output
+    assert _status(site["id"]) == "running"
+
+    sitebox.destroy_site(site["id"])
+
+    assert _cli("container", "exists", f"capweb-{site['id']}").returncode != 0
+    assert _cli("volume", "exists", f"capweb-nm-{site['id']}").returncode != 0
+    assert not workspace.exists()
+    assert site["id"] not in sitebox.last_used

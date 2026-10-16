@@ -17,6 +17,7 @@ and everything read-only keeps working because it never touches the container.
 
 import hashlib
 import json
+import logging
 import os
 import shlex
 import shutil
@@ -27,6 +28,8 @@ import time
 from pathlib import Path
 
 from app import config, db
+
+logger = logging.getLogger(__name__)
 
 IMAGE_REPO = "cappuccina-site"
 # Absolute and cwd-independent: the backend may be started from anywhere.
@@ -473,6 +476,49 @@ def stop_idle() -> None:
             continue
         _run(["stop", _container_name(site_id)], timeout=MACHINE_START_TIMEOUT)
         del last_used[site_id]
+
+
+def remove_container(site_id: str) -> bool:
+    """Remove the site's container and its node_modules volume; True on success.
+
+    `rm -f` and `volume rm -f` succeed (or fail harmlessly) when either is
+    already gone. Never raises: an engine that stays unreachable after the
+    machine start returns False so the caller can log the leak and carry on.
+    """
+    last_used.pop(site_id, None)
+    try:
+        _cli(["rm", "-f", _container_name(site_id)], timeout=MACHINE_START_TIMEOUT)
+        _cli(["volume", "rm", "-f", f"capweb-nm-{site_id}"], timeout=60)
+    except SiteboxUnavailable:
+        return False
+    return True
+
+
+def _make_writable_and_retry(func, path, _exc) -> None:
+    """rmtree hook: git marks its object files read-only, which Windows refuses to unlink."""
+    os.chmod(path, stat.S_IWRITE)
+    func(path)
+
+
+def destroy_site(site_id: str) -> None:
+    """Delete everything a site owns: container, volume and workspace folder.
+
+    Used when its chat (or its whole account) is deleted, so nothing of the
+    page is left on disk or in the engine. Best-effort and never raises.
+    """
+    if not remove_container(site_id):
+        logger.warning("Could not remove the container for site %s", site_id)
+    workspace = sites_root() / site_id[:2] / site_id
+    try:
+        shutil.rmtree(workspace, onexc=_make_writable_and_retry)
+    except FileNotFoundError:
+        pass
+    except OSError:
+        logger.warning("Could not remove the workspace folder for site %s", site_id)
+    try:
+        workspace.parent.rmdir()  # the shard bucket, once it is empty
+    except OSError:
+        pass
 
 
 def finalize_run(

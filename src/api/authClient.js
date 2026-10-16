@@ -33,6 +33,8 @@ export const setAdultMode = (enabled) =>
   request('/api/v1/auth/me', { method: 'PATCH', body: { adultMode: enabled } })
 export const setMemoryEnabled = (enabled) =>
   request('/api/v1/auth/me', { method: 'PATCH', body: { memoryEnabled: enabled } })
+// Deletes the account and everything linked to it; the server clears the cookie.
+export const deleteAccount = () => request('/api/v1/auth/me', { method: 'DELETE' })
 
 // Sign-in is a full-page redirect (cookie is set by the OAuth callback).
 export const googleSignInUrl = '/api/v1/auth/google/start'

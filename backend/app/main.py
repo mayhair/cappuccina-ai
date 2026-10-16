@@ -681,6 +681,20 @@ async def update_me(
     return _user_response(db.get_user_by_id(user["id"]))
 
 
+@app.delete("/api/v1/auth/me")
+async def delete_me(response: Response, user=Depends(current_user)) -> dict:
+    """Delete the account and everything linked to it, then sign out.
+
+    Google tokens are revoked first, while they are still stored. Both steps
+    run in worker threads: revoking calls Google, and removing webpage
+    containers shells out to the container CLI.
+    """
+    await asyncio.to_thread(google_oauth.revoke_grants, user["id"])
+    await asyncio.to_thread(db.delete_user, user["id"])
+    clear_session_cookie(response)
+    return {"ok": True}
+
+
 # ---------- memories (the Settings > Memory manager) ----------
 # The agent's memory tools write the same rows; both go through
 # memory_rules.validate, so the content rules are identical either way.
@@ -934,7 +948,8 @@ async def rename_chat(chat_id: str, req: RenameChatRequest, user=Depends(current
 
 @app.delete("/api/v1/chats/{chat_id}")
 async def delete_chat(chat_id: str, user=Depends(current_user)) -> dict:
-    if not db.delete_chat(user["id"], chat_id):
+    # A worker thread: removing the chat's webpage container shells out to the CLI.
+    if not await asyncio.to_thread(db.delete_chat, user["id"], chat_id):
         raise HTTPException(status_code=404, detail="Chat not found")
     return {"ok": True}
 

@@ -176,6 +176,15 @@ export default function App() {
     setAuthPhase('landing')
   }
 
+  // Same exit as signing out; the server already cleared the session cookie.
+  const handleAccountDeleted = () => {
+    tts.stop()
+    setSettingsOpen(false)
+    setSettingsSection('')
+    setUser(null)
+    setAuthPhase('landing')
+  }
+
   if (!user) {
     if (authPhase === 'checking') {
       return (
@@ -284,6 +293,7 @@ export default function App() {
           setCalendarNotice('')
         }}
         onUserUpdated={setUser}
+        onAccountDeleted={handleAccountDeleted}
         gmailNotice={gmailNotice}
         onGmailNoticeClear={() => setGmailNotice('')}
         calendarNotice={calendarNotice}

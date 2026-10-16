@@ -31,6 +31,7 @@ from app.config import (
 GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
 GOOGLE_USERINFO_URL = "https://openidconnect.googleapis.com/v1/userinfo"
+GOOGLE_REVOKE_URL = "https://oauth2.googleapis.com/revoke"
 
 # Refresh a little early so a token can't expire mid-request.
 _EXPIRY_SKEW = timedelta(seconds=60)
@@ -177,6 +178,22 @@ def store_grant(user_id: str, service: str, payload: dict) -> None:
         refresh_token=encrypt_token(payload.get("refresh_token", "")),
         expires_at=_expiry_from(payload),
     )
+
+
+def revoke_grants(user_id: str) -> None:
+    """Ask Google to revoke every token the user granted us (account deletion).
+
+    Best-effort: a token Google already dropped, or a network failure, must
+    not block the deletion, which removes the stored tokens either way.
+    Revoking the refresh token ends the whole grant, access tokens included.
+    """
+    for grant in db.list_google_grants(user_id):
+        try:
+            token = decrypt_token(grant["refresh_token"]) or decrypt_token(grant["access_token"])
+            if token:
+                httpx.post(GOOGLE_REVOKE_URL, data={"token": token}, timeout=TIMEOUT)
+        except (GoogleOAuthError, GoogleNotConfigured, httpx.HTTPError):
+            continue
 
 
 def get_access_token(user_id: str, service: str) -> str:
