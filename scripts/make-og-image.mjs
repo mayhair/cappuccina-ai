@@ -1,5 +1,5 @@
 // Renders the link-preview card (Open Graph / Twitter / Discord embed) into
-// assets/og-image.jpg at 1200x630.
+// assets/og-image.png at 1200x630.
 // Run with: node scripts/make-og-image.mjs
 // The card is laid out as HTML in headless Chromium (the playwright
 // devDependency) so it uses the app's own fonts, colours and plates.
@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
-const outPath = join(root, 'assets', 'og-image.jpg')
+const outPath = join(root, 'assets', 'og-image.png')
 
 async function dataUrl(rel, type) {
   const bytes = await readFile(join(root, rel))
@@ -130,6 +130,6 @@ const browser = await chromium.launch()
 const page = await browser.newPage({ viewport: { width: 1200, height: 630 }, deviceScaleFactor: 1 })
 await page.setContent(html, { waitUntil: 'networkidle' })
 await page.evaluate(() => document.fonts.ready)
-await page.screenshot({ path: outPath, type: 'jpeg', quality: 90 })
+await page.screenshot({ path: outPath, type: 'png' })
 await browser.close()
 console.log(`Wrote ${outPath}`)
