@@ -53,6 +53,11 @@ CHARACTER_REF_IMAGES = os.getenv("CHARACTER_REF_IMAGES", "1").strip().lower() no
 # Reads assistant replies aloud. POST https://api.fish.audio/v1/tts is proxied
 # behind /api/v1/tts (see app/tts.py). Leave FISH_API_KEY empty to disable TTS
 # (the endpoint answers 503 and the frontend silently skips speaking).
+# TTS_ENABLED switches it off even with a key: voice replies are paused because
+# Fish Audio may train on the text it receives, which can include Gmail and
+# Calendar details. The frontend hides the switch too (VOICE_REPLIES_AVAILABLE
+# in src/App.jsx).
+TTS_ENABLED = False
 FISH_API_KEY = os.getenv("FISH_API_KEY", "")
 FISH_TTS_REFERENCE_ID = os.getenv(
     "FISH_TTS_REFERENCE_ID", "e9f4485fdde24821835dfe129d3c22b0"

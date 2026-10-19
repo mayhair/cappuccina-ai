@@ -29,6 +29,7 @@ def fish_ok(monkeypatch):
     client = httpx.AsyncClient(transport=_mock_transport(b"ID3mp3-frame"))
     monkeypatch.setattr(tts.httpx, "AsyncClient", lambda **kwargs: client)
     monkeypatch.setattr(config, "FISH_API_KEY", "test-fish-key")
+    monkeypatch.setattr(config, "TTS_ENABLED", True)
     yield
     tts._pending.clear()
 
@@ -45,6 +46,7 @@ def fish_down(monkeypatch):
     client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
     monkeypatch.setattr(tts.httpx, "AsyncClient", lambda **kwargs: client)
     monkeypatch.setattr(config, "FISH_API_KEY", "test-fish-key")
+    monkeypatch.setattr(config, "TTS_ENABLED", True)
     yield
 
 
@@ -94,8 +96,16 @@ def test_tts_upstream_error_becomes_502(signed_in, fish_down):
     assert "402" in response.json()["detail"]
 
 
+def test_tts_is_off_by_default(signed_in, monkeypatch):
+    monkeypatch.setattr(config, "FISH_API_KEY", "test-fish-key")
+    response = signed_in.post("/api/v1/tts", json={"text": "hello"})
+    assert response.status_code == 503
+
+
 def test_tts_without_api_key_is_503(signed_in, monkeypatch):
     import app.main as main
+
+    monkeypatch.setattr(config, "TTS_ENABLED", True)
 
     monkeypatch.setattr(config, "FISH_API_KEY", "")
     monkeypatch.setattr(main, "FISH_API_KEY", "")

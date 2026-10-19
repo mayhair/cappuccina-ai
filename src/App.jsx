@@ -17,6 +17,11 @@ import tts from './lib/tts'
 import { setManifestEnabled } from './lib/pwa'
 import { useLanguage } from './i18n/LanguageProvider'
 
+// Voice replies are paused: Fish Audio may train on the text it receives,
+// which can include Gmail and Calendar details. The backend refuses TTS too
+// (TTS_ENABLED in backend/app/config.py). Flip both to bring them back.
+const VOICE_REPLIES_AVAILABLE = false
+
 export default function App() {
   const { t } = useLanguage()
   // The stored preference: 'light', 'dark' or 'system' (follow the OS).
@@ -38,8 +43,12 @@ export default function App() {
     if (pageBg) document.querySelector('meta[name="theme-color"]')?.setAttribute('content', pageBg)
   }, [theme])
 
-  // Voice replies (TTS) are off until the user opts in.
-  const [voice, setVoice] = useState(() => localStorage.getItem('cappuccina-voice') === '1')
+  // Voice replies (TTS) are off until the user opts in. While
+  // VOICE_REPLIES_AVAILABLE is false they stay off and the switches are hidden.
+  const [voice, setVoice] = useState(
+    () => VOICE_REPLIES_AVAILABLE && localStorage.getItem('cappuccina-voice') === '1',
+  )
+  const onVoice = VOICE_REPLIES_AVAILABLE ? setVoice : null
 
   useEffect(() => {
     localStorage.setItem('cappuccina-voice', voice ? '1' : '0')
@@ -337,7 +346,7 @@ export default function App() {
         theme={themePref}
         onTheme={setThemePref}
         voice={voice}
-        onVoice={setVoice}
+        onVoice={onVoice}
       />
 
       <main className="main">
@@ -376,7 +385,7 @@ export default function App() {
               theme={themePref}
               onTheme={setThemePref}
               voice={voice}
-              onVoice={setVoice}
+              onVoice={onVoice}
               onSettings={() => setSettingsOpen(true)}
             />
           </div>

@@ -42,7 +42,7 @@ To turn on Adult mode, you enter your birthday. Your browser checks it, and **yo
 ### Voice
 
 - **Talking to Cappuccina:** voice typing uses your browser's built-in speech recognition. We only receive the text. Your browser may send your voice to its maker to turn it into text. For example, Google Chrome sends it to Google.
-- **Read aloud:** when you press the speaker button, we send the text of that reply to our voice provider to turn it into audio.
+- **Voice replies are turned off for now.** Before that, when voice replies were on, we sent the text of each reply to our voice provider, Fish Audio, to turn it into audio. Fish Audio's [terms](https://fish.audio/terms/) let it keep that text and use it to train its AI models, and we can't delete it for you. We turned the feature off so that this no longer happens. We won't turn it back on until we have a voice provider that doesn't store your text or train on it.
 
 ### Technical information
 
@@ -68,7 +68,7 @@ Cappuccina's use and transfer of information received from Google APIs follows t
 
 - We only use your Gmail and Calendar data to provide the features you use in Cappuccina.
 - We don't use it for ads, sell it, or use it to train AI models.
-- When you ask Cappuccina about your emails or calendar, the parts she reads are sent to our AI provider (OpenRouter and the zero-data-retention model providers in section 4) so she can write her reply. If you ask her to read that reply aloud, its text goes to Fish Audio. These providers don't store this data or use it to train AI models.
+- When you ask Cappuccina about your emails or calendar, the parts she reads are sent to our AI provider (OpenRouter and the zero-data-retention model providers in section 4) so she can write her reply. These providers don't store this data or use it to train AI models.
 - Nobody reads it, unless you give us permission, it's needed for security or to follow the law, or the data has been made anonymous.
 
 ## 4. Who we share your information with
@@ -81,7 +81,6 @@ We share information only with the service providers below, and only what they n
 | **AI model providers** chosen by OpenRouter | Run the AI model (currently GLM 5.3 Flash) that writes Cappuccina's replies and chat titles. OpenRouter picks one of the [providers for this model](https://openrouter.ai/z-ai/glm-5.3-flash/providers) that offer zero data retention, mostly in the United States. | The same as OpenRouter |
 | **OpenAI** | Creates and edits images. OpenAI doesn't train on this data. It [keeps it for up to 30 days](https://developers.openai.com/api/docs/guides/your-data) to check for misuse, unless the law or safety needs require keeping it longer. | Your image request, and any image you ask her to edit |
 | **Parallel Web Systems** | Web search and reading webpages | The search words Cappuccina uses for your question, the addresses (URLs) of webpages she reads, and what she is looking for on those pages |
-| **Fish Audio** | Reads replies aloud | The text of the reply you want to hear |
 | **Google** | Sign-in, Gmail and Calendar | What's needed to sign you in and to do what you asked in Gmail or Calendar |
 | **FMHY guide server** (fmhy-mcp.ken.tools) | Looks up free-media sites | The search words Cappuccina uses |
 | **Cloudflare** | Delivers the website and protects it | Your requests to Cappuccina, including your IP address |

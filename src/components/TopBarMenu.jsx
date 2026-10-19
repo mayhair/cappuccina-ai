@@ -43,9 +43,11 @@ export function TopBarMenu({ theme, onTheme, voice, onVoice, onSettings }) {
           <div className="top-menu-pop" role="dialog" aria-label={t('app.moreOptions')}>
             <p className="top-menu-label">{t('theme.group')}</p>
             <ThemeChoice value={theme} onChange={onTheme} />
-            <div className="top-menu-row">
-              <VoiceSwitch enabled={voice} onChange={onVoice} />
-            </div>
+            {onVoice && (
+              <div className="top-menu-row">
+                <VoiceSwitch enabled={voice} onChange={onVoice} />
+              </div>
+            )}
             <div className="top-menu-sep" />
             <button
               type="button"

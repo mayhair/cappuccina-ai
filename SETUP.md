@@ -107,7 +107,7 @@ nano .env
 | `OPENROUTER_API_KEY`   | Yes        | Chat model + reasoning (via OpenRouter)                      |
 | `OPENAI_API_KEY`       | For images | Image generation tool; chat works without it                 |
 | `PARALLEL_API_KEY`     | For search | Web-search tool; chat works without it                       |
-| `FISH_API_KEY`         | For voice  | Fish Audio key; reads replies aloud (speaker icon); optional |
+| `FISH_API_KEY`         | For voice  | Fish Audio key; reads replies aloud. Voice is paused, see below |
 | `MODEL_ID`             | No         | Defaults to `z-ai/glm-5.3-flash` (OpenRouter)                |
 | `GOOGLE_CLIENT_ID`     | Yes        | Google OAuth web client (see §4)                             |
 | `GOOGLE_CLIENT_SECRET` | Yes        | Google OAuth web client (see §4)                             |
@@ -121,6 +121,20 @@ nano .env
 
 `.env` is gitignored — never commit it. Every variable with its default and a
 one-line explanation is commented in `backend/.env.example`.
+
+**Voice replies are paused.** Fish Audio's terms let it train on the text it
+receives, and a reply can include Gmail or Calendar details, which Google's
+Limited Use rules don't allow. So voice is off in code, even when
+`FISH_API_KEY` is set. To turn it back on, change both switches:
+
+- `TTS_ENABLED = True` in `backend/app/config.py`. While it is `False`,
+  `POST /api/v1/tts` answers 503 and nothing is sent to Fish Audio.
+- `VOICE_REPLIES_AVAILABLE = true` in `src/App.jsx`. While it is `false`, the
+  "Read replies aloud" switch is hidden in the ⋯ menu and in Settings, and
+  voice replies stay off.
+
+Before you do, use a voice provider (or Fish Audio plan) that doesn't store or
+train on the text. Then add the provider back to `legal/privacy-policy.md`.
 
 ## 4. Google Cloud setup (sign-in + Gmail)
 

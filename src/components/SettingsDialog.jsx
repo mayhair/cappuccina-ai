@@ -569,7 +569,7 @@ export function SettingsDialog({
   theme = 'system',
   onTheme = () => {},
   voice = false,
-  onVoice = () => {},
+  onVoice = null,
 }) {
   const { lang, setLang, t } = useLanguage()
   const [section, setSection] = useState('account')
@@ -677,13 +677,15 @@ export function SettingsDialog({
               <p className="settings-hint">{t('settings.appearance.themeHint')}</p>
             </div>
           </section>
-          <section className="settings-section">
-            <h4>{t('settings.appearance.voice')}</h4>
-            <div className="settings-form">
-              <VoiceSwitch enabled={voice} onChange={onVoice} />
-              <p className="settings-hint">{t('settings.appearance.voiceHint')}</p>
-            </div>
-          </section>
+          {onVoice && (
+            <section className="settings-section">
+              <h4>{t('settings.appearance.voice')}</h4>
+              <div className="settings-form">
+                <VoiceSwitch enabled={voice} onChange={onVoice} />
+                <p className="settings-hint">{t('settings.appearance.voiceHint')}</p>
+              </div>
+            </section>
+          )}
         </>
       ),
     },

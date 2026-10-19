@@ -29,7 +29,7 @@ from agent.tools import (
     _webpage_path,
     validate_webpage_write,
 )
-from app import calendar, db, documents, gmail, google_oauth, sitebox, tts, webpage_git
+from app import calendar, config, db, documents, gmail, google_oauth, sitebox, tts, webpage_git
 from app.auth import (
     clear_session_cookie,
     current_user,
@@ -1851,6 +1851,8 @@ async def chat_stream(req: ChatRequest, user=Depends(current_user)):
 async def start_tts(req: TtsRequest, user=Depends(current_user)) -> TtsJobResponse:
     """Register the text for speech synthesis. Returns a job id whose audio
     /api/v1/tts/{id} streams as audio/mpeg (fetchable once)."""
+    if not config.TTS_ENABLED:
+        raise HTTPException(status_code=503, detail="Text-to-speech is turned off")
     if not FISH_API_KEY:
         raise HTTPException(status_code=503, detail="Text-to-speech is not configured")
     return TtsJobResponse(id=tts.create_job(user["id"], req.text))
