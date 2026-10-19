@@ -172,6 +172,7 @@ export default {
   'settings.connections.disconnecting': "Disconnect ho raha hai…",
   'settings.connections.disconnect': "{service} ko disconnect karein",
   'settings.connections.connect': "{service} ko connect karein",
+  'settings.connections.testingNote': "Abhi yeh testing app hai, is liye inhein istemal karne ke liye aap ko creator se mahaer.mahmud@gmail.com par khud rabta karna hoga.",
   'settings.connections.gmailDesc': "Cappuccina ko apna inbox parhne aur email ke musawwaday likhne dein. Woh kabhi email bhej nahi sakti — har musawwada aap ke Bhejein dabane ka intezar karta hai.",
   'settings.connections.calendarDesc': "Cappuccina ko apna schedule dekhne aur aap ke liye events shamil ya tarmeem karne dein. Woh apne tor par koi event delete nahi kar sakti — pehle aap se tasdeeq mangti hai.",
 

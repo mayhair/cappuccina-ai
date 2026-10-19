@@ -2712,6 +2712,16 @@ html[dir='rtl'] .modal-danger-list { padding: 0.8rem 2.2rem 0.8rem 1rem; }
   color: var(--ink-soft);
   max-width: 46ch;
 }
+.settings-testing-note {
+  margin: 0 0 1.2rem;
+  padding: 0.9rem 1.1rem;
+  border: 2px solid var(--danger);
+  border-radius: 12px;
+  font-size: 17px;
+  font-weight: 700;
+  line-height: 1.4;
+  color: var(--ink);
+}
 .settings-status {
   display: flex;
   align-items: center;

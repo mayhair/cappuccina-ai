@@ -173,6 +173,7 @@ export default {
   'settings.connections.disconnecting': "منقطع ہو رہا ہے…",
   'settings.connections.disconnect': "{service} کو منقطع کریں",
   'settings.connections.connect': "{service} کو منسلک کریں",
+  'settings.connections.testingNote': "فی الحال یہ ایک ٹیسٹنگ ایپ ہے، اس لیے انہیں استعمال کرنے کے لیے آپ کو خود تخلیق کار سے mahaer.mahmud@gmail.com پر رابطہ کرنا ہوگا۔",
   'settings.connections.gmailDesc': "کیپوچینا کو اپنا ان باکس پڑھنے اور ای میل کے مسودے لکھنے دیں۔ وہ کبھی ای میل بھیج نہیں سکتی — ہر مسودہ آپ کے بھیجیں دبانے کا انتظار کرتا ہے۔",
   'settings.connections.calendarDesc': "کیپوچینا کو اپنا شیڈول دیکھنے اور آپ کے لیے ایونٹس شامل یا ترمیم کرنے دیں۔ وہ اپنے طور پر کوئی ایونٹ حذف نہیں کر سکتی — پہلے آپ سے تصدیق مانگتی ہے۔",
 

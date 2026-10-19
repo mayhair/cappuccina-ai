@@ -29,6 +29,7 @@ import {
   promptInstall,
   platformHint,
 } from '../lib/pwa'
+import { SHOW_CONNECTIONS_TESTING_NOTE } from '../config'
 import { connectGmailUrl, disconnectGmail, gmailStatus } from '../api/gmailClient'
 import {
   connectCalendarUrl,
@@ -471,6 +472,15 @@ function CalendarForm({ user, notice, onNoticeClear, onUserUpdated }) {
   )
 }
 
+function TestingNote() {
+  const { t } = useLanguage()
+  return (
+    <p className="settings-testing-note" role="note">
+      {t('settings.connections.testingNote')}
+    </p>
+  )
+}
+
 function InstallForm() {
   const { t } = useLanguage()
   const { installed, canPrompt } = useSyncExternalStore(subscribeInstall, getInstallSnapshot)
@@ -613,6 +623,7 @@ export function SettingsDialog({
       content: (
         <>
           <h3 className="settings-heading">{t('settings.nav.connections')}</h3>
+          {SHOW_CONNECTIONS_TESTING_NOTE && <TestingNote />}
           <section className="settings-section">
             <h4>{t('settings.connections.gmail')}</h4>
             <GmailForm

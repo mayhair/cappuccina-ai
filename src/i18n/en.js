@@ -174,6 +174,7 @@ export default {
   'settings.connections.disconnecting': "Disconnecting…",
   'settings.connections.disconnect': "Disconnect {service}",
   'settings.connections.connect': "Connect {service}",
+  'settings.connections.testingNote': "For now, since this is a testing app, you’ll need to manually contact the creator at mahaer.mahmud@gmail.com in order to actually use these.",
   'settings.connections.gmailDesc': "Let Cappuccina read your inbox and write email drafts. She can never send email — every draft waits for you to press Send.",
   'settings.connections.calendarDesc': "Let Cappuccina see your schedule and add or edit events for you. She can never delete an event on her own — she asks you to confirm first.",
 
