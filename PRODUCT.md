@@ -12,7 +12,7 @@ React + Vite (user-selected from options; UI mockup first, real backend later)
 
 ## Users
 
-Primary users: secondary schoolers — tweens and early teens (~11–15). They use it in casual at-home or study situations: open-ended chat about anything (questions, boredom, feelings, curiosity), and on-demand tutoring. They are already fluent with modern chat interfaces (ChatGPT-like) and expect that grammar; they respond to a friendly, characterful presence rather than a sterile tool.
+Primary users: secondary schoolers and teens (13+). They use it in casual at-home or study situations: open-ended chat about anything (questions, boredom, feelings, curiosity), and on-demand tutoring. They are already fluent with modern chat interfaces (ChatGPT-like) and expect that grammar; they respond to a friendly, characterful presence rather than a sterile tool.
 
 ## Product Purpose
 
