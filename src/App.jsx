@@ -114,6 +114,42 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKey)
   }, [isMobile, collapsed])
 
+  // Swipe to open/close the drawer on mobile. Opening starts at the screen edge
+  // the drawer lives on (so it never fights with scrolling content); closing
+  // can start anywhere. Mirrored for right-to-left languages.
+  useEffect(() => {
+    if (!isMobile) return
+    const EDGE = 32
+    const MIN_DX = 60
+    let start = null
+    const onStart = (e) => {
+      if (e.touches.length !== 1) { start = null; return }
+      const { clientX: x, clientY: y } = e.touches[0]
+      const rtl = document.documentElement.dir === 'rtl'
+      const nearEdge = rtl ? window.innerWidth - x <= EDGE : x <= EDGE
+      start = collapsed && !nearEdge ? null : { x, y, rtl }
+    }
+    const onEnd = (e) => {
+      if (!start) return
+      const { clientX: x, clientY: y } = e.changedTouches[0]
+      const dx = (x - start.x) * (start.rtl ? -1 : 1) // positive = toward the content
+      const dy = y - start.y
+      start = null
+      if (Math.abs(dx) < MIN_DX || Math.abs(dx) < Math.abs(dy) * 1.5) return
+      if (collapsed && dx > 0) setCollapsed(false)
+      else if (!collapsed && dx < 0) setCollapsed(true)
+    }
+    const cancel = () => { start = null }
+    window.addEventListener('touchstart', onStart, { passive: true })
+    window.addEventListener('touchend', onEnd, { passive: true })
+    window.addEventListener('touchcancel', cancel, { passive: true })
+    return () => {
+      window.removeEventListener('touchstart', onStart)
+      window.removeEventListener('touchend', onEnd)
+      window.removeEventListener('touchcancel', cancel)
+    }
+  }, [isMobile, collapsed])
+
   const [user, setUser] = useState(null)
   const [authPhase, setAuthPhase] = useState('checking') // checking | landing
   const [authError, setAuthError] = useState('')
