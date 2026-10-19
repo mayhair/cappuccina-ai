@@ -1,18 +1,18 @@
 # Cappuccina Terms of Service
 
-**Draft — not yet in effect**  
-Effective date: [EFFECTIVE DATE]  
-Last updated: [LAST UPDATED]
+Effective date: 20 October 2026  
+Last updated: 19 October 2026
 
 Welcome to Cappuccina! These Terms of Service ("Terms") are the rules for using Cappuccina, the AI chatbot at [cappuccina.mayhair.net](https://cappuccina.mayhair.net) (the "Service"). Cappuccina is run by Mahaer Mahmud, an individual based in Pakistan ("we", "us" or "our").
 
 Please read these Terms carefully. By signing in or using Cappuccina, you agree to them. If you don't agree, please don't use the Service.
 
-Our [Privacy Policy](privacy-policy.md) explains what information we collect and how we use it. It is part of these Terms.
+Our [Privacy Policy](https://cappuccina.mayhair.net/privacy) explains what information we collect and how we use it. It is part of these Terms.
 
 ## 1. Who can use Cappuccina
 
 - You must be **13 or older** to use Cappuccina.
+- If you are under 18, ask your parent or legal guardian to read these Terms with you. You need their permission to use Cappuccina.
 - If the law where you live sets a higher minimum age for using an online service like this on your own, you must meet that age.
 - **Adult mode** is only for people **18 or older**. Don't turn it on if you're younger, and don't give a false birthday.
 - You can't use Cappuccina if we have closed your account before, or if the law doesn't allow you to use it.

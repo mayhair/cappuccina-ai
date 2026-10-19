@@ -57,6 +57,13 @@ export function LandingPage({ theme, onTheme, error }) {
 
           <div className="landing-actions">
             <GoogleButton label={t('landing.google')} />
+            <p className="landing-legal">
+              {t('landing.legal.before')}
+              <a href="/terms" target="_blank" rel="noopener">{t('landing.legal.terms')}</a>
+              {t('landing.legal.and')}
+              <a href="/privacy" target="_blank" rel="noopener">{t('landing.legal.privacy')}</a>
+              {t('landing.legal.after')}
+            </p>
           </div>
 
           {error && (

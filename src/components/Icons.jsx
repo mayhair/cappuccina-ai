@@ -366,3 +366,12 @@ export function MonitorIcon(props) {
     </svg>
   )
 }
+
+export function DocumentIcon(props) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <path d="M7 3h7l5 5v11a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z" />
+      <path d="M14 3v5h5M9 13h6M9 17h4" />
+    </svg>
+  )
+}

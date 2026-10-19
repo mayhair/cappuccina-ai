@@ -77,8 +77,15 @@ def make_model(reasoning: str = DEFAULT_REASONING, tools=None, model_id: str = "
     if reasoning:
         extra_body["reasoning"] = {"effort": reasoning}
 
-    extra_body["preferred_min_throughput"] = {"p75": 35}
-    extra_body["allow_fallbacks"] = True
+    # Provider routing. `zdr` and `data_collection: deny` restrict routing to
+    # providers that neither keep nor train on prompts, which the Privacy
+    # Policy promises; they must stay on for every request.
+    extra_body["provider"] = {
+        "zdr": True,
+        "data_collection": "deny",
+        "preferred_min_throughput": {"p75": 35},
+        "allow_fallbacks": True,
+    }
 
     model = OpenRouterChatModel(
         model=model_id or MODEL_ID,

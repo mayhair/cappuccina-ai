@@ -13,6 +13,7 @@ import {
   CheckIcon,
   DownloadIcon,
   TrashIcon,
+  DocumentIcon,
 } from './Icons'
 import { EmojiText } from '../lib/emoji'
 import { LanguagePicker } from './LanguagePicker'
@@ -711,6 +712,35 @@ export function SettingsDialog({
             <h4>{t('settings.install.section')}</h4>
             <InstallForm />
           </section>
+        </>
+      ),
+    },
+    {
+      key: 'about',
+      icon: <DocumentIcon />,
+      label: t('settings.nav.about'),
+      content: (
+        <>
+          <h3 className="settings-heading">{t('settings.nav.about')}</h3>
+          <div className="settings-form">
+            {[
+              ['terms', t('settings.about.terms')],
+              ['privacy', t('settings.about.privacy')],
+            ].map(([slug, label]) => (
+              <div key={slug} className="settings-row">
+                <span className="settings-label">{label}</span>
+                <a
+                  className="settings-view"
+                  href={`/${slug}`}
+                  target="_blank"
+                  rel="noopener"
+                  aria-label={`${t('settings.about.view')}: ${label}`}
+                >
+                  {t('settings.about.view')}
+                </a>
+              </div>
+            ))}
+          </div>
         </>
       ),
     },

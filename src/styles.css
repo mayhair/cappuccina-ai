@@ -2569,6 +2569,16 @@ html[dir='rtl'] .modal-danger-list { padding: 0.8rem 2.2rem 0.8rem 1rem; }
 }
 .landing-note svg { width: 1em; height: 1em; color: var(--lilac); flex: none; }
 
+.landing-legal {
+  margin: 0;
+  text-align: center;
+  color: var(--ink-faint);
+  font-size: clamp(12px, 0.9vw, 14px);
+  line-height: 1.45;
+}
+.landing-legal a { color: var(--ink-soft); font-weight: 700; }
+.landing-legal a:hover { color: var(--pink-ink); }
+
 .landing-pills {
   display: flex;
   flex-wrap: wrap;
@@ -2713,6 +2723,19 @@ html[dir='rtl'] .modal-danger-list { padding: 0.8rem 2.2rem 0.8rem 1rem; }
 }
 .settings-status svg { width: 17px; height: 17px; color: var(--lilac); flex: none; }
 a.settings-save { text-decoration: none; display: inline-flex; align-items: center; }
+.settings-view {
+  flex: none;
+  padding: 0.45rem 1.1rem;
+  border: 1px solid var(--hairline);
+  border-radius: 999px;
+  color: var(--ink);
+  font-size: 13.5px;
+  font-weight: 700;
+  text-decoration: none;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+.settings-view:hover { background: var(--pink-soak); border-color: var(--pink-strong); }
+.settings-view:focus-visible { outline: 2px solid var(--pink-strong); outline-offset: 2px; }
 .settings-steps {
   margin: 0.5rem 0 0;
   padding-inline-start: 1.3rem;
@@ -3982,6 +4005,11 @@ a.settings-save { text-decoration: none; display: inline-flex; align-items: cent
     width: 100%;
     max-width: none;
   }
+  /* A label and a short link button fit on one line, unlike a label and a field. */
+  .settings-row:has(> .settings-view) {
+    flex-direction: row;
+    align-items: center;
+  }
 }
 
 /* Push a settings detail screen in from the inline end (mirrored for RTL). */
@@ -4076,7 +4104,8 @@ html[lang='ur'] * { letter-spacing: 0 !important; }
 html[lang='ur'] .landing-title,
 html[lang='ur'] .welcome-title { line-height: 1.6; }
 html[lang='ur'] .landing-sub,
-html[lang='ur'] .welcome-sub { line-height: 1.9; }
+html[lang='ur'] .welcome-sub,
+html[lang='ur'] .landing-legal { line-height: 1.9; }
 html[lang='ur'] .modal h2 { line-height: 1.7; }
 /* The disclaimer's tight Latin line height lets Nastaliq's tall letters climb
    into the composer box above it. */
