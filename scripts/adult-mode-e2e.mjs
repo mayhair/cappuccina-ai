@@ -2,6 +2,12 @@ import { chromium } from "playwright";
 
 const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 1536, height: 1024 } });
+// A first visit shows the language picker; pick English up front.
+await page.addInitScript(() => {
+  try {
+    localStorage.setItem("cappuccina-lang", "en");
+  } catch {}
+});
 const errors = [];
 page.on("console", (m) => m.type() === "error" && errors.push(m.text()));
 page.on("pageerror", (e) => errors.push(String(e)));
@@ -58,9 +64,9 @@ const patchOk = patched && patched.adultMode === true && Object.keys(patched).le
 console.log("PATCH carries only adultMode:true:", patchOk);
 
 // persistence: a fresh load reads the flag back from the server
+// The URL still has ?settings=..., so the dialog reopens by itself.
 await page.reload();
-await page.focus('[aria-label="Account options"]');
-await page.click("text=Settings");
+await page.waitForSelector(".settings-veil", { timeout: 5000 });
 await page.click(".settings-nav-item:has-text('Adult mode')");
 await page.waitForSelector("text=Adult mode is on", { timeout: 5000 });
 console.log("still on after reload:", (await page.locator("text=Adult mode is on").count()) === 1);

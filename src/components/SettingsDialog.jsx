@@ -30,6 +30,7 @@ import {
   platformHint,
 } from '../lib/pwa'
 import { SHOW_CONNECTIONS_TESTING_NOTE } from '../config'
+import { saveReturnTo } from '../lib/router'
 import { connectGmailUrl, disconnectGmail, gmailStatus } from '../api/gmailClient'
 import {
   connectCalendarUrl,
@@ -389,6 +390,9 @@ function ConnectionForm({
 
   const connected = status?.connected ?? user[connectedKey]
 
+  // The OAuth round trip ends on "/"; remember the chat to return to.
+  const rememberPlace = () => saveReturnTo(window.location.pathname)
+
   return (
     <div className="settings-form">
       <p className="settings-hint">{description}</p>
@@ -425,7 +429,7 @@ function ConnectionForm({
             {busy ? t('settings.connections.disconnecting') : t('settings.connections.disconnect', { service: serviceName })}
           </button>
         ) : (
-          <a className="settings-save" href={connectUrl}>
+          <a className="settings-save" href={connectUrl} onClick={rememberPlace}>
             {t('settings.connections.connect', { service: serviceName })}
           </a>
         )}
@@ -570,8 +574,12 @@ export function SettingsDialog({
   onUserUpdated,
   // Called once the account is gone (the server has already cleared the cookie).
   onAccountDeleted = () => {},
-  // Section to land on when the dialog opens (e.g. 'memory' from a chat card).
+  // Section the URL asks for (e.g. 'memory' from a chat card); empty means the
+  // first one (the index on mobile). Follows the URL while the dialog is open.
   initialSection = '',
+  // Told when the user picks a section ('' = back to the mobile index), so the
+  // URL can follow.
+  onSectionChange = () => {},
   gmailNotice = '',
   onGmailNoticeClear = () => {},
   calendarNotice = '',
@@ -774,17 +782,39 @@ export function SettingsDialog({
     setView(initialSection ? 'detail' : 'index')
   }, [open])
 
+  // The URL moved to another section while the dialog stayed open.
+  useLayoutEffect(() => {
+    if (!open) return
+    if (initialSection) {
+      setSection(initialSection)
+      setView('detail')
+    } else {
+      setView('index')
+    }
+  }, [initialSection])
+
+  const showSection = (key) => {
+    setSection(key)
+    setView('detail')
+    onSectionChange(key)
+  }
+
+  const showIndex = () => {
+    setView('index')
+    onSectionChange('')
+  }
+
   useEffect(() => {
     if (!open) return
     const esc = (e) => {
       if (e.key !== 'Escape') return
       // On mobile Escape steps back out of the detail screen before closing.
-      if (isMobile && view === 'detail') setView('index')
+      if (isMobile && view === 'detail') showIndex()
       else onClose()
     }
     window.addEventListener('keydown', esc)
     return () => window.removeEventListener('keydown', esc)
-  }, [open, onClose, isMobile, view])
+  }, [open, onClose, isMobile, view, onSectionChange])
 
   // Move focus with the stack: the back button when a section opens, the row
   // that was visited when it closes. The first render is skipped so opening
@@ -835,7 +865,7 @@ export function SettingsDialog({
                   type="button"
                   className="settings-back"
                   aria-label={t('settings.back')}
-                  onClick={() => setView('index')}
+                  onClick={showIndex}
                 >
                   <ArrowLeftIcon />
                   {t('settings.title')}
@@ -857,10 +887,7 @@ export function SettingsDialog({
                       }}
                       type="button"
                       className="settings-index-item"
-                      onClick={() => {
-                        setSection(key)
-                        setView('detail')
-                      }}
+                      onClick={() => showSection(key)}
                     >
                       {icon}
                       <span className="settings-index-label">{label}</span>
@@ -880,7 +907,7 @@ export function SettingsDialog({
                   key={key}
                   type="button"
                   className={`settings-nav-item${section === key ? ' active' : ''}`}
-                  onClick={() => setSection(key)}
+                  onClick={() => showSection(key)}
                 >
                   {icon}
                   {label}

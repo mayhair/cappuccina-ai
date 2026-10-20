@@ -2,8 +2,19 @@ import { chromium } from "playwright";
 
 const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 1536, height: 1024 } });
+// A first visit shows the language picker; pick English up front.
+await page.addInitScript(() => {
+  try {
+    localStorage.setItem("cappuccina-lang", "en");
+  } catch {}
+});
 const errors = [];
-page.on("console", (m) => m.type() === "error" && errors.push(m.text()));
+// "Failed to load resource" is browser noise for endpoints the mocks leave out.
+page.on(
+  "console",
+  (m) =>
+    m.type() === "error" && !m.text().startsWith("Failed to load resource") && errors.push(m.text()),
+);
 page.on("pageerror", (e) => errors.push(String(e)));
 
 await page.route("**/api/v1/auth/me", async (route) => {

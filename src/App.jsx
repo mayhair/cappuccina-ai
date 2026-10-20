@@ -16,14 +16,30 @@ import { useMediaQuery } from './hooks/useMediaQuery'
 import tts from './lib/tts'
 import { setManifestEnabled } from './lib/pwa'
 import { useLanguage } from './i18n/LanguageProvider'
+import {
+  navigate,
+  useLocation,
+  parseRoute,
+  currentRoute,
+  buildUrl,
+  saveReturnTo,
+  takeReturnTo,
+} from './lib/router'
 
 // Voice replies are paused: Fish Audio may train on the text it receives,
 // which can include Gmail and Calendar details. The backend refuses TTS too
 // (TTS_ENABLED in backend/app/config.py). Flip both to bring them back.
 const VOICE_REPLIES_AVAILABLE = false
 
+// The tab title of the landing page and of a new chat (index.html's <title>).
+const BASE_TITLE = document.title
+const TITLE_SUFFIX = 'Ballerina Cappuccina'
+
 export default function App() {
   const { t } = useLanguage()
+  // The URL decides the chat, the canvas and the Settings section.
+  const route = parseRoute(useLocation())
+  const settingsOpen = route.settings != null
   // The stored preference: 'light', 'dark' or 'system' (follow the OS).
   const [themePref, setThemePref] = useState(() => {
     const saved = localStorage.getItem('cappuccina-theme')
@@ -105,13 +121,51 @@ export default function App() {
   // On mobile the sidebar is a drawer: picking a chat or starting a new one
   // closes it so the chat gets the whole screen.
   const handleSelectChat = (id) => {
-    selectChat(id)
+    navigate(buildUrl({ chatId: id }))
     if (isMobile) setCollapsed(true)
   }
 
   const handleNewChat = () => {
-    newChat()
+    // Already on a new chat: nothing to navigate to, just refocus the composer.
+    if (route.chatId === null) inputRef.current?.focus()
+    else navigate('/')
     if (isMobile) setCollapsed(true)
+  }
+
+  // The controller moves the URL itself when a chat gets its server id, when
+  // the open chat is deleted and when a page appears. A pushed canvas entry is
+  // flagged so closing the canvas can step back instead of stacking entries.
+  const handleLocationChange = (url, { replace = false } = {}) => {
+    const canvas = parseRoute(new URL(url, window.location.origin)).canvas
+    navigate(url, { replace, state: !replace && canvas ? { canvasPushed: true } : undefined })
+  }
+
+  const openCanvasPage = () => {
+    const now = currentRoute()
+    if (!now.chatId || now.canvas) return
+    navigate(buildUrl({ ...now, canvas: true }), { state: { canvasPushed: true } })
+  }
+
+  const closeCanvasPage = () => {
+    const now = currentRoute()
+    if (!now.canvas) return
+    if (window.history.state?.canvasPushed) window.history.back()
+    else navigate(buildUrl({ ...now, canvas: false }), { replace: true })
+  }
+
+  // Mobile opens Settings on its index; desktop on the first section.
+  const openSettings = (section) => {
+    const target = section ?? (window.matchMedia('(max-width: 768px)').matches ? '' : 'account')
+    navigate(buildUrl({ ...currentRoute(), settings: target }), { state: { settingsPushed: true } })
+  }
+
+  const closeSettings = () => {
+    if (window.history.state?.settingsPushed) window.history.back()
+    else navigate(buildUrl({ ...currentRoute(), settings: null }), { replace: true })
+  }
+
+  const changeSettingsSection = (section) => {
+    navigate(buildUrl({ ...currentRoute(), settings: section }), { replace: true })
   }
 
   useEffect(() => {
@@ -162,10 +216,6 @@ export default function App() {
   const [user, setUser] = useState(null)
   const [authPhase, setAuthPhase] = useState('checking') // checking | landing
   const [authError, setAuthError] = useState('')
-  const [settingsOpen, setSettingsOpen] = useState(false)
-  // Section Settings opens on; empty means the first one. Set to 'memory' by
-  // the chat's memory card.
-  const [settingsSection, setSettingsSection] = useState('')
   const [gmailNotice, setGmailNotice] = useState('')
   const [calendarNotice, setCalendarNotice] = useState('')
 
@@ -176,14 +226,10 @@ export default function App() {
     const gmail = params.get('gmail')
     const calendar = params.get('calendar')
     if (error) setAuthError(error)
-    if (gmail === 'error' || gmail === 'connected') {
-      setGmailNotice(gmail)
-      setSettingsOpen(true)
-    }
-    if (calendar === 'error' || calendar === 'connected') {
-      setCalendarNotice(calendar)
-      setSettingsOpen(true)
-    }
+    const gmailDone = gmail === 'error' || gmail === 'connected'
+    const calendarDone = calendar === 'error' || calendar === 'connected'
+    if (gmailDone) setGmailNotice(gmail)
+    if (calendarDone) setCalendarNotice(calendar)
     if (error || gmail || calendar) {
       params.delete('auth_error')
       params.delete('gmail')
@@ -191,13 +237,22 @@ export default function App() {
       const qs = params.toString()
       window.history.replaceState({}, '', window.location.pathname + (qs ? `?${qs}` : ''))
     }
+    // Back to the chat the connect button was pressed in, with the result
+    // showing in Settings.
+    if (gmailDone || calendarDone) {
+      navigate(`${takeReturnTo() ?? '/'}?settings=connections`, { replace: true })
+    }
   }, [])
 
   useEffect(() => {
     let canceled = false
     getMe()
       .then((me) => {
-        if (!canceled) setUser(me)
+        if (canceled) return
+        setUser(me)
+        // Signed in again after the landing page bounced a deep link.
+        const back = takeReturnTo()
+        if (back) navigate(back, { replace: true })
       })
       .catch(() => {
         if (!canceled) setAuthPhase('landing')
@@ -207,49 +262,27 @@ export default function App() {
     }
   }, [])
 
+  // The landing page lives at "/" only. Keep a deep link so signing in lands
+  // on it, rather than on a new chat.
+  useEffect(() => {
+    if (user || authPhase !== 'landing') return
+    const { pathname, search } = window.location
+    if (pathname === '/' && !search) return
+    saveReturnTo(pathname + search)
+    navigate('/', { replace: true })
+  }, [user, authPhase])
+
   // The app is installable only for signed-in users, so the manifest link follows the session.
   useEffect(() => {
     setManifestEnabled(Boolean(user))
   }, [user])
 
-  const chat = useChatController(Boolean(user))
-
-  const handleLogout = async () => {
-    tts.stop()
-    await logout()
-    setUser(null)
-    setAuthPhase('landing')
-  }
-
-  // Same exit as signing out; the server already cleared the session cookie.
-  const handleAccountDeleted = () => {
-    tts.stop()
-    setSettingsOpen(false)
-    setSettingsSection('')
-    setUser(null)
-    setAuthPhase('landing')
-  }
-
-  if (!user) {
-    if (authPhase === 'checking') {
-      return (
-        <div className="landing">
-          <Sky theme={theme} />
-        </div>
-      )
-    }
-    return (
-      <div className="landing">
-        <Sky theme={theme} />
-        <LandingPage theme={theme} onTheme={setThemePref} error={authError} />
-        <LanguageGate />
-        <AlphaGate />
-      </div>
-    )
-  }
-
+  const chat = useChatController(Boolean(user), { onLocationChange: handleLocationChange })
   const {
     chats,
+    chatsLoaded,
+    pristineChatId,
+    hasChat,
     activeChat,
     activeChatId,
     draft,
@@ -291,8 +324,96 @@ export default function App() {
     saveFile,
     openCanvas,
     closeCanvas,
-    toggleCanvas,
   } = chat
+
+  // Make the controller match the URL. Idempotent: each branch only acts when
+  // the controller disagrees with the route.
+  useEffect(() => {
+    if (!user) return
+    if (route.chatId === null) {
+      // "/" is a fresh new chat.
+      if (!pristineChatId) newChat()
+      else if (activeChatId !== pristineChatId) selectChat(pristineChatId)
+      if (canvasOpen) closeCanvas()
+      return
+    }
+    // Until the history arrives the chat area stays empty; never another chat.
+    if (!chatsLoaded) return
+    if (!hasChat(route.chatId)) {
+      navigate('/', { replace: true })
+      return
+    }
+    if (activeChatId !== route.chatId) selectChat(route.chatId)
+    if (canvasOpen !== route.canvas) {
+      if (route.canvas) openCanvas()
+      else closeCanvas()
+    }
+  }, [
+    user,
+    route.chatId,
+    route.canvas,
+    chatsLoaded,
+    pristineChatId,
+    activeChatId,
+    canvasOpen,
+    hasChat,
+    newChat,
+    selectChat,
+    openCanvas,
+    closeCanvas,
+  ])
+
+  // The tab names the open chat.
+  const tabTitle = route.chatId && activeChat && !activeChat.pending && activeChat.title !== 'New chat'
+    ? activeChat.title
+    : ''
+  useEffect(() => {
+    document.title = user && tabTitle ? `${tabTitle} — ${TITLE_SUFFIX}` : BASE_TITLE
+  }, [user, tabTitle])
+
+  // The result notices belong to one visit to Settings.
+  const wasSettingsOpen = useRef(false)
+  useEffect(() => {
+    if (wasSettingsOpen.current && !settingsOpen) {
+      setGmailNotice('')
+      setCalendarNotice('')
+    }
+    wasSettingsOpen.current = settingsOpen
+  }, [settingsOpen])
+
+  const handleLogout = async () => {
+    tts.stop()
+    await logout()
+    navigate('/', { replace: true })
+    setUser(null)
+    setAuthPhase('landing')
+  }
+
+  // Same exit as signing out; the server already cleared the session cookie.
+  const handleAccountDeleted = () => {
+    tts.stop()
+    navigate('/', { replace: true })
+    setUser(null)
+    setAuthPhase('landing')
+  }
+
+  if (!user) {
+    if (authPhase === 'checking') {
+      return (
+        <div className="landing">
+          <Sky theme={theme} />
+        </div>
+      )
+    }
+    return (
+      <div className="landing">
+        <Sky theme={theme} />
+        <LandingPage theme={theme} onTheme={setThemePref} error={authError} />
+        <LanguageGate />
+        <AlphaGate />
+      </div>
+    )
+  }
 
   return (
     <div className={`app${collapsed ? ' is-collapsed' : ''}${canvasOpen ? ' canvas-open' : ''}`}>
@@ -322,7 +443,7 @@ export default function App() {
         user={user}
         onLogout={handleLogout}
         onSettings={() => {
-          setSettingsOpen(true)
+          openSettings()
           if (isMobile) setCollapsed(true)
         }}
         onClose={() => setCollapsed(true)}
@@ -330,13 +451,9 @@ export default function App() {
       <SettingsDialog
         user={user}
         open={settingsOpen}
-        initialSection={settingsSection}
-        onClose={() => {
-          setSettingsOpen(false)
-          setSettingsSection('')
-          setGmailNotice('')
-          setCalendarNotice('')
-        }}
+        initialSection={route.settings ?? ''}
+        onSectionChange={changeSettingsSection}
+        onClose={closeSettings}
         onUserUpdated={setUser}
         onAccountDeleted={handleAccountDeleted}
         gmailNotice={gmailNotice}
@@ -354,12 +471,12 @@ export default function App() {
           {/* DOM order is title-first (it is the view's heading); CSS places it
               after the sidebar pill. */}
           <div className="top-bar-title">
-            <TopBarTitle
+            {activeChat && <TopBarTitle
               title={activeChat.pending ? '' : activeChat.title === 'New chat' ? t('sidebar.newChat') : activeChat.title}
               typing={activeChat.id === typingTitleId}
               onTyped={clearTypingTitle}
               onRename={(title) => renameChat(activeChat.id, title)}
-            />
+            />}
           </div>
           <SidebarControls
             collapsed={collapsed}
@@ -376,7 +493,7 @@ export default function App() {
                 data-tip={canvasOpen ? t('app.hideWebpage') : t('app.showWebpage')}
                 aria-label={canvasOpen ? t('app.hideWebpage') : t('app.showWebpage')}
                 aria-pressed={canvasOpen}
-                onClick={toggleCanvas}
+                onClick={canvasOpen ? closeCanvasPage : openCanvasPage}
               >
                 <WindowIcon />
               </button>
@@ -386,12 +503,12 @@ export default function App() {
               onTheme={setThemePref}
               voice={voice}
               onVoice={onVoice}
-              onSettings={() => setSettingsOpen(true)}
+              onSettings={() => openSettings()}
             />
           </div>
         </header>
 
-        <ChatWindow
+        {activeChat && <ChatWindow
           chat={activeChat}
           user={user}
           isStreaming={isStreaming}
@@ -405,11 +522,8 @@ export default function App() {
           onDraftSent={(draftId) => markDraftSent(activeChatId, draftId)}
           onEventDeleted={(eventId) => markEventDeleted(activeChatId, eventId)}
           onMemoryUndone={(toolName, memoryId) => markMemoryUndone(activeChatId, toolName, memoryId)}
-          onManageMemory={() => {
-            setSettingsSection('memory')
-            setSettingsOpen(true)
-          }}
-          onOpenWebpage={openCanvas}
+          onManageMemory={() => openSettings('memory')}
+          onOpenWebpage={openCanvasPage}
           inputRef={inputRef}
           effort={effort}
           onEffort={setEffort}
@@ -420,7 +534,7 @@ export default function App() {
           attachError={attachError}
           onAttach={addAttachments}
           onRemoveAttachment={removeAttachment}
-        />
+        />}
       </main>
 
       {canvasOpen && (
@@ -446,7 +560,7 @@ export default function App() {
             setDraft(text)
             inputRef.current?.focus()
           }}
-          onClose={closeCanvas}
+          onClose={closeCanvasPage}
         />
       )}
 

@@ -11,6 +11,7 @@ import {
 } from '../api/chatClient'
 import { getWebpageEnv, getWebpageVersions, activateWebpageVersion, saveWebpageFile } from '../api/webpageClient'
 import tts from '../lib/tts'
+import { buildUrl, currentRoute } from '../lib/router'
 import { translate, useLanguage } from '../i18n/LanguageProvider'
 import {
   makeMessageId,
@@ -21,7 +22,6 @@ import {
 } from '../lib/branching'
 
 const EFFORT_KEY = 'cappuccina-effort'
-const ACTIVE_CHAT_KEY = 'cappuccina-active-chat'
 const DEFAULT_TITLE = 'New chat'
 export const MAX_ATTACHMENTS = 5
 
@@ -58,15 +58,6 @@ function loadEffort() {
     // storage unavailable
   }
   return 'High'
-}
-
-function loadActiveChatId() {
-  try {
-    return localStorage.getItem(ACTIVE_CHAT_KEY)
-  } catch {
-    // storage unavailable
-  }
-  return null
 }
 
 export function makeChat() {
@@ -126,14 +117,22 @@ function normalizeChat(c) {
   }
 }
 
-export function useChatController(enabled) {
+// `onLocationChange(url, { replace })` is how the controller asks the router
+// to move when it changes things on its own (a chat gets its server id, a
+// delete, a page appearing). The URL decides which chat is active; selectChat,
+// newChat, openCanvas and closeCanvas are the appliers the router drives.
+export function useChatController(enabled, { onLocationChange } = {}) {
+  const locationRef = useRef(onLocationChange)
+  locationRef.current = onLocationChange
   // Read through a ref so long-lived callbacks always use the current language.
   const { lang } = useLanguage()
   const langRef = useRef(lang)
   langRef.current = lang
   const tt = (key, vars) => translate(langRef.current, key, vars)
   const [chats, setChats] = useState(() => [makeChat()])
+  // Null until the URL picks a chat (and while the history list loads).
   const [activeChatId, setActiveChatId] = useState(null)
+  const [chatsLoaded, setChatsLoaded] = useState(false)
   const [draft, setDraft] = useState('')
   const [query, setQuery] = useState('')
   const [effort, setEffort] = useState(loadEffort)
@@ -162,18 +161,30 @@ export function useChatController(enabled) {
   const inputRef = useRef(null)
   const chatsRef = useRef(chats)
   const streamSeq = useRef(0)
+  // The active id as of the last render or adoption, for callbacks that must
+  // not capture a stale one.
+  const activeIdRef = useRef(null)
 
   useEffect(() => {
     chatsRef.current = chats
   }, [chats])
 
   const adoptServerChat = useCallback((localId, created) => {
-    setChats((all) =>
+    const adopt = (all) =>
       all.map((c) =>
         c.id === localId ? normalizeChat({ ...c, id: created.id, title: created.title }) : c,
-      ),
-    )
-    setActiveChatId((cur) => (cur === localId ? created.id : cur))
+      )
+    // Ref first: the router sees the new id the moment the URL changes, which
+    // can be before React commits the state below.
+    chatsRef.current = adopt(chatsRef.current)
+    setChats(adopt)
+    if (activeIdRef.current === localId) {
+      activeIdRef.current = created.id
+      setActiveChatId(created.id)
+      // The chat now has an address; swap the "/" it was started on for it.
+      const { canvas, settings } = currentRoute()
+      locationRef.current?.(buildUrl({ chatId: created.id, canvas, settings }), { replace: true })
+    }
   }, [])
 
   // Persist a memory-only chat on first use. Returns the server id, which the
@@ -192,25 +203,25 @@ export function useChatController(enabled) {
   useEffect(() => {
     if (!enabled) return
     let canceled = false
+    setChatsLoaded(false)
     ;(async () => {
       try {
         const stored = await listChats()
         if (canceled) return
-        if (Array.isArray(stored) && stored.length > 0) {
-          const restored = stored.map(normalizeChat)
-          setChats(restored)
-          const saved = loadActiveChatId()
-          // Fall back to the newest chat when the saved one is gone.
-          setActiveChatId(restored.some((c) => c.id === saved) ? saved : stored[0].id)
-        } else {
-          // Fresh account: keep the empty placeholder local. It is only
+        if (Array.isArray(stored)) {
+          // A chat that was just persisted keeps its live copy; the local
+          // empty placeholder stays so "/" has a new chat ready. It is only
           // persisted once the user sends the first message.
-          setActiveChatId((cur) => cur ?? chatsRef.current[0]?.id ?? null)
+          const live = new Map(chatsRef.current.map((c) => [c.id, c]))
+          const restored = stored.map((c) => live.get(c.id) ?? normalizeChat(c))
+          const restoredIds = new Set(restored.map((c) => c.id))
+          const pending = chatsRef.current.filter((c) => c.pending && !restoredIds.has(c.id))
+          setChats([...pending, ...restored])
         }
       } catch {
         // Backend unreachable — fall back to in-memory chats
-        setActiveChatId((cur) => cur ?? chatsRef.current[0].id)
       }
+      if (!canceled) setChatsLoaded(true)
     })()
     return () => {
       canceled = true
@@ -225,20 +236,11 @@ export function useChatController(enabled) {
     }
   }, [effort])
 
-  // Remember the selected chat so a reload lands on the same conversation.
-  // Pending (memory-only) chats have no server id and are skipped.
-  useEffect(() => {
-    if (!activeChatId) return
-    const chat = chatsRef.current.find((c) => c.id === activeChatId)
-    if (!chat || chat.pending) return
-    try {
-      localStorage.setItem(ACTIVE_CHAT_KEY, activeChatId)
-    } catch {
-      // storage full or unavailable
-    }
-  }, [activeChatId])
-
-  const activeChat = chats.find((c) => c.id === activeChatId) ?? chats[0]
+  // No fallback to another chat: an unknown id (or one still loading) is null.
+  const activeChat = chats.find((c) => c.id === activeChatId) ?? null
+  activeIdRef.current = activeChat?.id ?? activeChatId
+  const pristineChatId = chats.find((c) => c.pending && c.messages.length === 0)?.id ?? null
+  const hasChat = useCallback((id) => chatsRef.current.some((c) => c.id === id), [])
 
   // Fold one env response (fetch, activation or save) into the chat's canvas
   // state: all three return the same shape and all three replace the working
@@ -371,7 +373,7 @@ export function useChatController(enabled) {
   const addAttachments = useCallback(
     async (fileList) => {
       const files = Array.from(fileList || [])
-      if (!files.length || status === 'streaming') return
+      if (!activeChat || !files.length || status === 'streaming') return
       const room = MAX_ATTACHMENTS - attachments.length
       if (room <= 0) {
         setAttachError(tt('controller.attachMax', { n: MAX_ATTACHMENTS }))
@@ -721,7 +723,14 @@ export function useChatController(enabled) {
           // more. A page is appearing: show the canvas without making the user
           // ask.
           setCanvasRevision((r) => r + 1)
-          setCanvasOpen(true)
+          // ...but only if the user is still looking at this chat; the URL
+          // change opens the canvas.
+          if (activeIdRef.current === chatId) {
+            locationRef.current?.(
+              buildUrl({ chatId, canvas: true, settings: currentRoute().settings }),
+              { replace: false },
+            )
+          }
         },
         onTitle: (title) => applyTitle(chatId, title),
         onDone: () => {
@@ -769,8 +778,8 @@ export function useChatController(enabled) {
   const sendMessage = useCallback(() => {
     const text = draft.trim()
     const pending = attachments
-    if ((!text && pending.length === 0) || status !== 'idle' || uploading) return
     const chat = activeChat
+    if (!chat || (!text && pending.length === 0) || status !== 'idle' || uploading) return
     // Failed stream tails are transient: a new turn follows the last real node.
     const visible = visibleMessages(chat).filter((m) => !m.failed)
     const parentId = visible.length ? visible[visible.length - 1].id : null
@@ -802,8 +811,8 @@ export function useChatController(enabled) {
   // fresh reply is streamed under it. The old branch stays navigable.
   const editMessage = useCallback((messageId, text) => {
     const next = (text ?? '').trim()
-    if (!next || status !== 'idle') return
     const chat = activeChat
+    if (!chat || !next || status !== 'idle') return
     const visible = visibleMessages(chat)
     const at = visible.findIndex((m) => m.id === messageId)
     if (at === -1) return
@@ -825,8 +834,8 @@ export function useChatController(enabled) {
   // Regenerate an assistant reply: stream a new sibling version from the same
   // prompt, keeping the previous answer reachable with the arrows.
   const regenerateMessage = useCallback((messageId) => {
-    if (status !== 'idle') return
     const chat = activeChat
+    if (!chat || status !== 'idle') return
     const visible = visibleMessages(chat)
     const at = visible.findIndex((m) => m.id === messageId)
     if (at <= 0) return
@@ -834,8 +843,8 @@ export function useChatController(enabled) {
   }, [status, activeChat, runStream])
 
   const retryMessage = useCallback(() => {
-    if (status !== 'idle') return
     const chat = activeChat
+    if (!chat || status !== 'idle') return
     const visible = visibleMessages(chat)
     let lastUser = -1
     for (let i = visible.length - 1; i >= 0; i--) {
@@ -851,8 +860,8 @@ export function useChatController(enabled) {
   // Move up/down the sibling versions of a message; the visible tail follows
   // the chosen version's newest branch.
   const navigateBranch = useCallback((messageId, delta) => {
-    if (status !== 'idle') return
     const chat = activeChat
+    if (!chat || status !== 'idle') return
     const next = navigateBranchPath(chat.messages, chat.activePath ?? [], messageId, delta)
     tts.stop()
     patchChatState(chat.id, (c) => ({ ...c, activePath: next }))
@@ -876,10 +885,14 @@ export function useChatController(enabled) {
     const all = chatsRef.current
     const target = all.find((c) => c.id === id)
     const remaining = all.filter((c) => c.id !== id)
-    if (remaining.length === 0) return
     // React can run state updaters twice (StrictMode), so the server DELETE and
-    // the active-chat switch live here rather than inside the setChats updater.
-    setActiveChatId((current) => (current === id ? remaining[0].id : current))
+    // the location change live here rather than inside the setChats updater.
+    if (activeIdRef.current === id) {
+      // Deleting the open chat lands on a new one ("/").
+      activeIdRef.current = null
+      setActiveChatId(null)
+      locationRef.current?.(buildUrl(), { replace: true })
+    }
     if (!target?.pending) deleteChatOnServer(id).catch(() => {})
     setChats(remaining)
   }, [])
@@ -896,16 +909,10 @@ export function useChatController(enabled) {
   // never follow the user into a different conversation.
   const selectChat = useCallback((id) => {
     setActiveChatId(id)
+    setCanvasNotice(null)
     tts.stop()
     clearAttachments()
   }, [])
-
-  // Close the canvas when the user leaves a chat that had one open.
-  const selectChatAndCanvas = useCallback((id) => {
-    setCanvasOpen(false)
-    setCanvasNotice(null)
-    selectChat(id)
-  }, [selectChat])
 
   // Closing hides the panel but keeps the page: the top-bar toggle and the
   // message card can reopen it at any time (and a later turn edits it).
@@ -939,6 +946,9 @@ export function useChatController(enabled) {
 
   return {
     chats: visibleChats,
+    chatsLoaded,
+    pristineChatId,
+    hasChat,
     activeChat: activeView,
     activeChatId: activeChat?.id ?? null,
     draft,
@@ -963,7 +973,7 @@ export function useChatController(enabled) {
     markDraftSent,
     markEventDeleted,
     markMemoryUndone,
-    selectChat: selectChatAndCanvas,
+    selectChat,
     attachments,
     uploading,
     attachError,

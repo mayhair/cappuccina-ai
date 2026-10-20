@@ -8,6 +8,12 @@ import { chromium } from "playwright";
 
 const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 1536, height: 1024 } });
+// A first visit shows the language picker; pick English up front.
+await page.addInitScript(() => {
+  try {
+    localStorage.setItem("cappuccina-lang", "en");
+  } catch {}
+});
 const errors = [];
 page.on("console", (m) => m.type() === "error" && errors.push(m.text()));
 page.on("pageerror", (e) => errors.push(String(e)));
@@ -467,8 +473,7 @@ savedChats = [
   },
 ];
 await page.reload({ waitUntil: "networkidle" });
-await page.waitForSelector('.ctrl-btn[aria-label="Show the webpage"]', { timeout: 5000 });
-await page.click('.ctrl-btn[aria-label="Show the webpage"]');
+// The URL is /c/<id>/page, so the canvas reopens on its own after a reload.
 await page.waitForSelector(".canvas-frame", { timeout: 5000 });
 const restoredSrc = await page.locator(".canvas-frame").getAttribute("src");
 const reloadedFrame = page.frameLocator(".canvas-frame");
@@ -516,7 +521,8 @@ console.log(
   `icons.bottom=${Math.round(narrow.icons.bottom)} tabs.y=${Math.round(narrow.tabs.y)}`,
 );
 console.log("narrow header fits, nothing clipped:", narrowFits);
-await page.click('.canvas-icon-btn[aria-label="Exit fullscreen"]');
+// At 360px the canvas leaves fullscreen by itself (phone range), so there is
+// no exit button to click.
 await page.setViewportSize({ width: viewport.width, height: viewport.height });
 await page.waitForTimeout(250);
 

@@ -2,6 +2,12 @@ import { chromium } from "playwright";
 
 const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 1536, height: 1024 } });
+// A first visit shows the language picker; pick English up front.
+await page.addInitScript(() => {
+  try {
+    localStorage.setItem("cappuccina-lang", "en");
+  } catch {}
+});
 const errors = [];
 page.on("console", (m) => m.type() === "error" && errors.push(m.text()));
 page.on("pageerror", (e) => errors.push(String(e)));
