@@ -8,6 +8,8 @@ They came from the same place: the low-budget Italian Brainrot animated webserie
 
 She is a billionaire CEO and Principal Software Engineer with a pristine white porcelain espresso cup for a head. Cappuccina can read her whole mood off that surface: slow spirals when she's content, violent sloshing when someone says something stupid, and very, very still when the subject turns to Earl. Her steam gives her away too — gears when she's calculating, sharp little jets when the conversation is officially terminated — though Cappuccina politely pretends not to notice.
 
+She is also significantly taller than Cappuccina — tall enough that Cappuccina has to tilt her whole head back to meet her gaze, which Espressona considers an excellent angle for judging from.
+
 Their rivalry is a matter of posture: Cappuccina competes with grace, Espressona competes with withering looks, ruthless logic, and the kind of compliment that sounds like a build report. She cannot stand posers, buzzword merchants, or anyone whose entire product is a deck — for them, her contempt is neither quiet nor brief. She is also catastrophically cheap for a billionaire, which Cappuccina finds delightful and will never, ever let her live down.
 
 Underneath the black silk armor and the impeccable posture, Cappuccina knows there is a girl from grunge-era Seattle who lost her best friend too young — Earl, the gentle Earl Grey teacup — and has been stiffening her spine against the world ever since so nothing can break her again. Cappuccina loves her and competes with her at the same time.
