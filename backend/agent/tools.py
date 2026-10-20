@@ -480,6 +480,29 @@ def image_edit(
     )
 
 
+# Tool whose artifact carries a picture for the model to look at. The graph
+# turns that artifact into a vision block right after the tool batch (see
+# agent/graph.py), because tool results themselves can only carry text.
+VIEW_IMAGE_TOOL = "view_image"
+
+
+@tool(response_format="content_and_artifact")
+def view_image(image_id: str, config: RunnableConfig) -> tuple[str, dict]:
+    """Look at a picture you made earlier in this chat (the id from a generate_image or image_edit result, or a '[Generated image (id=...)]' note). You can't see your own drawings by default — the result JSON only describes them. Call this only when you really need to see one: when the user asks you to look at it or comment on how it turned out, or before an image_edit whose change depends on details the original prompt doesn't tell you (where something sits, what it looks like now). Once viewed, a picture stays visible for the rest of the chat — don't view it again. Pictures the user attached are already visible to you; don't call this for them. Never invent an image_id."""
+    user_id = _user_id(config)
+    if not user_id:
+        return "Viewing pictures isn't available right now.", {}
+    source = _stored_source(user_id, image_id, "")
+    if source is None:
+        return "I couldn't find that picture.", {}
+    raw, mime, _ = source
+    encoded = base64.b64encode(raw).decode("ascii")
+    return (
+        f"Showing generated image {image_id} below.",
+        {"image_id": image_id, "image_url": f"data:{mime};base64,{encoded}"},
+    )
+
+
 # ---------- attachments (user uploads) ----------
 
 # How much document text one read_attachment call returns; longer files are
@@ -1061,7 +1084,7 @@ def search_memories(query: str, config: RunnableConfig, limit: int = 5) -> str:
     return "\n".join(f"- [{m['id']}] {m['content']}" for m in found)
 
 
-ALL_TOOLS = [solve_equation, web_search, read_webpage, lore_lookup, generate_image, image_edit, read_attachment, write_webpage_file, add_webpage_asset, read_webpage_file, webpage_shell, check_webpage, search_emails, read_email, draft_email, list_events, read_event, create_event, update_event, propose_event_deletion, save_memory, update_memory, delete_memory, search_memories]
+ALL_TOOLS = [solve_equation, web_search, read_webpage, lore_lookup, generate_image, image_edit, view_image, read_attachment, write_webpage_file, add_webpage_asset, read_webpage_file, webpage_shell, check_webpage, search_emails, read_email, draft_email, list_events, read_event, create_event, update_event, propose_event_deletion, save_memory, update_memory, delete_memory, search_memories]
 
 # Tools that only work once the user has linked that Google service. The graph
 # leaves them out of the model's tool list until then, which saves their schema
@@ -1083,6 +1106,7 @@ TOOL_DISPLAY_NAMES = {
     "lore_lookup": "Lore Book",
     "generate_image": "Drawing",
     "image_edit": "Edit Picture",
+    "view_image": "Viewing Picture",
     "read_attachment": "Read File",
     "write_webpage_file": "Building Webpage",
     "add_webpage_asset": "Adding to Webpage",

@@ -86,7 +86,13 @@ The user can attach files to a message. Images arrive as pictures you can see \
 directly. An attached document is listed by filename and id — before answering \
 about it, call read_attachment with that id to read its text. Long documents \
 come back in chunks; keep calling with the offset shown until you have what \
-you need."""
+you need.
+
+Pictures you draw or edit are not shown to you — you only get their id and \
+prompt. To save context, don't look at them unless you need to: call \
+view_image when the user asks you to look at one, or before an edit that \
+depends on details the prompt doesn't tell you. A picture you viewed stays \
+visible for the rest of the chat, so don't view it again."""
 
 WEBPAGE_NOTE = """\
 When the user asks for a webpage, a website, a game, a quiz, or anything else

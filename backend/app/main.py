@@ -20,12 +20,13 @@ from sse_starlette.sse import EventSourceResponse
 
 from agent.content import flatten_content
 from agent.fmhy import load_fmhy_tools
-from agent.graph import build_graph
+from agent.graph import build_graph, is_viewed_image_message, viewed_images_message_for
 from agent import memory as memory_rules
 from agent.title import generate_title
 from agent.tools import (
     ALL_TOOLS,
     TOOL_DISPLAY_NAMES,
+    VIEW_IMAGE_TOOL,
     _webpage_path,
     validate_webpage_write,
 )
@@ -335,6 +336,10 @@ def _final_extras(messages) -> tuple[str, list[ToolCall], list[dict]]:
     parts: list[dict] = []
     tools_by_part_id: dict[str, dict] = {}
     for msg in messages:
+        # Pictures view_image put in front of the model are not part of the
+        # reply; the tool card already records the call.
+        if is_viewed_image_message(msg):
+            continue
         content = getattr(msg, "content", "")
         step_reasoning = _message_reasoning(msg, content)
         if step_reasoning:
@@ -495,6 +500,41 @@ def _attachment_blocks(parts, user_id: str) -> list[dict]:
     return blocks
 
 
+def _viewed_image_message(parts, user_id: str) -> HumanMessage | None:
+    """The pictures an earlier reply looked at with view_image, shown again.
+
+    A viewed picture stays in context for the rest of the chat (like an
+    attached image), so the user can ask follow-up questions about it without
+    the model calling view_image again. The saved tool part names the image id;
+    the bytes are re-read from disk, user-scoped, and a picture that is gone is
+    skipped.
+    """
+    seen: set[str] = set()
+    viewed = []
+    for part in parts or []:
+        if (
+            not isinstance(part, dict)
+            or part.get("type") != "tool"
+            or part.get("name") != VIEW_IMAGE_TOOL
+            or part.get("ok") is False
+        ):
+            continue
+        image_id = (part.get("args") or {}).get("image_id")
+        if not isinstance(image_id, str) or not image_id or image_id in seen:
+            continue
+        seen.add(image_id)
+        row = db.get_image(user_id, image_id)
+        if row is None:
+            continue
+        try:
+            raw = db.image_file_path(row["id"], row["mime"]).read_bytes()
+        except OSError:
+            continue
+        encoded = base64.b64encode(raw).decode("ascii")
+        viewed.append((row["id"], f"data:{row['mime']};base64,{encoded}"))
+    return viewed_images_message_for(viewed)
+
+
 def _assistant_content(m) -> str:
     """Assistant text plus pointers to any pictures and webpages it produced.
 
@@ -550,6 +590,11 @@ def _state(req: ChatRequest, user) -> dict:
     messages = []
     for m in req.messages:
         if m.role == "assistant":
+            # Pictures this reply viewed go first, as they did during the run:
+            # the reply's text was written after looking at them.
+            viewed = _viewed_image_message(m.parts, user["id"])
+            if viewed is not None:
+                messages.append(viewed)
             messages.append(AIMessage(content=_assistant_content(m)))
             continue
         if m.role != "user":

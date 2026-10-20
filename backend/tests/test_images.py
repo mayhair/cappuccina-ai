@@ -1142,3 +1142,189 @@ def test_image_edit_explicit_size_overrides_the_source(isolated_db, monkeypatch)
         config={"configurable": {"user_id": user["id"], "chat_id": chat["id"]}},
     )
     assert seen == ["1024x1024"]
+
+
+# ---------- view_image ----------
+
+
+def _view_call(image_id: str, call_id: str = "v1") -> dict:
+    return {
+        "name": "view_image",
+        "args": {"image_id": image_id},
+        "id": call_id,
+        "type": "tool_call",
+    }
+
+
+def test_view_image_returns_picture_as_artifact(isolated_db):
+    from agent import tools
+
+    user, chat = _user_and_chat()
+    image = db.create_image(user["id"], chat["id"], FAKE_PNG, prompt="a cat")
+
+    result = tools.view_image.invoke(
+        _view_call(image["id"]),
+        config={"configurable": {"user_id": user["id"], "chat_id": chat["id"]}},
+    )
+    # The text result stays tiny; the bytes ride only in the artifact.
+    assert "base64" not in result.content
+    encoded = base64.b64encode(FAKE_PNG).decode("ascii")
+    assert result.artifact == {
+        "image_id": image["id"],
+        "image_url": f"data:image/png;base64,{encoded}",
+    }
+
+
+def test_view_image_is_user_scoped(isolated_db):
+    from agent import tools
+
+    user, chat = _user_and_chat()
+    image = db.create_image(user["id"], chat["id"], FAKE_PNG, prompt="a cat")
+
+    result = tools.view_image.invoke(
+        _view_call(image["id"]),
+        config={"configurable": {"user_id": "someone-else", "chat_id": chat["id"]}},
+    )
+    assert "couldn't find" in result.content
+    assert not result.artifact
+
+
+def test_view_image_schema_hides_injected_config():
+    from agent import tools
+
+    assert set(tools.view_image.args) == {"image_id"}
+
+
+def test_viewed_images_message_puts_picture_after_tool_batch():
+    from langchain_core.messages import ToolMessage
+
+    from agent.graph import is_viewed_image_message, viewed_images_message
+
+    viewed = ToolMessage(
+        content="Showing generated image img-1 below.",
+        tool_call_id="v1",
+        name="view_image",
+        artifact={"image_id": "img-1", "image_url": "data:image/png;base64,AAAA"},
+    )
+    other = ToolMessage(content="ok", tool_call_id="t2", name="web_search")
+
+    message = viewed_images_message([viewed, other])
+    assert is_viewed_image_message(message)
+    assert message.content[0] == {
+        "type": "image_url",
+        "image_url": {"url": "data:image/png;base64,AAAA"},
+    }
+    assert "img-1" in message.content[1]["text"]
+
+    # Nothing to show: no message at all.
+    assert viewed_images_message([other]) is None
+    failed = ToolMessage(content="couldn't find", tool_call_id="v2", name="view_image")
+    assert viewed_images_message([failed]) is None
+
+
+def test_viewed_image_message_does_not_start_a_new_run():
+    from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+
+    from agent.graph import _current_run, viewed_images_message
+
+    user_turn = HumanMessage(content="change the hat")
+    call = AIMessage(content="", tool_calls=[_view_call("img-1")])
+    result = ToolMessage(
+        content="Showing",
+        tool_call_id="v1",
+        name="view_image",
+        artifact={"image_id": "img-1", "image_url": "data:image/png;base64,AAAA"},
+    )
+    injected = viewed_images_message([result])
+    run = _current_run([user_turn, call, result, injected])
+    assert run == [call, result, injected]
+
+
+def test_final_extras_skips_viewed_image_message():
+    import app.main as main
+    from langchain_core.messages import AIMessage, ToolMessage
+
+    from agent.graph import viewed_images_message
+
+    result = ToolMessage(
+        content="Showing generated image img-1 below.",
+        tool_call_id="v1",
+        name="view_image",
+        artifact={"image_id": "img-1", "image_url": "data:image/png;base64,AAAA"},
+    )
+    messages = [
+        AIMessage(content="", tool_calls=[_view_call("img-1")]),
+        result,
+        viewed_images_message([result]),
+        AIMessage(content="It looks lovely."),
+    ]
+    _, _, parts = main._final_extras(messages)
+    assert [p["type"] for p in parts] == ["tool", "text"]
+    assert parts[1]["text"] == "It looks lovely."
+    assert "base64" not in json.dumps(parts)
+
+
+def test_state_keeps_viewed_image_in_later_turns(isolated_db):
+    import app.main as main
+
+    from agent.graph import is_viewed_image_message
+
+    user, chat = _user_and_chat()
+    image = db.create_image(user["id"], chat["id"], FAKE_PNG, prompt="a penguin")
+    view_part = {
+        "type": "tool",
+        "id": "v1",
+        "name": "view_image",
+        "args": {"image_id": image["id"]},
+        "result": "Showing",
+        "ok": True,
+    }
+    req = main.ChatRequest(
+        chatId=chat["id"],
+        messages=[
+            {"role": "user", "content": "how does it look?"},
+            {
+                "role": "assistant",
+                "content": "Lovely!",
+                # Viewed twice in one reply: shown once.
+                "parts": [view_part, {**view_part, "id": "v2"}],
+            },
+            {"role": "user", "content": "what colour is the hat?"},
+        ],
+    )
+    state = main._state(req, user)
+    viewed = state["messages"][1]
+    assert is_viewed_image_message(viewed)
+    encoded = base64.b64encode(FAKE_PNG).decode("ascii")
+    assert viewed.content[0]["image_url"]["url"] == f"data:image/png;base64,{encoded}"
+    assert len(viewed.content) == 2
+    assert state["messages"][2].content == "Lovely!"
+    assert state["messages"][3].content == "what colour is the hat?"
+
+
+def test_state_skips_failed_or_foreign_viewed_images(isolated_db):
+    import app.main as main
+
+    user, chat = _user_and_chat()
+    other = db.create_google_user("other@example.com", "Other", "google-sub-other")
+    other_chat = db.create_chat(other["id"], title="Theirs")
+    theirs = db.create_image(other["id"], other_chat["id"], FAKE_PNG, prompt="x")
+    mine = db.create_image(user["id"], chat["id"], FAKE_PNG, prompt="y")
+    req = main.ChatRequest(
+        chatId=chat["id"],
+        messages=[
+            {"role": "user", "content": "look"},
+            {
+                "role": "assistant",
+                "content": "Hmm.",
+                "parts": [
+                    {"type": "tool", "name": "view_image", "args": {"image_id": theirs["id"]}, "ok": True},
+                    {"type": "tool", "name": "view_image", "args": {"image_id": mine["id"]}, "ok": False},
+                    {"type": "tool", "name": "view_image", "args": {"image_id": "missing"}, "ok": True},
+                ],
+            },
+            {"role": "user", "content": "again"},
+        ],
+    )
+    state = main._state(req, user)
+    assert [m.content for m in state["messages"]] == ["look", "Hmm.", "again"]

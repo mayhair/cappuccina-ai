@@ -1,7 +1,7 @@
 import logging
 from uuid import uuid4
 
-from langchain_core.messages import SystemMessage
+from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, START, MessagesState, StateGraph
 from langgraph.prebuilt import ToolNode
@@ -78,10 +78,49 @@ def _is_auto_check_note(message) -> bool:
     return bool(getattr(message, "additional_kwargs", {}).get("webpage_auto_check"))
 
 
+def is_viewed_image_message(message) -> bool:
+    """True for the injected message carrying pictures view_image fetched."""
+    return bool(getattr(message, "additional_kwargs", {}).get("viewed_image"))
+
+
+def viewed_images_message(batch):
+    """A HumanMessage showing the pictures view_image fetched in ``batch``, or None.
+
+    Tool results can only carry text through the Chat Completions API, so the
+    picture rides in a user-role message placed right after the tool results.
+    Later turns rebuild the same message from the saved view_image tool part
+    (see app.main._viewed_image_message), so the picture stays in context.
+    """
+    viewed = []
+    for message in batch:
+        if getattr(message, "name", "") != agent_tools.VIEW_IMAGE_TOOL:
+            continue
+        artifact = getattr(message, "artifact", None) or {}
+        if artifact.get("image_url"):
+            viewed.append((artifact.get("image_id"), artifact["image_url"]))
+    return viewed_images_message_for(viewed)
+
+
+def viewed_images_message_for(viewed: list[tuple[str, str]]):
+    """The vision message for ``(image_id, data_url)`` pairs, or None if empty."""
+    blocks: list[dict] = []
+    for image_id, url in viewed:
+        blocks.append({"type": "image_url", "image_url": {"url": url}})
+        blocks.append(
+            {"type": "text", "text": f"[Generated image (id={image_id}), from view_image]"}
+        )
+    if not blocks:
+        return None
+    return HumanMessage(content=blocks, additional_kwargs={"viewed_image": True})
+
+
 def _current_run(messages) -> list:
     """The messages after the user's latest turn — this run's own work."""
     index = len(messages)
-    while index > 0 and getattr(messages[index - 1], "type", "") != "human":
+    while index > 0 and (
+        getattr(messages[index - 1], "type", "") != "human"
+        or is_viewed_image_message(messages[index - 1])
+    ):
         index -= 1
     return messages[index:]
 
@@ -183,11 +222,15 @@ def build_graph(tools=None):
 
         This node sits between the tools and the next model call, so the note
         lands in the transcript right after the tool results. It is added once
-        per run, and only when an FMHY tool actually ran.
+        per run, and only when an FMHY tool actually ran. Pictures fetched by
+        view_image are attached here too, for the same reason: they must land
+        right after the tool results.
         """
         messages = state["messages"]
-        note = safety_note_for(_trailing_tool_messages(messages), messages)
-        return {"messages": [note] if note is not None else []}
+        batch = _trailing_tool_messages(messages)
+        note = safety_note_for(batch, messages)
+        viewed = viewed_images_message(batch)
+        return {"messages": [m for m in (note, viewed) if m is not None]}
 
     # pyrefly: ignore [bad-specialization]
     graph = StateGraph(AgentState)
