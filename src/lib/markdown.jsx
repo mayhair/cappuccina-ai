@@ -216,7 +216,15 @@ function renderBlocks(text, prefix) {
   return out
 }
 
+// The model sometimes cites a generated picture as a link to a made-up
+// `image:<id>` target, e.g. "([the new version](image:c7b8...))". The image is
+// already attached to the reply, so the dead link is dropped but its text is
+// kept and any surrounding parentheses are left alone. Display-only: stored
+// text is untouched.
+const FAKE_IMAGE_LINK = /\[([^\]\n]*)\]\(image:[^)\s]*\)/gi
+
 export function Markdown({ text }) {
   if (!text) return null
-  return <>{renderBlocks(text, 'md')}</>
+  const shown = text.replace(FAKE_IMAGE_LINK, '$1')
+  return <>{renderBlocks(shown, 'md')}</>
 }
