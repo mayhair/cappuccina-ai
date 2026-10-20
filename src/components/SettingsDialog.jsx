@@ -617,64 +617,6 @@ export function SettingsDialog({
       ),
     },
     {
-      key: 'connections',
-      icon: <MailIcon />,
-      label: t('settings.nav.connections'),
-      content: (
-        <>
-          <h3 className="settings-heading">{t('settings.nav.connections')}</h3>
-          {SHOW_CONNECTIONS_TESTING_NOTE && <TestingNote />}
-          <section className="settings-section">
-            <h4>{t('settings.connections.gmail')}</h4>
-            <GmailForm
-              user={user}
-              notice={gmailNotice}
-              onNoticeClear={onGmailNoticeClear}
-              onUserUpdated={onUserUpdated}
-            />
-          </section>
-          <section className="settings-section">
-            <h4>{t('settings.connections.calendar')}</h4>
-            <CalendarForm
-              user={user}
-              notice={calendarNotice}
-              onNoticeClear={onCalendarNoticeClear}
-              onUserUpdated={onUserUpdated}
-            />
-          </section>
-        </>
-      ),
-    },
-    {
-      key: 'memory',
-      icon: <BrainIcon />,
-      label: t('settings.nav.memory'),
-      content: (
-        <>
-          <h3 className="settings-heading">{t('settings.nav.memory')}</h3>
-          <MemoryManager user={user} onUserUpdated={onUserUpdated} />
-        </>
-      ),
-    },
-    ...(adultEnabled
-      ? [
-          {
-            key: 'adult',
-            icon: <ShieldIcon />,
-            label: t('settings.nav.adult'),
-            content: (
-              <>
-                <h3 className="settings-heading">{t('settings.nav.adult')}</h3>
-                <section className="settings-section">
-                  <h4>{t('settings.adult.section')}</h4>
-                  <AdultModeForm user={user} onUpdated={onUserUpdated} />
-                </section>
-              </>
-            ),
-          },
-        ]
-      : []),
-    {
       key: 'appearance',
       icon: <SunIcon />,
       label: t('settings.nav.appearance'),
@@ -710,6 +652,64 @@ export function SettingsDialog({
           <section className="settings-section">
             <p className="settings-hint">{t('language.settings.hint')}</p>
             <LanguagePicker value={lang} onChange={setLang} />
+          </section>
+        </>
+      ),
+    },
+    {
+      key: 'memory',
+      icon: <BrainIcon />,
+      label: t('settings.nav.memory'),
+      content: (
+        <>
+          <h3 className="settings-heading">{t('settings.nav.memory')}</h3>
+          <MemoryManager user={user} onUserUpdated={onUserUpdated} />
+        </>
+      ),
+    },
+    ...(adultEnabled
+      ? [
+          {
+            key: 'adult',
+            icon: <ShieldIcon />,
+            label: t('settings.nav.adult'),
+            content: (
+              <>
+                <h3 className="settings-heading">{t('settings.nav.adult')}</h3>
+                <section className="settings-section">
+                  <h4>{t('settings.adult.section')}</h4>
+                  <AdultModeForm user={user} onUpdated={onUserUpdated} />
+                </section>
+              </>
+            ),
+          },
+        ]
+      : []),
+    {
+      key: 'connections',
+      icon: <MailIcon />,
+      label: t('settings.nav.connections'),
+      content: (
+        <>
+          <h3 className="settings-heading">{t('settings.nav.connections')}</h3>
+          {SHOW_CONNECTIONS_TESTING_NOTE && <TestingNote />}
+          <section className="settings-section">
+            <h4>{t('settings.connections.gmail')}</h4>
+            <GmailForm
+              user={user}
+              notice={gmailNotice}
+              onNoticeClear={onGmailNoticeClear}
+              onUserUpdated={onUserUpdated}
+            />
+          </section>
+          <section className="settings-section">
+            <h4>{t('settings.connections.calendar')}</h4>
+            <CalendarForm
+              user={user}
+              notice={calendarNotice}
+              onNoticeClear={onCalendarNoticeClear}
+              onUserUpdated={onUserUpdated}
+            />
           </section>
         </>
       ),
