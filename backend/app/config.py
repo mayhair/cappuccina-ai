@@ -99,6 +99,11 @@ SITE_EXEC_TIMEOUT = int(os.getenv("SITE_EXEC_TIMEOUT", "120"))
 # install plus a framework build routinely takes minutes.
 SITE_BUILD_TIMEOUT = int(os.getenv("SITE_BUILD_TIMEOUT", "300"))
 
+# ---------- Rate limiting ----------
+# Requests per user per minute to the endpoints that call paid models
+# (chat, chat stream, text-to-speech). Everything else is unlimited.
+RATE_LIMIT_PER_MINUTE = int(os.getenv("RATE_LIMIT_PER_MINUTE", "10"))
+
 # ---------- Memory ----------
 # Long-term facts about the user that the agent saves through its memory tools
 # and the user manages from Settings. The caps apply to everyone; the content

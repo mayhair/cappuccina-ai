@@ -48,6 +48,7 @@ from app.config import (
     MEMORY_MAX_PER_USER,
 )
 from app.google_oauth import ServiceNotConnected
+from app.ratelimit import rate_limited_user
 from app.webpage_preview import (
     PREVIEW_HEADERS,
     blocked_segment,
@@ -1500,7 +1501,7 @@ def _serialize_tool_calls(tool_calls: list[ToolCall]) -> list[dict]:
 
 
 @app.post("/api/v1/chat")
-async def chat(req: ChatRequest, user=Depends(current_user)) -> ChatResponse:
+async def chat(req: ChatRequest, user=Depends(rate_limited_user)) -> ChatResponse:
     _owned_chat_or_404(user, req)
     _WEBPAGE_BUSY.discard(req.chat_id)
     _WEBPAGE_BUSY.add(req.chat_id)
@@ -1839,7 +1840,7 @@ async def _stream_chat_events(req: ChatRequest, user: dict):
 
 
 @app.post("/api/v1/chat/stream")
-async def chat_stream(req: ChatRequest, user=Depends(current_user)):
+async def chat_stream(req: ChatRequest, user=Depends(rate_limited_user)):
     _owned_chat_or_404(user, req)
     return EventSourceResponse(_tracked_events(req.chat_id, _stream_chat_events(req, user)), ping=15)
 
@@ -1848,7 +1849,7 @@ async def chat_stream(req: ChatRequest, user=Depends(current_user)):
 
 
 @app.post("/api/v1/tts")
-async def start_tts(req: TtsRequest, user=Depends(current_user)) -> TtsJobResponse:
+async def start_tts(req: TtsRequest, user=Depends(rate_limited_user)) -> TtsJobResponse:
     """Register the text for speech synthesis. Returns a job id whose audio
     /api/v1/tts/{id} streams as audio/mpeg (fetchable once)."""
     if not config.TTS_ENABLED:
