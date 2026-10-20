@@ -85,6 +85,15 @@ def make_model(reasoning: str = DEFAULT_REASONING, tools=None, model_id: str = "
         "data_collection": "deny",
         "preferred_min_throughput": {"p75": 35},
         "allow_fallbacks": True,
+        "quantizations": [
+            "int8",
+            "fp8",
+            "mxfp8",
+            "fp16",
+            "bf16",
+            "fp32",
+            "unknown",
+        ],
     }
 
     model = OpenRouterChatModel(
