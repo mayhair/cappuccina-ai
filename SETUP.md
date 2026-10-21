@@ -165,6 +165,8 @@ Gmail connection. In [Google Cloud Console](https://console.cloud.google.com/):
    [redirect-URI rules](https://developers.google.com/identity/protocols/oauth2/web-server#uri-validation)
    prefer HTTPS for anything that isn't localhost — the live deployment
    registers plain `http://` and works, but use `https://` where you can.
+   The backend takes the scheme from `APP_ORIGIN`, so change the Console and
+   `APP_ORIGIN` together (§7.5 has the steps).
 
 5. Copy the **client ID** and **client secret** into `backend/.env` as
    `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`, and generate the token key:
@@ -533,6 +535,23 @@ repo and have to be set in the dashboard:
   https://cappuccina.<your-domain>/api/v1/calendar/callback
   ```
 
+  **The scheme comes from `APP_ORIGIN`, not from the browser.** The backend
+  builds every `redirect_uri` it sends Google from `APP_ORIGIN`
+  (`backend/app/google_oauth.py`). It ignores the URL the visitor actually
+  used. So switching the Console entries to `https://` while `APP_ORIGIN` still
+  says `http://` breaks sign-in with `redirect_uri_mismatch`. To move to HTTPS:
+
+  1. Add the `https://` trio in the Console. Keep the `http://` trio until the
+     switch is done, because Google accepts any registered URI. Console changes
+     can take a few minutes to apply.
+  2. Set `APP_ORIGIN=https://cappuccina.<your-domain>` in the server's
+     `backend/.env` and restart the backend (`sudo systemctl restart cappuccina`).
+  3. Turn on **SSL/TLS → Edge Certificates → Always Use HTTPS** in Cloudflare
+     for the domain. With an `https://` origin the session cookie is `Secure`,
+     and browsers drop it over plain http. A visitor on `http://` would get
+     through Google and still land logged out.
+  4. Remove the `http://` trio from the Console.
+
 Verify the worker is really proxying:
 
 ```bash
@@ -681,7 +700,8 @@ cd / && sudo -u cappuccina podman ps --filter name=capweb
 | CORS errors in dev | You're not on `http://localhost:5173` — use that exact origin |
 | `401` on chat send | Session expired — log out and back in |
 | Sign-in says Google isn't set up | Missing `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET` in `backend/.env` |
-| `redirect_uri_mismatch` from Google | The redirect URIs in Console must match `APP_ORIGIN` exactly (`http://localhost:5173/api/v1/...`) |
+| `redirect_uri_mismatch` from Google | The redirect URIs in Console must match `APP_ORIGIN` exactly (`http://localhost:5173/api/v1/...`), scheme included. Changing the Console to `https://` without also changing `APP_ORIGIN` causes this (§7.5) |
+| Google sign-in finishes but you are still logged out | `APP_ORIGIN` is `https://`, so the session cookie is `Secure`, but you browsed over `http://`. Turn on Cloudflare's **Always Use HTTPS** (§7.5) |
 | "Access blocked" during sign-in | Your Google account isn't in **Test users** on the consent screen |
 | Gmail connect instantly errors | Consent-screen scopes missing, or `TOKEN_ENC_KEY` empty |
 | Gmail disconnects every ~7 days | Testing-mode refresh tokens expire weekly — reconnect in Settings (see §4) |
