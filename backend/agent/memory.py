@@ -6,13 +6,12 @@ one the model saves.
 """
 
 import re
-import sqlite3
 from collections.abc import Sequence
 
 from app.config import ADULT_MODE_ENABLED, MEMORY_MAX_CHARS
 
 
-def is_adult(user: sqlite3.Row | dict | None) -> bool:
+def is_adult(user: dict | None) -> bool:
     """Same test the chat state uses: the feature is on and the user opted in."""
     return bool(user is not None and ADULT_MODE_ENABLED and user["adult_mode"])
 

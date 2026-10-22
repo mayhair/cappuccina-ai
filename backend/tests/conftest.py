@@ -7,19 +7,84 @@ BACKEND = Path(__file__).resolve().parents[1]
 if str(BACKEND) not in sys.path:
     sys.path.insert(0, str(BACKEND))
 
+import os  # noqa: E402
+
+import psycopg  # noqa: E402
+from psycopg import sql  # noqa: E402
+from psycopg.conninfo import conninfo_to_dict, make_conninfo  # noqa: E402
+
 from app import db  # noqa: E402
+
+TEST_DATABASE_URL = os.getenv(
+    "TEST_DATABASE_URL",
+    "postgresql://cappuccina:cappuccina@127.0.0.1:5432/cappuccina_test",
+)
+
+# Nothing in the suite may touch the development database, even a test that
+# forgets the isolated_db fixture: the db layer opens its pool lazily from this.
+db.DATABASE_URL = TEST_DATABASE_URL
+
+
+def _ensure_test_database() -> None:
+    """Create the test database if missing; stop with a clear hint if PG is down."""
+    name = conninfo_to_dict(TEST_DATABASE_URL).get("dbname") or ""
+    if "test" not in name:
+        pytest.exit(
+            f"Refusing to run: the test database {name!r} is wiped between tests, so its "
+            "name must contain 'test'. Set TEST_DATABASE_URL accordingly.",
+            returncode=2,
+        )
+    try:
+        with psycopg.connect(
+            make_conninfo(TEST_DATABASE_URL, dbname="postgres"),
+            autocommit=True,
+            connect_timeout=5,
+        ) as admin:
+            exists = admin.execute(
+                "SELECT 1 FROM pg_database WHERE datname = %s", (name,)
+            ).fetchone()
+            if not exists:
+                admin.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(name)))
+    except psycopg.OperationalError as exc:
+        pytest.exit(
+            "Cannot reach PostgreSQL for the tests. Start the local database with "
+            "`podman compose up -d` (or `docker compose up -d`) from the repo root, "
+            f"or point TEST_DATABASE_URL at a running server.\n{exc}",
+            returncode=2,
+        )
+
+
+@pytest.fixture(scope="session")
+def _test_database():
+    """Fresh schema once per session; each test then just empties the tables."""
+    _ensure_test_database()
+    db.close_pool()
+    with psycopg.connect(TEST_DATABASE_URL, autocommit=True) as conn:
+        conn.execute("DROP SCHEMA public CASCADE")
+        conn.execute("CREATE SCHEMA public")
+    db.get_pool()  # applies the migrations
+    yield
+    db.close_pool()
 
 
 @pytest.fixture
-def isolated_db(tmp_path, monkeypatch):
-    """Point the sqlite layer at a throwaway file for one test."""
+def isolated_db(_test_database, tmp_path, monkeypatch):
+    """An empty database (and a throwaway data directory) for one test."""
     monkeypatch.setattr(db, "DATA_DIR", tmp_path)
-    monkeypatch.setattr(db, "DB_PATH", tmp_path / "test.db")
-    monkeypatch.setattr(db, "_conn", None)
+    with db.connection() as conn:
+        tables = [
+            r["tablename"]
+            for r in conn.execute(
+                "SELECT tablename FROM pg_tables"
+                " WHERE schemaname = 'public' AND tablename <> 'schema_migrations'"
+            )
+        ]
+        conn.execute(
+            sql.SQL("TRUNCATE {} RESTART IDENTITY CASCADE").format(
+                sql.SQL(", ").join(sql.Identifier(t) for t in tables)
+            )
+        )
     yield
-    if db._conn is not None:
-        db._conn.close()
-    db._conn = None
 
 
 @pytest.fixture

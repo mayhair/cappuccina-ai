@@ -107,6 +107,7 @@ async def lifespan(app: FastAPI):
         idle_task.cancel()
         # Drain it so shutdown never leaves a canceled task complaining.
         await asyncio.gather(idle_task, return_exceptions=True)
+        await asyncio.to_thread(db.close_pool)
 
 
 GRAPH = build_graph(ALL_TOOLS)

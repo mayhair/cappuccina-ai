@@ -145,55 +145,6 @@ def test_deleted_event_survives_reload(signed_in, monkeypatch):
     assert db.get_deleted_event_ids(user["id"]) == {"e-1"}
 
 
-# ---------- migration ----------
-
-
-def test_old_single_grant_db_migrates_to_service_rows(isolated_db):
-    """A pre-Calendar database (one grant per user, Gmail only) upgrades in place."""
-    import sqlite3
-
-    raw = sqlite3.connect(db.DB_PATH)
-    raw.executescript(
-        """
-        CREATE TABLE users (
-            id TEXT PRIMARY KEY,
-            email TEXT UNIQUE NOT NULL,
-            display_name TEXT NOT NULL,
-            password_hash TEXT,
-            google_sub TEXT,
-            avatar_url TEXT,
-            created_at TEXT NOT NULL
-        );
-        CREATE TABLE google_grants (
-            user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
-            scopes TEXT NOT NULL DEFAULT '',
-            access_token TEXT NOT NULL DEFAULT '',
-            refresh_token TEXT NOT NULL DEFAULT '',
-            expires_at TEXT,
-            granted_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL
-        );
-        INSERT INTO users VALUES ('u1', 'a@b.com', 'A', NULL, NULL, NULL, 't');
-        INSERT INTO google_grants VALUES ('u1', 'gmail.readonly', 'at', 'rt', NULL, 't', 't');
-        """
-    )
-    raw.commit()
-    raw.close()
-
-    db.get_conn()  # opens + runs _init_schema (and the migration)
-
-    grant = db.get_google_grant("u1", "gmail")
-    assert grant is not None
-    assert grant["scopes"] == "gmail.readonly"
-
-    # A Calendar grant can now coexist without clobbering the Gmail one.
-    db.save_google_grant(
-        "u1", "calendar", scopes="calendar.events", access_token="c", refresh_token="r", expires_at=None
-    )
-    assert db.get_google_grant("u1", "gmail") is not None
-    assert db.get_google_grant("u1", "calendar") is not None
-
-
 # ---------- client unit tests ----------
 
 

@@ -24,7 +24,7 @@ from pathlib import Path
 from app import db, sitebox
 
 # Iterations kept before the oldest non-active one is retired. Same number the
-# SQLite history used; the frontend's iteration bar assumes nothing beyond it.
+# earlier database-backed history used; the frontend's iteration bar assumes nothing beyond it.
 GIT_VERSION_LIMIT = 50
 
 # Rendered diff lines across all files of one response, same as before.

@@ -51,12 +51,12 @@ def test_callback_creates_user_and_session(client, monkeypatch):
 
 
 def test_callback_links_existing_email_account(client, monkeypatch):
-    conn = db.get_conn()
-    conn.execute(
-        "INSERT INTO users (id, email, display_name, password_hash, created_at)"
-        " VALUES ('u-legacy', 'kid@example.com', 'Old Name', 'salt$hash', '2020-01-01T00:00:00+00:00')"
-    )
-    conn.commit()
+    with db.connection() as conn:
+        conn.execute(
+            "INSERT INTO users (id, email, display_name, password_hash, created_at)"
+            " VALUES ('u-legacy', 'kid@example.com', 'Old Name', 'salt$hash',"
+            " '2020-01-01T00:00:00+00:00')"
+        )
 
     monkeypatch.setattr(
         google_oauth, "exchange_code", lambda code, uri: {"access_token": "at"}
@@ -123,9 +123,15 @@ def test_state_is_single_use(client):
 
 
 def test_schema_allows_oauth_only_users(isolated_db):
-    conn = db.get_conn()
-    cols = {r["name"]: r["notnull"] for r in conn.execute("PRAGMA table_info(users)")}
-    assert cols["password_hash"] == 0
+    with db.connection() as conn:
+        cols = {
+            r["column_name"]: r["is_nullable"]
+            for r in conn.execute(
+                "SELECT column_name, is_nullable FROM information_schema.columns"
+                " WHERE table_schema = 'public' AND table_name = 'users'"
+            )
+        }
+    assert cols["password_hash"] == "YES"
     assert "google_sub" in cols
     assert "avatar_url" in cols
     plan = db.create_google_user("a@b.com", "A", "sub-a")

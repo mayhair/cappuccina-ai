@@ -12,6 +12,12 @@ MODEL_ID = os.getenv("MODEL_ID", "z-ai/glm-5.3-flash")
 TITLE_MODEL_ID = os.getenv("TITLE_MODEL_ID", "")
 PARALLEL_API_KEY = os.getenv("PARALLEL_API_KEY", "")
 
+# PostgreSQL connection string (libpq URL). The default matches compose.yaml.
+# An empty host connects over the local Unix socket, e.g. postgresql:///cappuccina.
+DATABASE_URL = os.getenv(
+    "DATABASE_URL", "postgresql://cappuccina:cappuccina@127.0.0.1:5432/cappuccina"
+)
+
 # FMHY (Free Media Heck Yeah) free-media guide, reached through its MCP server.
 # The agent tools fmhy_media_sites/fmhy_search/fmhy_get_links/fmhy_get_section/
 # fmhy_list_sections

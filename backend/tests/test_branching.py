@@ -1,6 +1,5 @@
 """Chat branching: message trees, sibling order and reply parenting."""
 
-import sqlite3
 from types import SimpleNamespace
 
 from app import db
@@ -84,49 +83,6 @@ def test_append_without_parent_is_a_root(isolated_db):
     message = db.list_messages_by_chat([chat["id"]])[chat["id"]][0]
     assert message["parentId"] is None
     assert message["branchIndex"] == 0
-
-
-def test_legacy_rows_backfill_into_one_branch(tmp_path, monkeypatch):
-    """A pre-branching DB gains the columns and links its rows linearly."""
-    legacy = sqlite3.connect(tmp_path / "legacy.db")
-    legacy.executescript(
-        """
-        CREATE TABLE messages (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            chat_id TEXT NOT NULL,
-            role TEXT NOT NULL,
-            content TEXT NOT NULL,
-            reasoning TEXT NOT NULL DEFAULT '',
-            tools TEXT NOT NULL DEFAULT '[]',
-            parts TEXT NOT NULL DEFAULT '[]',
-            thinking_done INTEGER NOT NULL DEFAULT 0,
-            thought_seconds REAL,
-            created_at TEXT NOT NULL
-        );
-        """
-    )
-    for content in ("one", "two", "three"):
-        legacy.execute(
-            "INSERT INTO messages (chat_id, role, content, created_at)"
-            " VALUES ('c1', 'user', ?, '2020-01-01T00:00:00+00:00')",
-            (content,),
-        )
-    legacy.commit()
-
-    legacy.row_factory = sqlite3.Row
-    db._init_schema(legacy)
-
-    cols = {row[1] for row in legacy.execute("PRAGMA table_info(messages)")}
-    assert {"uid", "parent_uid", "branch_index"} <= cols
-    rows = legacy.execute(
-        "SELECT uid, parent_uid, branch_index FROM messages ORDER BY id"
-    ).fetchall()
-    assert [r["uid"] for r in rows] == ["m1", "m2", "m3"]
-    assert rows[0]["parent_uid"] is None
-    assert rows[1]["parent_uid"] == "m1"
-    assert rows[2]["parent_uid"] == "m2"
-    assert all(r["branch_index"] == 0 for r in rows)
-    legacy.close()
 
 
 def test_sync_history_returns_last_visible_uid(isolated_db):

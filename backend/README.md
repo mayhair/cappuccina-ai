@@ -73,7 +73,7 @@ Webpage environments (the canvas a built page renders in):
 
 Every chat's site is a real folder on disk (`backend/data/sites/{site_id}/`) with
 its own git history, driven through a container (`podman` by default; `docker`
-works via `SITE_CONTAINER_CLI`); SQLite keeps only a registry row. Routes are
+works via `SITE_CONTAINER_CLI`); PostgreSQL keeps only a registry row. Routes are
 user-scoped except the preview.
 
 - `GET /api/v1/webpages/{chat_id}` -> `{webpageId, files, updatedAt, activeVersionId,
@@ -134,7 +134,7 @@ the connected calendar's zone, then UTC), so long chats always read the live dat
 - `app/google_oauth.py` — OAuth code flow, token encryption, refresh
 - `app/gmail.py` — Gmail REST client (search/read/draft/send) over httpx
 - `app/calendar.py` — Calendar REST client (list/read/create/update/delete) over httpx
-- `app/db.py` — SQLite (users, sessions, chats, messages, google_grants, oauth_states, images, attachments, webpage_sites, memories — user-scoped, so deleting a chat keeps them). One shared connection whose statements are serialized under a lock, because sync tools run in worker threads (and one model message can carry several parallel tool calls): unsynchronized use made SQLite answer `InterfaceError: bad parameter or other API misuse`
+- `app/db.py` — PostgreSQL via a psycopg connection pool (users, sessions, chats, messages, google_grants, oauth_states, images, attachments, webpage_sites, memories — user-scoped, so deleting a chat keeps them). Configured by `DATABASE_URL`. Each operation takes a pooled connection and runs in a transaction (committed on success, rolled back on error), so sync tools in worker threads — and several parallel tool calls in one model message — never share a connection. The schema is created and upgraded at app startup by numbered migrations, tracked in the `schema_migrations` table. Images, attachments and site workspaces stay on disk under `data/`. To import an old SQLite file once: `python -m scripts.migrate_sqlite_to_postgres --sqlite <path>` (see `SETUP.md` §7.9)
 - `app/sitebox.py` — container runtime for the webpage workspaces (env `SITE_CONTAINER_CLI`, `SITE_IDLE_MINUTES`, `SITE_EXEC_TIMEOUT`, `SITE_BUILD_TIMEOUT`): one container per site, idle stop + on-demand restart, command exec, `finalize_run`, build, `destroy_site` (container, volume and folder, on chat or account deletion). The image tag is the Containerfile's content hash, so editing the image rebuilds it once (`podman image prune` drops the superseded tags); a container that already exists keeps the image and capabilities it was created with
 - `app/webpage_git.py` — git history of a site folder: one tagged commit per AI run or manual save (50-tag cap), diffs from git
 - `app/webpage_preview.py` — what the canvas preview serves for a path (dist/ or root, root-absolute URL rebasing, placeholder). Every html page gets the preview runtime injected first: an in-memory `localStorage`/`sessionStorage` when the sandboxed (opaque-origin) frame's real one throws, and a relay that posts uncaught errors to the canvas, which shows them with an "Ask Cappuccina to fix" button. The site's own `<script src>` tags are served `crossorigin` so those errors keep their real message. Files on disk are never changed
