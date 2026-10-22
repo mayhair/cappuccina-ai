@@ -737,6 +737,47 @@ itself: at startup the backend runs any new numbered migration (tracked in the
 `journalctl -u cappuccina -n 50` after a restart that shipped a migration.
 Take a backup first (§7.10) when an update adds one.
 
+#### Optional: a one-command deploy script
+
+To avoid typing those commands on every update, put them in a root-owned script
+on the server. Create `/usr/local/bin/deploy-cappuccina` as the admin user:
+
+```sh
+#!/bin/sh
+set -e
+cd /
+sudo -u cappuccina git -C /srv/cappuccina pull --ff-only
+sudo -u cappuccina /srv/cappuccina/backend/.venv/bin/pip install -q -r /srv/cappuccina/backend/requirements.txt
+systemctl restart cappuccina.service
+systemctl --no-pager status cappuccina.service | head -n 5
+```
+
+```bash
+sudo chown root:root /usr/local/bin/deploy-cappuccina
+sudo chmod 755 /usr/local/bin/deploy-cappuccina
+```
+
+`set -e` stops the script before the restart if the pull or the install fails.
+The `pip install` does nothing when the dependencies did not change. A
+playwright upgrade still needs the `playwright install chromium` line above,
+run by hand.
+
+Then deploy from your own machine with one command (`-t` lets sudo ask for your
+password; the session closes when the script ends):
+
+```bash
+ssh -t <your-vps> sudo deploy-cappuccina
+```
+
+To skip the password prompt, allow only this script without a password
+(`sudo visudo -f /etc/sudoers.d/deploy-cappuccina`):
+
+```
+<admin-user> ALL=(root) NOPASSWD: /usr/local/bin/deploy-cappuccina
+```
+
+This is safe only while root owns the script and nobody else can write to it.
+
 ### 7.7 What the app creates on first use
 
 - The database **tables** (users, sessions, chats, messages, webpage registry)
