@@ -65,15 +65,17 @@ def _fill_chat(user_id: str, chat_id: str) -> dict:
 
 
 def _count(table: str, user_id: str) -> int:
-    return db.get_conn().execute(
-        f"SELECT COUNT(*) FROM {table} WHERE user_id = :uid", {"uid": user_id}
-    ).fetchone()[0]
+    with db.connection() as conn:
+        return conn.execute(
+            f"SELECT COUNT(*) AS n FROM {table} WHERE user_id = %(uid)s", {"uid": user_id}
+        ).fetchone()["n"]
 
 
 def _messages(chat_id: str) -> int:
-    return db.get_conn().execute(
-        "SELECT COUNT(*) FROM messages WHERE chat_id = :id", {"id": chat_id}
-    ).fetchone()[0]
+    with db.connection() as conn:
+        return conn.execute(
+            "SELECT COUNT(*) AS n FROM messages WHERE chat_id = %(id)s", {"id": chat_id}
+        ).fetchone()["n"]
 
 
 # ---------- chat deletion ----------

@@ -11,8 +11,11 @@ How to install, configure, and run the app on **Windows** (PowerShell) and
 | Backend  | FastAPI + LangGraph (`backend/`) | 8000      |
 
 The Vite dev server proxies `/api` → `http://localhost:8000`, so the browser
-only talks to the frontend port. Chat history lives in SQLite at
-`backend/data/cappuccina.db` (auto-created, gitignored — delete it to reset).
+only talks to the frontend port. Chat history lives in **PostgreSQL**
+(`DATABASE_URL`; locally a container from `compose.yaml`, see §3). The tables
+are created and migrated automatically at startup. Uploaded images,
+attachments and webpage workspaces stay on disk under `backend/data/`
+(gitignored).
 
 ## 2. Prerequisites
 
@@ -20,8 +23,12 @@ only talks to the frontend port. Chat history lives in SQLite at
 - **Node.js 20 LTS or newer** (Vite 5 requirement) + npm
 - **Podman** (rootless) — each webpage canvas runs in its own site container
   (from the `node:22-bookworm-slim`-based image). Verified on 5.7 under Ubuntu
-  26.04 (§7); on Windows, run `podman machine init && podman machine start`
-  once. Docker Desktop works too: set `SITE_CONTAINER_CLI=docker` (see §3).
+  26.04 (§7); on Windows, create a **rootless** machine once with
+  `podman machine init && podman machine start` (details in §3). Docker
+  Desktop works too: set `SITE_CONTAINER_CLI=docker` (see §3).
+- **PostgreSQL 18** for the database. For local development it runs in a
+  container from `compose.yaml` (same Podman, see §3); on a server you install
+  it from the PostgreSQL apt repository (§7.1).
 - A terminal: **PowerShell 5.1+** on Windows, any POSIX shell on macOS/Linux
 - API keys: an **OpenRouter API key** (required, chat model), an **OpenAI API
   key** (required, image generation), a **Parallel Search API key**
@@ -86,6 +93,90 @@ missing shared library).
 > If Windows blocks the activation script, run
 > `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` once, then retry.
 
+### PostgreSQL for local development (Podman)
+
+The backend needs a running PostgreSQL. `compose.yaml` at the repo root defines
+one service, `postgres` (image `docker.io/library/postgres:18`; user, password
+and database are all `cappuccina`), published on `127.0.0.1:5432`, with a named
+volume `cappuccina-pg` and a healthcheck.
+
+**One-time setup on Windows.** Install Podman Desktop (WSL2 backend) and a
+compose provider: `podman compose` is only a wrapper, and Podman Desktop offers
+to install `docker-compose` (otherwise `pip install podman-compose`). Then
+create the Podman machine **rootless**, which is the default:
+
+```powershell
+# Windows (PowerShell) — one-time
+podman machine init
+podman machine start
+podman machine inspect --format "{{.Rootful}}"     # must print: false
+```
+
+If you create the machine in Podman Desktop's wizard instead, leave the
+"Machine with root privileges" option **off**. Rootless matters here because
+with a rootful WSL machine the ports that containers publish are not forwarded
+to Windows, so the backend and the tests cannot reach `127.0.0.1:5432`.
+Docker Desktop works as well — use `docker compose` for every command here.
+
+**Every time you start working** (repo root):
+
+```powershell
+# Windows (PowerShell)
+podman machine start                  # if the machine isn't already running
+podman compose up -d
+podman compose ps                     # postgres should become "healthy"
+```
+
+```bash
+# macOS / Linux — repo root
+podman compose up -d
+podman compose ps
+```
+
+When `DATABASE_URL` is unset the backend uses
+`postgresql://cappuccina:cappuccina@127.0.0.1:5432/cappuccina`, which is exactly
+this container, so local dev needs **no** change to `backend/.env`. The data
+survives `podman compose down` and reboots (it lives in the `cappuccina-pg`
+volume).
+
+It uses `127.0.0.1` rather than `localhost` because the Podman/WSL port relay is
+IPv4-only, and on Windows `localhost` tries IPv6 first, which makes every
+connection hang for seconds.
+
+Useful commands:
+
+```bash
+podman compose logs postgres                     # server log
+podman compose exec postgres psql -U cappuccina  # SQL shell (\dt lists tables, \q quits)
+podman compose down                              # stop, keep the data
+podman compose down -v                           # stop AND delete the volume: empty database
+```
+
+Troubleshooting:
+
+- **`port is already allocated` / `address already in use` on 5432** — a native
+  PostgreSQL (or another container) already holds the port. Stop it, or change
+  the left-hand number in the `ports:` line of `compose.yaml` (e.g. `5433:5432`)
+  and set `DATABASE_URL=postgresql://cappuccina:cappuccina@127.0.0.1:5433/cappuccina`
+  in `backend/.env`.
+- **`unable to connect to Podman socket` / `cannot connect to Podman`** — the
+  machine isn't running. `podman machine start` (or start it in Podman Desktop).
+- **Backend says connection refused** — `podman compose ps` must show
+  `postgres` as `healthy`; give it a few seconds after `up -d`, then read
+  `podman compose logs postgres`.
+- **Connection refused although the container is `healthy` (Windows)** — check
+  `podman machine inspect --format "{{.Rootful}}"`. If it says `true`, the
+  machine was created rootful: `podman machine stop`,
+  `podman machine set --rootful=false`, `podman machine start`,
+  `podman compose up -d`. Containers and volumes made in the other mode aren't
+  visible after switching, so the dev database starts empty — load data again
+  with the migration script (§7.9) if you want it.
+- **Connections take ~8 s / pool timeout** — you're using `localhost`; use
+  `127.0.0.1`.
+- **Start from scratch** — `podman compose down -v && podman compose up -d`.
+  This deletes every chat; uploaded files under `backend/data/` stay on disk
+  (delete that folder too for a full reset).
+
 ### Configure environment
 
 Copy the example env file and fill in your keys:
@@ -112,6 +203,7 @@ nano .env
 | `GOOGLE_CLIENT_ID`     | Yes        | Google OAuth web client (see §4)                             |
 | `GOOGLE_CLIENT_SECRET` | Yes        | Google OAuth web client (see §4)                             |
 | `TOKEN_ENC_KEY`        | Yes        | Encrypts Gmail tokens at rest; `openssl rand -hex 32`        |
+| `DATABASE_URL`         | Servers    | PostgreSQL connection string; defaults to the local dev container (`postgresql://cappuccina:cappuccina@127.0.0.1:5432/cappuccina`). On the VPS: `postgresql:///cappuccina` (§7.1) |
 | `APP_ORIGIN`           | No         | Origin users browse; defaults to `http://localhost:5173`     |
 | `FMHY_MCP_URL`         | No         | FMHY free-media MCP endpoint; blank disables those tools     |
 | `SITE_CONTAINER_CLI`   | Webpages   | Container CLI for the site sandboxes; defaults to `podman`  |
@@ -165,6 +257,8 @@ Gmail connection. In [Google Cloud Console](https://console.cloud.google.com/):
    [redirect-URI rules](https://developers.google.com/identity/protocols/oauth2/web-server#uri-validation)
    prefer HTTPS for anything that isn't localhost — the live deployment
    registers plain `http://` and works, but use `https://` where you can.
+   The backend takes the scheme from `APP_ORIGIN`, so change the Console and
+   `APP_ORIGIN` together (§7.5 has the steps).
 
 5. Copy the **client ID** and **client secret** into `backend/.env` as
    `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`, and generate the token key:
@@ -356,6 +450,75 @@ Expect `rootless: true`, `cgroupVersion: v2`, `cgroupManager: systemd`, then
 `hello`. `sudo -l -U cappuccina` should report that the user is **not allowed**
 to run sudo — that is the intended state, not a problem to fix.
 
+#### PostgreSQL (official PGDG repository)
+
+The database runs on the same box. Install it from the PostgreSQL project's own
+apt repository (PGDG, `apt.postgresql.org`), not Ubuntu's package, so minor
+releases arrive straight from upstream. The `postgresql-common` package ships a
+script that adds the signed repository for your Ubuntu release:
+
+```bash
+sudo apt install -y postgresql-common
+sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y   # adds the PGDG source + signing key, runs apt update
+sudo apt install -y postgresql-18
+```
+
+If the script reports that your release isn't supported yet, check
+<https://www.postgresql.org/download/linux/ubuntu/> for the current method. The
+manual alternative is a key in `/etc/apt/keyrings/postgresql.asc`
+(<https://www.postgresql.org/media/keys/ACCC4CF8.asc>) referenced by a
+`signed-by=` option in `/etc/apt/sources.list.d/pgdg.sources`.
+
+**Major version 18** matches the `postgres:18` image used for local development
+(§3), so dev and production behave the same. To see which majors the repository
+offers, run `apt-cache search --names-only '^postgresql-[0-9]+$'`. To choose a
+newer one, install `postgresql-<N>` instead — and develop against the same
+major by changing the image tag in `compose.yaml`.
+
+The package creates and starts a cluster named `main` on port 5432, listening on
+`localhost` only (the default `listen_addresses`). Leave that alone, and **do not
+open 5432 in the firewall** — no `ufw allow` rule for it. The app talks to
+PostgreSQL over the local Unix socket with **peer authentication**: the server
+trusts the OS user name, so the `cappuccina` OS user can log in as the
+`cappuccina` role and nobody else can. The role has no password at all, so there
+is nothing to leak into `.env`.
+
+Create the role (login, no superuser, no password) and the database it owns,
+plus a second database for the test suite (§7.8):
+
+```bash
+cd / && sudo -u postgres createuser --no-superuser --no-createdb --no-createrole cappuccina
+cd / && sudo -u postgres createdb --owner=cappuccina cappuccina
+cd / && sudo -u postgres createdb --owner=cappuccina cappuccina_test
+```
+
+Verify, as the deploy user (peer auth: no password prompt):
+
+```bash
+cd / && sudo -u cappuccina psql -d cappuccina -c 'select version()'      # PostgreSQL 18.x
+ss -ltn 'sport = :5432'                                                  # only 127.0.0.1 (and ::1), never 0.0.0.0
+```
+
+The site containers (sitebox) run untrusted generated code, so confirm they
+cannot get at the database. Localhost-only listening plus a role without a
+password already covers it; this proves the first half from inside a container:
+
+```bash
+cd / && sudo -u cappuccina env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin HOME=/home/cappuccina \
+  sh -c 'podman run --rm docker.io/library/alpine sh -c "nc -z -w 2 10.0.2.2 5432 && echo REACHABLE || echo blocked"'
+```
+
+Expect `blocked`. (`10.0.2.2` is the host's loopback as seen from a slirp4netns
+container; if your Podman uses `pasta` instead, try `host.containers.internal`.)
+
+**Keeping it updated.** Minor releases (18.x) come with the normal `sudo apt
+update && sudo apt upgrade`; PostgreSQL restarts itself, so do it when a few
+seconds of downtime is fine (the backend's pool reconnects). A **major**
+upgrade is a deliberate step: install the new `postgresql-<N>` package, then
+`sudo pg_upgradecluster 18 main` (it creates the new cluster, copies the data
+and moves it onto port 5432), check the app, and only then `sudo pg_dropcluster
+18 main`. Take a backup first (§7.10).
+
 ### 7.2 Checkout, venv, `.env`
 
 The repo is **private**, so give the box its own read-only credential *before*
@@ -388,6 +551,7 @@ production values:
 | Variable | Value on a server |
 |---|---|
 | `APP_ORIGIN` | the origin **users browse**, scheme included (live: `http://cappuccina.mayhair.net`). It builds the three Google redirect URIs, and the session cookie gets its `Secure` flag only when it starts with `https://` — so a plain-`http` origin means a cookie that is also sent over http |
+| `DATABASE_URL` | `postgresql:///cappuccina` — no host, so it uses the Unix socket and peer auth as the `cappuccina` OS user (PostgreSQL install and role: §7.1). Without this line the backend falls back to the local-dev URL and fails to connect |
 | `SITE_CONTAINER_CLI` | leave the default `podman` |
 | `SITE_IDLE_MINUTES`, `SITE_*_TIMEOUT` | defaults are fine |
 
@@ -533,6 +697,23 @@ repo and have to be set in the dashboard:
   https://cappuccina.<your-domain>/api/v1/calendar/callback
   ```
 
+  **The scheme comes from `APP_ORIGIN`, not from the browser.** The backend
+  builds every `redirect_uri` it sends Google from `APP_ORIGIN`
+  (`backend/app/google_oauth.py`). It ignores the URL the visitor actually
+  used. So switching the Console entries to `https://` while `APP_ORIGIN` still
+  says `http://` breaks sign-in with `redirect_uri_mismatch`. To move to HTTPS:
+
+  1. Add the `https://` trio in the Console. Keep the `http://` trio until the
+     switch is done, because Google accepts any registered URI. Console changes
+     can take a few minutes to apply.
+  2. Set `APP_ORIGIN=https://cappuccina.<your-domain>` in the server's
+     `backend/.env` and restart the backend (`sudo systemctl restart cappuccina`).
+  3. Turn on **SSL/TLS → Edge Certificates → Always Use HTTPS** in Cloudflare
+     for the domain. With an `https://` origin the session cookie is `Secure`,
+     and browsers drop it over plain http. A visitor on `http://` would get
+     through Google and still land logged out.
+  4. Remove the `http://` trio from the Console.
+
 Verify the worker is really proxying:
 
 ```bash
@@ -550,13 +731,19 @@ sudo systemctl restart cappuccina.service
 
 Frontend changes are `npm run build && npx wrangler deploy` from your machine.
 Nothing else needs restarting: the site image is rebuilt by the app whenever the
-Containerfile's hash changes.
+Containerfile's hash changes. Database changes are applied by the restart
+itself: at startup the backend runs any new numbered migration (tracked in the
+`schema_migrations` table). There is no separate migrate command; check
+`journalctl -u cappuccina -n 50` after a restart that shipped a migration.
+Take a backup first (§7.10) when an update adds one.
 
 ### 7.7 What the app creates on first use
 
-- `backend/data/cappuccina.db` (users, sessions, chats, messages, webpage
-  registry) plus `data/attachments/`, `data/images/` and `data/sites/` — all
-  gitignored, all created on demand.
+- The database **tables** (users, sessions, chats, messages, webpage registry)
+  in the `cappuccina` PostgreSQL database, created by the startup migrations.
+  Next to it, on disk, `backend/data/attachments/`, `data/images/` and
+  `data/sites/` — gitignored, created on demand, and *not* in the database, so
+  they need their own backup (§7.10).
 - The site image, built lazily by the first `webpage_shell` call and tagged
   `cappuccina-site:<first 12 hex of the sha256 of backend/sitebox/Containerfile>`
   (`podman images cappuccina-site`). The build is capped at 600 s; on a slow box
@@ -571,12 +758,14 @@ without it.
 ### 7.8 Acceptance test on the box
 
 The site runtime has its own suite, and it is the one test that must pass on a
-server (it needs a real engine, so it skips itself elsewhere). As the deploy
-user, in the same environment the service runs in:
+server (it needs a real engine, so it skips itself elsewhere). The tests use a
+database of their own, `TEST_DATABASE_URL`, never the real one. Point it at the
+`cappuccina_test` database created in §7.1 (the suite resets its tables). As
+the deploy user, in the same environment the service runs in:
 
 ```bash
 cd / && sudo -u cappuccina /srv/cappuccina/backend/.venv/bin/pip install -q -r /srv/cappuccina/backend/requirements-dev.txt
-cd / && sudo -u cappuccina sh -c 'cd /srv/cappuccina/backend && .venv/bin/python -m pytest tests/test_sitebox.py -q -rs'
+cd / && sudo -u cappuccina sh -c 'cd /srv/cappuccina/backend && TEST_DATABASE_URL=postgresql:///cappuccina_test .venv/bin/python -m pytest tests/test_sitebox.py -q -rs'
 ```
 
 Expected on the live box: `8 passed, 1 skipped` — the skip is
@@ -596,6 +785,169 @@ runs:
 ```bash
 cd / && sudo -u cappuccina podman ps --filter name=capweb
 ```
+
+### 7.9 One-time cutover from SQLite to PostgreSQL
+
+Only for a box that still runs the SQLite version (`backend/data/cappuccina.db`).
+A fresh install skips this section. The service is down for the few minutes the
+copy takes. The old `.db` file is never modified, which is what makes rollback
+cheap. PostgreSQL must already be installed with the `cappuccina` role and
+database (§7.1), and `cappuccina` must hold no rows yet (a fresh database; the
+script creates the tables itself).
+
+```bash
+# 1. Stop the app, so nothing writes while you copy
+sudo systemctl stop cappuccina.service
+
+# 2. Back up the whole data directory (database file, images, attachments, sites)
+sudo tar -czf /root/cappuccina-data-pre-pg.tar.gz -C /srv/cappuccina/backend data
+
+# 3. A consistent SQLite copy (handles the -wal/-shm side files correctly)
+sudo apt install -y sqlite3                       # the CLI, if missing
+cd / && sudo -u cappuccina sqlite3 /srv/cappuccina/backend/data/cappuccina.db ".backup /tmp/cappuccina-pre-pg.db"
+ls -l /tmp/cappuccina-pre-pg.db
+
+# 4. Get the PostgreSQL version of the code
+cd / && sudo -u cappuccina git -C /srv/cappuccina pull --ff-only
+cd / && sudo -u cappuccina /srv/cappuccina/backend/.venv/bin/pip install -r /srv/cappuccina/backend/requirements.txt
+
+# 5. Point the app at PostgreSQL (add the line to backend/.env, §7.2)
+echo 'DATABASE_URL=postgresql:///cappuccina' | sudo -u cappuccina tee -a /srv/cappuccina/backend/.env >/dev/null
+
+# 6. Copy the data, as the deploy user (peer auth), from backend/
+cd / && sudo -u cappuccina sh -c 'cd /srv/cappuccina/backend && .venv/bin/python -m scripts.migrate_sqlite_to_postgres --sqlite /tmp/cappuccina-pre-pg.db'
+```
+
+The script reads `DATABASE_URL` from `.env`, applies the schema migrations
+(so the tables exist afterwards), then copies all 12 tables (`users`,
+`sessions`, `chats`, `messages`, `google_grants`, `oauth_states`,
+`sent_drafts`, `deleted_events`, `images`, `attachments`, `webpage_sites`,
+`memories`) in one transaction: either everything is copied or nothing is. It
+refuses to run if any of those tables already holds rows; pass
+`--force-truncate` only to redo a failed attempt on purpose, because it empties
+all 12 tables first. At the end it prints a table with the SQLite count, the
+PostgreSQL count and the number of skipped orphan rows (rows whose parent is
+missing) for every table, marks any difference with `<-- MISMATCH`, and exits
+non-zero if one exists. For each table, `sqlite` must equal `postgres` plus
+`skipped`; a non-zero `skipped` is explained in the lines below the table.
+
+To check the counts yourself, compare all 12 tables:
+
+```bash
+for t in users sessions chats messages google_grants oauth_states sent_drafts deleted_events images attachments webpage_sites memories; do
+  a=$(sqlite3 /tmp/cappuccina-pre-pg.db "select count(*) from $t")
+  b=$(cd / && sudo -u cappuccina psql -d cappuccina -Atc "select count(*) from $t")
+  echo "$t sqlite=$a postgres=$b"
+done
+```
+
+Then start the app and smoke-test it:
+
+```bash
+sudo systemctl start cappuccina.service
+journalctl -u cappuccina -n 50                    # no tracebacks
+curl -s -o /dev/null -w '%{http_code}\n' https://cappuccina-api.<your-domain>/api/v1/auth/me   # 401
+```
+
+In the browser: sign in, check that old chats and their images are there, send
+a message, and open a chat that owns a webpage. Set up the nightly backup
+(§7.10) the same day.
+
+**Rollback** (the old file is untouched, so this loses only what was written
+after the cutover): `sudo systemctl stop cappuccina`, then in `backend/.env`
+delete the `DATABASE_URL` line, check out the commit you were running before
+(`cd / && sudo -u cappuccina git -C /srv/cappuccina checkout <previous-commit>`),
+and `sudo systemctl start cappuccina`. If `data/` was damaged, restore it from
+`/root/cappuccina-data-pre-pg.tar.gz` first.
+
+**Clean up.** Keep the old `cappuccina.db`, `/tmp/cappuccina-pre-pg.db` and the
+tarball for a short while, then delete them. They hold user data, and
+the privacy policy promises that deleted data leaves backups within 30 days —
+so these files follow the same 30-day rule as every other backup (§7.10). Do not
+let them outlive it:
+
+```bash
+sudo rm -f /tmp/cappuccina-pre-pg.db /root/cappuccina-data-pre-pg.tar.gz
+cd / && sudo -u cappuccina rm -f /srv/cappuccina/backend/data/cappuccina.db*
+```
+
+### 7.10 Backups
+
+Two things hold user data: the PostgreSQL database and the files in
+`backend/data/` (`images/`, `attachments/`, `sites/`). A database dump alone
+restores the chats but not their pictures or webpages, so back up both.
+
+The privacy policy tells users that after they delete an account, copies in
+backups are deleted **within 30 days** (`legal/privacy-policy.md`, retention
+section; the terms say backup copies are kept "for a short time"). So rotate at
+30 days and never keep a longer-lived copy anywhere, including off-box ones.
+
+A nightly systemd timer, run as the deploy user (peer auth, no password), writes
+to `/var/backups/cappuccina`:
+
+```bash
+sudo install -d -o cappuccina -g cappuccina -m 700 /var/backups/cappuccina
+
+sudo tee /etc/systemd/system/cappuccina-backup.service >/dev/null <<'UNIT'
+[Unit]
+Description=Cappuccina nightly backup (database + data directory)
+
+[Service]
+Type=oneshot
+User=cappuccina
+Group=cappuccina
+UMask=0077
+WorkingDirectory=/srv/cappuccina/backend
+ExecStart=/bin/sh -c 'set -e; d=/var/backups/cappuccina; s=$$(date +%%F); \
+  pg_dump -Fc -d cappuccina -f $$d/db-$$s.dump; \
+  tar -czf $$d/data-$$s.tar.gz -C /srv/cappuccina/backend data; \
+  find $$d -type f \\( -name "db-*.dump" -o -name "data-*.tar.gz" \\) -mtime +29 -delete'
+UNIT
+
+sudo tee /etc/systemd/system/cappuccina-backup.timer >/dev/null <<'UNIT'
+[Unit]
+Description=Nightly Cappuccina backup
+
+[Timer]
+OnCalendar=*-*-* 03:30:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+UNIT
+
+sudo systemctl daemon-reload
+sudo systemctl enable --now cappuccina-backup.timer
+sudo systemctl start cappuccina-backup.service        # run once now
+journalctl -u cappuccina-backup -n 20
+ls -l /var/backups/cappuccina
+```
+
+`pg_dump` takes a consistent snapshot without stopping the app. The `data/`
+tarball is not atomic (a file can change mid-copy), which is acceptable here:
+files are written once and rarely edited. Files younger than 30 days are kept,
+older ones are deleted by the last line of the script. (`%%`, `$$` and `\\(` are
+systemd escaping for the unit file; the shell sees `%`, `$` and `\(`. Without
+`$$`, systemd would replace `$d` and `$s` with empty strings itself.)
+
+**Restore** the database into an empty one (here a scratch copy first, so you
+can look before replacing anything):
+
+```bash
+cd / && sudo -u postgres createdb --owner=cappuccina cappuccina_restore
+cd / && sudo -u cappuccina pg_restore -d cappuccina_restore --no-owner /var/backups/cappuccina/db-<date>.dump
+cd / && sudo -u cappuccina psql -d cappuccina_restore -c 'select count(*) from users'
+```
+
+For a real restore stop the service, `dropdb` and `createdb` the
+`cappuccina` database (as `postgres`, owner `cappuccina`), `pg_restore -d
+cappuccina`, restore `data/` with `tar -xzf /var/backups/cappuccina/data-<date>.tar.gz -C
+/srv/cappuccina/backend` as the deploy user, then start the service.
+
+**Off-box copies.** `/var/backups` lives on the same disk as the database, so it
+does not survive losing the VPS. Copy the files elsewhere (a storage bucket via
+`rclone`, or `rsync` to another machine) and give the remote copy the same
+30-day retention. Encrypt it if the destination is not yours alone.
 
 ## 8. Verify it works
 
@@ -621,6 +973,10 @@ cd / && sudo -u cappuccina podman ps --filter name=capweb
    ```
 
    Install dev deps first if needed: `pip install -r requirements-dev.txt`.
+   The tests need the PostgreSQL dev container running (`podman compose up -d`,
+   §3). They use `TEST_DATABASE_URL`, which defaults to
+   `postgresql://cappuccina:cappuccina@127.0.0.1:5432/cappuccina_test`; the
+   suite creates that database itself, so your real dev data is never touched.
 
 2. **In the browser:** sign in with Google, send a message. A tool-using
    question (e.g. "weather in London") should show a *Thought for …* block with
@@ -681,14 +1037,17 @@ cd / && sudo -u cappuccina podman ps --filter name=capweb
 | CORS errors in dev | You're not on `http://localhost:5173` — use that exact origin |
 | `401` on chat send | Session expired — log out and back in |
 | Sign-in says Google isn't set up | Missing `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET` in `backend/.env` |
-| `redirect_uri_mismatch` from Google | The redirect URIs in Console must match `APP_ORIGIN` exactly (`http://localhost:5173/api/v1/...`) |
+| `redirect_uri_mismatch` from Google | The redirect URIs in Console must match `APP_ORIGIN` exactly (`http://localhost:5173/api/v1/...`), scheme included. Changing the Console to `https://` without also changing `APP_ORIGIN` causes this (§7.5) |
+| Google sign-in finishes but you are still logged out | `APP_ORIGIN` is `https://`, so the session cookie is `Secure`, but you browsed over `http://`. Turn on Cloudflare's **Always Use HTTPS** (§7.5) |
 | "Access blocked" during sign-in | Your Google account isn't in **Test users** on the consent screen |
 | Gmail connect instantly errors | Consent-screen scopes missing, or `TOKEN_ENC_KEY` empty |
 | Gmail disconnects every ~7 days | Testing-mode refresh tokens expire weekly — reconnect in Settings (see §4) |
 | Search tool fails, chat is fine | Missing/invalid `PARALLEL_API_KEY` in `backend/.env` |
 | Model errors on startup | Missing `OPENROUTER_API_KEY`, or `MODEL_ID` your key can't access |
 | Thinking blocks always say "Thinking..." | Stale DB from before durations were stored — fixed going forward; old rows show "Thought" |
-| Weird local state | Delete `backend/data/` to reset all chats and stored files (fresh `CREATE TABLE`s + migrations re-run on next start) |
+| Weird local state | Reset the database with `podman compose down -v && podman compose up -d` (§3), and delete `backend/data/` to drop stored files; migrations re-run on the next start |
+| `connection refused` to `127.0.0.1:5432` / backend won't start | The PostgreSQL container isn't running or isn't healthy yet: `podman machine start`, `podman compose up -d`, `podman compose ps` (§3). On the VPS: `systemctl status postgresql` and the `DATABASE_URL` line in `.env` (§7.2) |
+| `Peer authentication failed` / `role "…" does not exist` on the VPS | The backend must run as the OS user `cappuccina` and the role of the same name must exist (§7.1) |
 | `pip install` fails on Windows | Use a matching Python 3.11+ from python.org; avoid the Store shim (`py -m pip install -r requirements.txt`) |
 | Playwright `Executable doesn't exist` | Run `npx playwright install chromium` |
 | **"Testing webpages isn't set up on this server"** from `check_webpage` | Chromium is missing *or* cannot start — on Linux run `sudo .venv/bin/python -m playwright install-deps chromium`, then `python -m playwright install chromium` in the venv (§3); the backend log (`journalctl -u cappuccina`) has the real cause |
@@ -706,10 +1065,11 @@ cd / && sudo -u cappuccina podman ps --filter name=capweb
 - `src/` — React UI (`components/ChatWindow.jsx`, `hooks/useChatController.js`,
   `components/MemoryManager.jsx` for Settings → Memory)
 - `backend/app/` — FastAPI routes (`main.py`), OAuth (`google_oauth.py`), Gmail
-  client (`gmail.py`), schemas, SQLite (`db.py`), config
+  client (`gmail.py`), schemas, PostgreSQL pool + migrations (`db.py`), config
 - `backend/agent/` — LangGraph (`graph.py`), model factory, tools
 - `backend/tests/` — pytest suite (auth, linking, token refresh, Gmail)
-- `backend/data/` — SQLite file + sharded `attachments/`, `images/` and
-  `sites/` trees (all created at runtime, ignored by git)
+- `backend/data/` — sharded `attachments/`, `images/` and `sites/` trees (all
+  created at runtime, ignored by git; chat data itself is in PostgreSQL)
+- `compose.yaml` — the local PostgreSQL dev container (§3)
 - `scripts/` — Playwright verification scripts + `dev-all.mjs` (dual runner)
 - `assets/` — static images served as `/plates/...`

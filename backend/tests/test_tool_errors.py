@@ -2,7 +2,7 @@
 
 LangGraph's default handler re-raises anything that is not a bad-arguments
 error, so one tool bug used to take the whole SSE stream with it: the reply was
-lost and uvicorn logged an ASGI traceback (the sqlite misuse from parallel
+lost and uvicorn logged an ASGI traceback (a database misuse error from parallel
 tool calls arrived exactly this way). The agent graph now hands the failure
 back to the model as an error ToolMessage.
 """

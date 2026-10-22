@@ -59,16 +59,16 @@ def test_memories_survive_chat_deletion_but_not_user_deletion(isolated_db):
     db.create_memory(user["id"], "Likes cats", source_chat_id=chat["id"])
     db.delete_chat(user["id"], chat["id"])
     assert db.count_memories(user["id"]) == 1
-    db.get_conn().execute("DELETE FROM users WHERE id = :id", {"id": user["id"]})
-    db.get_conn().commit()
+    with db.connection() as conn:
+        conn.execute("DELETE FROM users WHERE id = %(id)s", {"id": user["id"]})
     assert db.count_memories(user["id"]) == 0
 
 
 def test_memory_enabled_defaults_on_and_toggles(isolated_db):
     user = _user()
-    assert user["memory_enabled"] == 1
+    assert user["memory_enabled"] is True
     db.set_memory_enabled(user["id"], False)
-    assert db.get_user_by_id(user["id"])["memory_enabled"] == 0
+    assert db.get_user_by_id(user["id"])["memory_enabled"] is False
 
 
 def test_delete_all_memories(isolated_db):

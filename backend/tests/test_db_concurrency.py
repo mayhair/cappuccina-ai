@@ -1,12 +1,11 @@
-"""The shared sqlite connection under parallel tool execution.
+"""The shared connection pool under parallel tool execution.
 
 Sync tools run in worker threads (LangChain runs them in an executor) and a
 model can emit several tool calls in one message, which the tool node gathers.
-Every path below used to expose the one shared connection to unsynchronized
-statements: SQLite answered SQLITE_MISUSE ("InterfaceError: bad parameter or
-other API misuse"), or a second connection appeared without the schema
-("no such table", "database is locked"), and the exception escaped the tool,
-the graph and the SSE stream.
+Every path below used to expose a single shared connection to unsynchronized
+statements, and the exception escaped the tool, the graph and the SSE stream.
+Now each statement borrows its own pooled connection, and the get-or-create
+race is settled by the database (INSERT ... ON CONFLICT).
 """
 
 import threading
@@ -35,10 +34,11 @@ def _run_parallel(target, count: int) -> list[BaseException]:
 
 
 def _site_rows(chat_id: str) -> int:
-    return db.get_conn().execute(
-        "SELECT COUNT(*) AS n FROM webpage_sites WHERE chat_id = :chat_id",
-        {"chat_id": chat_id},
-    ).fetchone()["n"]
+    with db.connection() as conn:
+        return conn.execute(
+            "SELECT COUNT(*) AS n FROM webpage_sites WHERE chat_id = %(chat_id)s",
+            {"chat_id": chat_id},
+        ).fetchone()["n"]
 
 
 def test_parallel_writes_claim_one_site_and_land_every_file(isolated_db):
@@ -88,7 +88,7 @@ def test_get_or_create_gives_every_thread_the_same_site(isolated_db):
     assert _site_rows(chat["id"]) == 1
 
 
-def test_same_insert_across_threads_does_not_misuse_the_connection(isolated_db):
+def test_same_insert_across_threads_shares_the_pool_safely(isolated_db):
     """One SQL text from many threads at once: the statement race that crashed."""
     user = db.create_google_user("hammer@example.com", "H", "google-sub-hammer")
     thread_count = 8

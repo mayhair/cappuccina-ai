@@ -1,0 +1,28 @@
+# Local development database. Works with `podman compose` and `docker compose`:
+#   podman compose up -d      start (first run pulls the image)
+#   podman compose down       stop, data kept in the cappuccina-pg volume
+#   podman compose down -v    stop and wipe the data
+services:
+  postgres:
+    # Fully qualified so Podman does not ask which registry to use.
+    image: docker.io/library/postgres:18
+    environment:
+      POSTGRES_USER: cappuccina
+      POSTGRES_PASSWORD: cappuccina
+      POSTGRES_DB: cappuccina
+    ports:
+      # Loopback only: the dev database is never reachable from the network.
+      - "127.0.0.1:5432:5432"
+    volumes:
+      # PostgreSQL 18+ images keep PGDATA at /var/lib/postgresql/18/docker and
+      # expect the volume at /var/lib/postgresql (not .../data as before 18).
+      - cappuccina-pg:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cappuccina -d cappuccina"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  cappuccina-pg:
