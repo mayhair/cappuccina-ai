@@ -599,6 +599,8 @@ export function SettingsDialog({
   const backRef = useRef(null)
   const rowRefs = useRef({})
   const adultEnabled = user.adultModeEnabled !== false
+  const gmailEnabled = user.gmailEnabled === true
+  const calendarEnabled = user.calendarEnabled === true
 
   const sections = [
     {
@@ -693,35 +695,43 @@ export function SettingsDialog({
           },
         ]
       : []),
-    {
-      key: 'connections',
-      icon: <MailIcon />,
-      label: t('settings.nav.connections'),
-      content: (
-        <>
-          <h3 className="settings-heading">{t('settings.nav.connections')}</h3>
-          {SHOW_CONNECTIONS_TESTING_NOTE && <TestingNote />}
-          <section className="settings-section">
-            <h4>{t('settings.connections.gmail')}</h4>
-            <GmailForm
-              user={user}
-              notice={gmailNotice}
-              onNoticeClear={onGmailNoticeClear}
-              onUserUpdated={onUserUpdated}
-            />
-          </section>
-          <section className="settings-section">
-            <h4>{t('settings.connections.calendar')}</h4>
-            <CalendarForm
-              user={user}
-              notice={calendarNotice}
-              onNoticeClear={onCalendarNoticeClear}
-              onUserUpdated={onUserUpdated}
-            />
-          </section>
-        </>
-      ),
-    },
+    ...(gmailEnabled || calendarEnabled
+      ? [
+          {
+            key: 'connections',
+            icon: <MailIcon />,
+            label: t('settings.nav.connections'),
+            content: (
+              <>
+                <h3 className="settings-heading">{t('settings.nav.connections')}</h3>
+                {SHOW_CONNECTIONS_TESTING_NOTE && <TestingNote />}
+                {gmailEnabled && (
+                  <section className="settings-section">
+                    <h4>{t('settings.connections.gmail')}</h4>
+                    <GmailForm
+                      user={user}
+                      notice={gmailNotice}
+                      onNoticeClear={onGmailNoticeClear}
+                      onUserUpdated={onUserUpdated}
+                    />
+                  </section>
+                )}
+                {calendarEnabled && (
+                  <section className="settings-section">
+                    <h4>{t('settings.connections.calendar')}</h4>
+                    <CalendarForm
+                      user={user}
+                      notice={calendarNotice}
+                      onNoticeClear={onCalendarNoticeClear}
+                      onUserUpdated={onUserUpdated}
+                    />
+                  </section>
+                )}
+              </>
+            ),
+          },
+        ]
+      : []),
     {
       key: 'install',
       icon: <DownloadIcon />,

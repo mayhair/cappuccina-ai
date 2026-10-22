@@ -66,6 +66,8 @@ class UserResponse(BaseModel):
     avatar_url: str | None = Field(default=None, alias="avatarUrl")
     gmail_connected: bool = Field(default=False, alias="gmailConnected")
     calendar_connected: bool = Field(default=False, alias="calendarConnected")
+    gmail_enabled: bool = Field(default=False, alias="gmailEnabled")
+    calendar_enabled: bool = Field(default=False, alias="calendarEnabled")
     adult_mode: bool = Field(default=False, alias="adultMode")
     adult_mode_enabled: bool = Field(default=True, alias="adultModeEnabled")
     memory_enabled: bool = Field(default=True, alias="memoryEnabled")

@@ -80,6 +80,25 @@ TOKEN_ENC_KEY = os.getenv("TOKEN_ENC_KEY", "")
 # Google redirect URIs and post-login redirects are built from this.
 APP_ORIGIN = os.getenv("APP_ORIGIN", "http://localhost:5173").rstrip("/")
 
+# Gmail and Google Calendar integrations. Both are off by default (they saw
+# little use). Set to 1/true/yes/on to bring one back: the agent tools, the
+# connect/draft/event routes and the Settings → Connections forms all follow
+# these. Existing grants stay stored but are ignored while a switch is off.
+GMAIL_ENABLED = os.getenv("GMAIL_ENABLED", "0").strip().lower() not in (
+    "",
+    "0",
+    "false",
+    "no",
+    "off",
+)
+CALENDAR_ENABLED = os.getenv("CALENDAR_ENABLED", "0").strip().lower() not in (
+    "",
+    "0",
+    "false",
+    "no",
+    "off",
+)
+
 GOOGLE_LOGIN_SCOPES = ["openid", "email", "profile"]
 GOOGLE_GMAIL_SCOPES = [
     "https://www.googleapis.com/auth/gmail.readonly",

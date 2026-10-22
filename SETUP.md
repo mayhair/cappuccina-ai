@@ -203,6 +203,8 @@ nano .env
 | `GOOGLE_CLIENT_ID`     | Yes        | Google OAuth web client (see §4)                             |
 | `GOOGLE_CLIENT_SECRET` | Yes        | Google OAuth web client (see §4)                             |
 | `TOKEN_ENC_KEY`        | Yes        | Encrypts Gmail tokens at rest; `openssl rand -hex 32`        |
+| `GMAIL_ENABLED`        | No         | `1` turns the Gmail integration on; off by default (§4)      |
+| `CALENDAR_ENABLED`     | No         | `1` turns the Google Calendar integration on; off by default (§4) |
 | `DATABASE_URL`         | Servers    | PostgreSQL connection string; defaults to the local dev container (`postgresql://cappuccina:cappuccina@127.0.0.1:5432/cappuccina`). On the VPS: `postgresql:///cappuccina` (§7.1) |
 | `APP_ORIGIN`           | No         | Origin users browse; defaults to `http://localhost:5173`     |
 | `FMHY_MCP_URL`         | No         | FMHY free-media MCP endpoint; blank disables those tools     |
@@ -232,6 +234,11 @@ train on the text. Then add the provider back to `legal/privacy-policy.md`.
 
 Sign-in is Google-only, and the same OAuth client is used for the optional
 Gmail connection. In [Google Cloud Console](https://console.cloud.google.com/):
+
+> **Gmail and Calendar are off by default** (`GMAIL_ENABLED` and
+> `CALENDAR_ENABLED` in `backend/.env`). While both are off, sign-in only needs
+> the `auth/google/callback` redirect URI: skip step 2, the Gmail and Calendar
+> scopes in step 3, and their two redirect URIs in step 4.
 
 1. **Create a project** (e.g. "Cappuccina").
 2. **Enable the Gmail and Google Calendar APIs**: *APIs & Services → Library*,

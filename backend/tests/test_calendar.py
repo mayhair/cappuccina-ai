@@ -2,9 +2,20 @@ import json
 from datetime import datetime, timedelta, timezone
 from urllib.parse import parse_qs, urlparse
 
+import pytest
+
 from app import calendar, db, google_oauth
 
 CALENDAR_SCOPES = "https://www.googleapis.com/auth/calendar.events"
+
+
+@pytest.fixture(autouse=True)
+def _integrations_on(monkeypatch):
+    """Both switches default to off; these tests cover the integration itself."""
+    import app.main as main
+
+    monkeypatch.setattr(main, "CALENDAR_ENABLED", True)
+    monkeypatch.setattr(main, "GMAIL_ENABLED", True)
 
 
 def _connect_calendar(client, monkeypatch):

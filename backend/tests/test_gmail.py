@@ -2,6 +2,8 @@ import json
 from datetime import datetime, timedelta, timezone
 from urllib.parse import parse_qs, urlparse
 
+import pytest
+
 from app import db, gmail, google_oauth
 
 GMAIL_SCOPES = " ".join(
@@ -11,6 +13,14 @@ GMAIL_SCOPES = " ".join(
         "https://www.googleapis.com/auth/gmail.send",
     ]
 )
+
+
+@pytest.fixture(autouse=True)
+def _gmail_on(monkeypatch):
+    """The switch defaults to off; these tests cover the integration itself."""
+    import app.main as main
+
+    monkeypatch.setattr(main, "GMAIL_ENABLED", True)
 
 
 def _connect_gmail(client, monkeypatch):

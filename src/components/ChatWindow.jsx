@@ -974,8 +974,10 @@ function MessageRow({ message, prev, isActiveStream, user, onRetry, onDraftSent,
     m.role === 'assistant'
       ? (Array.isArray(m.parts) && m.parts.length ? m.parts : m.tools ?? [])
       : []
-  const drafts = toolParts.map(draftFromTool).filter(Boolean)
-  const proposals = toolParts.map(deleteFromTool).filter(Boolean)
+  // Old draft and deletion cards can't act while their integration is off.
+  const drafts = user?.gmailEnabled === true ? toolParts.map(draftFromTool).filter(Boolean) : []
+  const proposals =
+    user?.calendarEnabled === true ? toolParts.map(deleteFromTool).filter(Boolean) : []
   const memories = toolParts.map(memoryFromTool).filter(Boolean)
   const images = toolParts.map(imageFromPart).filter(Boolean)
   const webpages = webpagesFromParts(toolParts)

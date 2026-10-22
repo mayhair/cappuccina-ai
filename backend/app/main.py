@@ -40,7 +40,9 @@ from app.auth import (
 from app.config import (
     ADULT_MODE_ENABLED,
     APP_ORIGIN,
+    CALENDAR_ENABLED,
     FISH_API_KEY,
+    GMAIL_ENABLED,
     GOOGLE_CALENDAR_SCOPES,
     GOOGLE_GMAIL_SCOPES,
     GOOGLE_LOGIN_SCOPES,
@@ -573,13 +575,21 @@ def _valid_timezone(tz: str | None) -> str | None:
     return tz
 
 
+def _gmail_linked(user_id: str) -> bool:
+    return GMAIL_ENABLED and db.get_google_grant(user_id, "gmail") is not None
+
+
+def _calendar_linked(user_id: str) -> bool:
+    return CALENDAR_ENABLED and db.get_google_grant(user_id, "calendar") is not None
+
+
 def _resolve_timezone(req: ChatRequest, user) -> str:
     """The user's IANA timezone: the browser's value when valid, else the
     connected Google Calendar's zone, else UTC."""
     tz = _valid_timezone(req.timezone)
     if tz:
         return tz
-    if db.get_google_grant(user["id"], "calendar") is not None:
+    if _calendar_linked(user["id"]):
         try:
             return calendar.get_timezone(user["id"])
         except Exception:
@@ -618,8 +628,8 @@ def _state(req: ChatRequest, user) -> dict:
         "subject": req.subject,
         "timezone": _resolve_timezone(req, user),
         "adult": ADULT_MODE_ENABLED and bool(user["adult_mode"]),
-        "gmail": db.get_google_grant(user["id"], "gmail") is not None,
-        "calendar": db.get_google_grant(user["id"], "calendar") is not None,
+        "gmail": _gmail_linked(user["id"]),
+        "calendar": _calendar_linked(user["id"]),
         "memory": memory,
         # The newest few ride along in the prompt; search_memories reaches the rest.
         "memories": (
@@ -639,8 +649,10 @@ def _user_response(user) -> UserResponse:
         email=user["email"],
         displayName=user["display_name"],
         avatarUrl=user["avatar_url"] if "avatar_url" in user.keys() else None,
-        gmailConnected=db.get_google_grant(user["id"], "gmail") is not None,
-        calendarConnected=db.get_google_grant(user["id"], "calendar") is not None,
+        gmailConnected=_gmail_linked(user["id"]),
+        calendarConnected=_calendar_linked(user["id"]),
+        gmailEnabled=GMAIL_ENABLED,
+        calendarEnabled=CALENDAR_ENABLED,
         adultMode=ADULT_MODE_ENABLED and bool(user["adult_mode"]),
         adultModeEnabled=ADULT_MODE_ENABLED,
         memoryEnabled=bool(user["memory_enabled"]),
@@ -805,8 +817,14 @@ async def delete_all_user_memories(user=Depends(current_user)) -> dict:
 
 # ---------- Gmail (incremental consent) ----------
 
+def _require_gmail() -> None:
+    if not GMAIL_ENABLED:
+        raise HTTPException(status_code=404, detail="Gmail is turned off")
+
+
 @app.get("/api/v1/gmail/connect")
 async def gmail_connect(user=Depends(current_user)) -> RedirectResponse:
+    _require_gmail()
     if not google_oauth.is_configured():
         return RedirectResponse(f"{APP_ORIGIN}/?gmail=error")
     state = db.create_oauth_state("gmail", user["id"])
@@ -822,6 +840,7 @@ async def gmail_connect(user=Depends(current_user)) -> RedirectResponse:
 
 @app.get("/api/v1/gmail/callback")
 async def gmail_callback(request: Request, user=Depends(current_user)) -> RedirectResponse:
+    _require_gmail()
     if request.query_params.get("error"):
         return RedirectResponse(f"{APP_ORIGIN}/?gmail=error")
     state = db.consume_oauth_state(request.query_params.get("state", ""), "gmail")
@@ -841,7 +860,7 @@ async def gmail_callback(request: Request, user=Depends(current_user)) -> Redire
 @app.get("/api/v1/gmail/status")
 async def gmail_status(user=Depends(current_user)) -> GmailStatusResponse:
     grant = db.get_google_grant(user["id"], "gmail")
-    if grant is None:
+    if grant is None or not GMAIL_ENABLED:
         return GmailStatusResponse(connected=False)
     return GmailStatusResponse(connected=True, scopes=grant["scopes"].split())
 
@@ -857,6 +876,7 @@ async def gmail_update_draft(
     draft_id: str, req: UpdateDraftRequest, user=Depends(current_user)
 ) -> dict:
     """Let the user edit a draft (add their name, tweak wording) before sending."""
+    _require_gmail()
     if not req.to.strip():
         raise HTTPException(status_code=400, detail="Add a recipient first")
     try:
@@ -878,6 +898,7 @@ async def gmail_update_draft(
 @app.post("/api/v1/gmail/drafts/{draft_id}/send")
 async def gmail_send_draft(draft_id: str, user=Depends(current_user)) -> dict:
     """The only path that actually sends mail — driven by the user's button."""
+    _require_gmail()
     try:
         sent = gmail.send_draft(user["id"], draft_id)
     except ServiceNotConnected as exc:
@@ -895,8 +916,14 @@ async def gmail_send_draft(draft_id: str, user=Depends(current_user)) -> dict:
 
 # ---------- Calendar (incremental consent) ----------
 
+def _require_calendar() -> None:
+    if not CALENDAR_ENABLED:
+        raise HTTPException(status_code=404, detail="Google Calendar is turned off")
+
+
 @app.get("/api/v1/calendar/connect")
 async def calendar_connect(user=Depends(current_user)) -> RedirectResponse:
+    _require_calendar()
     if not google_oauth.is_configured():
         return RedirectResponse(f"{APP_ORIGIN}/?calendar=error")
     state = db.create_oauth_state("calendar", user["id"])
@@ -914,6 +941,7 @@ async def calendar_connect(user=Depends(current_user)) -> RedirectResponse:
 async def calendar_callback(
     request: Request, user=Depends(current_user)
 ) -> RedirectResponse:
+    _require_calendar()
     if request.query_params.get("error"):
         return RedirectResponse(f"{APP_ORIGIN}/?calendar=error")
     state = db.consume_oauth_state(request.query_params.get("state", ""), "calendar")
@@ -933,7 +961,7 @@ async def calendar_callback(
 @app.get("/api/v1/calendar/status")
 async def calendar_status(user=Depends(current_user)) -> CalendarStatusResponse:
     grant = db.get_google_grant(user["id"], "calendar")
-    if grant is None:
+    if grant is None or not CALENDAR_ENABLED:
         return CalendarStatusResponse(connected=False)
     return CalendarStatusResponse(connected=True, scopes=grant["scopes"].split())
 
@@ -951,6 +979,7 @@ async def calendar_delete_event(event_id: str, user=Depends(current_user)) -> di
     The assistant proposes the deletion in chat; nothing is removed until the
     user confirms here.
     """
+    _require_calendar()
     try:
         calendar.delete_event(user["id"], event_id)
     except ServiceNotConnected as exc:
