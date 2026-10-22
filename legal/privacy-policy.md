@@ -39,10 +39,10 @@ To turn on Adult mode, you enter your birthday. Your browser checks it, and **yo
 
 If you connected Gmail or Calendar before we turned them off:
 
-- We still store the access keys ("tokens") Google gave us, **encrypted**, but we don't use them. See section 6 to have them deleted.
+- We have **deleted** the access keys ("tokens") Google gave us, and asked Google to remove Cappuccina's access to your account.
 - Emails and events Cappuccina read for you before are still part of those chats, until you delete the chats.
 
-If we turn these connections back on, we'll update this policy and tell you before your stored access is used again.
+If we turn these connections back on, we'll update this policy first. Cappuccina won't have any access until you connect again yourself.
 
 ### Voice
 
@@ -106,7 +106,7 @@ Each webpage Cappuccina builds has a preview link. **Anyone who has the link can
 
 - **Chats, files, images and webpages:** until you delete them. Deleting a chat also deletes its messages, attached files, images and webpage.
 - **Memories:** until you delete them. Memories are not deleted when you delete a chat. You can delete them one by one or all at once in **Settings → Memory**.
-- **Gmail and Calendar tokens** (only if you connected them before we turned them off): until you delete your account, or ask us to delete them by emailing mahaer.mahmud@gmail.com. To remove Cappuccina's access on Google's side right away, go to your [Google Account permissions](https://myaccount.google.com/permissions). When you delete your account, we delete the tokens and remove that access for you.
+- **Gmail and Calendar tokens:** we deleted these when we turned the connections off, and asked Google to remove Cappuccina's access. You can check this at any time in your [Google Account permissions](https://myaccount.google.com/permissions).
 - **Sign-in sessions:** up to 30 days, or until you sign out.
 - **Your account:** until you delete it in **Settings → Account → Danger Zone**. When you do, we delete your account and everything linked to it right away. Copies in our backups are deleted within 30 days. Information we already sent to the providers in section 4 is kept for as long as their own policies say, such as up to 30 days at OpenAI.
 

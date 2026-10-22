@@ -94,12 +94,16 @@ async def _stop_idle_sites() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Load the FMHY free-media tools, then compile the graph around them.
+    """Drop grants for switched-off Google integrations, load the FMHY
+    free-media tools, then compile the graph around them.
 
-    The endpoint is best-effort: if it is down, the tools are simply absent and
+    The FMHY endpoint is best-effort: if it is down, the tools are simply absent and
     the rest of the chatbot boots as usual.
     """
     global GRAPH
+    # A switched-off integration keeps no tokens: delete (and revoke) them.
+    off = [s for s, on in (("gmail", GMAIL_ENABLED), ("calendar", CALENDAR_ENABLED)) if not on]
+    await asyncio.to_thread(google_oauth.purge_grants, off)
     fmhy_tools = await load_fmhy_tools()
     GRAPH = build_graph([*ALL_TOOLS, *fmhy_tools])
     idle_task = asyncio.create_task(_stop_idle_sites())

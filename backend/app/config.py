@@ -83,7 +83,9 @@ APP_ORIGIN = os.getenv("APP_ORIGIN", "http://localhost:5173").rstrip("/")
 # Gmail and Google Calendar integrations. Both are off by default (they saw
 # little use). Set to 1/true/yes/on to bring one back: the agent tools, the
 # connect/draft/event routes and the Settings → Connections forms all follow
-# these. Existing grants stay stored but are ignored while a switch is off.
+# these. At startup, every user's grant for a switched-off service is deleted
+# (and revoked at Google; see google_oauth.purge_grants), so users have to
+# connect again once it's back on.
 GMAIL_ENABLED = os.getenv("GMAIL_ENABLED", "0").strip().lower() not in (
     "",
     "0",

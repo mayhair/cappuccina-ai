@@ -430,6 +430,14 @@ def list_google_grants(user_id: str) -> list[dict]:
     )
 
 
+def list_google_grants_for_services(services: list[str]) -> list[dict]:
+    """Every user's grants for these services (the switched-off integrations)."""
+    return _fetchall(
+        "SELECT * FROM google_grants WHERE service = ANY(%(services)s)",
+        {"services": services},
+    )
+
+
 def delete_google_grant(user_id: str, service: str) -> None:
     _execute(
         "DELETE FROM google_grants WHERE user_id = %(user_id)s AND service = %(service)s",

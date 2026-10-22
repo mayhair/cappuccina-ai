@@ -188,12 +188,37 @@ def revoke_grants(user_id: str) -> None:
     Revoking the refresh token ends the whole grant, access tokens included.
     """
     for grant in db.list_google_grants(user_id):
-        try:
-            token = decrypt_token(grant["refresh_token"]) or decrypt_token(grant["access_token"])
-            if token:
-                httpx.post(GOOGLE_REVOKE_URL, data={"token": token}, timeout=TIMEOUT)
-        except (GoogleOAuthError, GoogleNotConfigured, httpx.HTTPError):
-            continue
+        _revoke(grant)
+
+
+def _revoke(grant: dict) -> None:
+    """Best-effort revoke of one stored grant at Google."""
+    try:
+        token = decrypt_token(grant["refresh_token"]) or decrypt_token(grant["access_token"])
+        if token:
+            httpx.post(GOOGLE_REVOKE_URL, data={"token": token}, timeout=TIMEOUT)
+    except (GoogleOAuthError, GoogleNotConfigured, httpx.HTTPError):
+        pass
+
+
+def purge_grants(services: list[str]) -> int:
+    """Delete every user's grants for switched-off services; returns how many.
+
+    Google ties incremental grants together, so revoking one token ends the
+    user's access to every scope we hold. A grant is therefore only revoked at
+    Google when the user keeps no grant for a service that is still on;
+    otherwise just the stored row goes, and the app stops using it.
+    """
+    if not services:
+        return 0
+    removed = 0
+    for grant in db.list_google_grants_for_services(services):
+        user_id = grant["user_id"]
+        if all(g["service"] in services for g in db.list_google_grants(user_id)):
+            _revoke(grant)
+        db.delete_google_grant(user_id, grant["service"])
+        removed += 1
+    return removed
 
 
 def get_access_token(user_id: str, service: str) -> str:

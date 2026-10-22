@@ -67,9 +67,9 @@ We can remove content, limit features or close accounts that break these rules (
 
 **The Gmail and Google Calendar connections are turned off for now.** You can't connect them, and Cappuccina can't read, write or send anything in your Gmail or Calendar.
 
-If you connected them before, Cappuccina no longer uses that access. You can remove it at any time in your [Google Account permissions](https://myaccount.google.com/permissions). Our [Privacy Policy](https://cappuccina.mayhair.net/privacy) explains how to have the stored access keys deleted.
+If you connected them before, we have deleted the access keys Google gave us and asked Google to remove Cappuccina's access. You can check this in your [Google Account permissions](https://myaccount.google.com/permissions).
 
-If we turn these connections back on, we'll update these Terms first.
+If we turn these connections back on, we'll update these Terms first, and you'll need to connect again yourself.
 
 ## 8. The webpage builder
 

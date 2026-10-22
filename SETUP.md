@@ -239,6 +239,13 @@ Gmail connection. In [Google Cloud Console](https://console.cloud.google.com/):
 > `CALENDAR_ENABLED` in `backend/.env`). While both are off, sign-in only needs
 > the `auth/google/callback` redirect URI: skip step 2, the Gmail and Calendar
 > scopes in step 3, and their two redirect URIs in step 4.
+>
+> Each time the backend starts with one of them off, it deletes every user's
+> stored tokens for that service and revokes them at Google. Turning a switch
+> back on doesn't bring old connections back: users connect again in
+> **Settings → Connections**. Google ties a user's Gmail and Calendar consent
+> together, so if one service is still on for that user, the other's tokens are
+> only deleted, not revoked, to keep the remaining connection working.
 
 1. **Create a project** (e.g. "Cappuccina").
 2. **Enable the Gmail and Google Calendar APIs**: *APIs & Services → Library*,
