@@ -1,7 +1,7 @@
 # Cappuccina Terms of Service
 
 Effective date: 20 October 2026  
-Last updated: 19 October 2026
+Last updated: 22 October 2026
 
 Welcome to Cappuccina! These Terms of Service ("Terms") are the rules for using Cappuccina, the AI chatbot at [cappuccina.mayhair.net](https://cappuccina.mayhair.net) (the "Service"). Cappuccina is run by Mahaer Mahmud, an individual based in Pakistan ("we", "us" or "our").
 
@@ -65,12 +65,11 @@ We can remove content, limit features or close accounts that break these rules (
 
 ## 7. Gmail and Google Calendar
 
-You can choose to connect your Gmail or Google Calendar. If you do:
+**The Gmail and Google Calendar connections are turned off for now.** You can't connect them, and Cappuccina can't read, write or send anything in your Gmail or Calendar.
 
-- Cappuccina can search and read your email, and write **drafts**, when you ask. An email is only sent when **you** press Send.
-- Cappuccina can read, add and change calendar events when you ask. She only deletes an event after **you** confirm it.
-- Check drafts and events before you rely on them. You're responsible for emails you send and events you keep.
-- You can disconnect either service at any time in **Settings → Connections**.
+If you connected them before, Cappuccina no longer uses that access. You can remove it at any time in your [Google Account permissions](https://myaccount.google.com/permissions). Our [Privacy Policy](https://cappuccina.mayhair.net/privacy) explains how to have the stored access keys deleted.
+
+If we turn these connections back on, we'll update these Terms first.
 
 ## 8. The webpage builder
 

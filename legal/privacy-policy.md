@@ -1,7 +1,7 @@
 # Cappuccina Privacy Policy
 
 Effective date: 20 October 2026  
-Last updated: 19 October 2026
+Last updated: 22 October 2026
 
 This Privacy Policy explains what information Cappuccina collects, why we collect it, who we share it with, and the choices you have. Cappuccina is the AI chatbot at [cappuccina.mayhair.net](https://cappuccina.mayhair.net). It is run by Mahaer Mahmud, an individual based in Pakistan ("we", "us" or "our"). We are responsible for your information.
 
@@ -33,11 +33,16 @@ You sign in with Google. Google gives us your **name**, **email address**, **pro
 
 To turn on Adult mode, you enter your birthday. Your browser checks it, and **your birthday is never sent to us or saved**. We only store whether Adult mode is on or off.
 
-### Gmail and Google Calendar (only if you connect them)
+### Gmail and Google Calendar (turned off for now)
 
-- **Gmail:** when you ask, Cappuccina can search and read your emails and save drafts, and send those drafts when you press Send. Emails she reads become part of that chat.
-- **Calendar:** when you ask, Cappuccina can read, add and change events. Events she reads become part of that chat.
-- We store the access keys ("tokens") Google gives us, **encrypted**. Cappuccina only uses them when you ask her to do something.
+**The Gmail and Google Calendar connections are turned off for now.** You can't connect them, and Cappuccina can't read, write or send anything in your Gmail or Calendar.
+
+If you connected Gmail or Calendar before we turned them off:
+
+- We still store the access keys ("tokens") Google gave us, **encrypted**, but we don't use them. See section 6 to have them deleted.
+- Emails and events Cappuccina read for you before are still part of those chats, until you delete the chats.
+
+If we turn these connections back on, we'll update this policy and tell you before your stored access is used again.
 
 ### Voice
 
@@ -55,7 +60,6 @@ To turn on Adult mode, you enter your birthday. Your browser checks it, and **yo
 We use your information to:
 
 - run Cappuccina: answer your messages, keep your chats, remember things you asked her to remember, and build your webpages;
-- do the things you ask with Gmail and Calendar;
 - keep Cappuccina safe and secure, prevent abuse, and fix bugs;
 - contact you about important changes to Cappuccina or these policies;
 - follow the law.
@@ -64,11 +68,11 @@ We **don't** use your information for ads, and we don't sell it or share it for 
 
 ## 3. Information from Google
 
-Cappuccina's use and transfer of information received from Google APIs follows the [Google API Services User Data Policy](https://developers.google.com/terms/api-services-user-data-policy), including the Limited Use requirements. This means:
+Cappuccina's use and transfer of information received from Google APIs follows the [Google API Services User Data Policy](https://developers.google.com/terms/api-services-user-data-policy), including the Limited Use requirements. Right now we only receive your Google sign-in details (section 1). For Gmail and Calendar data that Cappuccina read before we turned those connections off, this means:
 
-- We only use your Gmail and Calendar data to provide the features you use in Cappuccina.
+- We only use it to provide Cappuccina to you, for example to show you your old chats.
 - We don't use it for ads, sell it, or use it to train AI models.
-- When you ask Cappuccina about your emails or calendar, the parts she reads are sent to our AI provider (OpenRouter and the zero-data-retention model providers in section 4) so she can write her reply. These providers don't store this data or use it to train AI models.
+- When you keep writing in a chat that includes it, it can be sent again to our AI provider (OpenRouter and the zero-data-retention model providers in section 4) as part of that conversation. These providers don't store this data or use it to train AI models.
 - Nobody reads it, unless you give us permission, it's needed for security or to follow the law, or the data has been made anonymous.
 
 ## 4. Who we share your information with
@@ -77,11 +81,11 @@ We share information only with the service providers below, and only what they n
 
 | Provider | What it does | What it receives |
 |---|---|---|
-| **OpenRouter** | Sends your chat to an AI model and returns the reply. We've set it to only use providers with [zero data retention](https://openrouter.ai/docs/guides/features/zdr), which means they don't store your data or train on it. | Your chat messages, attached files, memories and webpage files that are part of the conversation, and any email or calendar details Cappuccina read in that chat |
+| **OpenRouter** | Sends your chat to an AI model and returns the reply. We've set it to only use providers with [zero data retention](https://openrouter.ai/docs/guides/features/zdr), which means they don't store your data or train on it. | Your chat messages, attached files, memories and webpage files that are part of the conversation, including any email or calendar details Cappuccina read in that chat before Gmail and Calendar were turned off |
 | **AI model providers** chosen by OpenRouter | Run the AI model (currently DeepSeek V4.1 Flash) that writes Cappuccina's replies and chat titles. OpenRouter picks one of the [providers for this model](https://openrouter.ai/deepseek/deepseek-v4.1-flash-1017/providers) that offer zero data retention, mostly in the United States. | The same as OpenRouter |
 | **OpenAI** | Creates and edits images. OpenAI doesn't train on this data. It [keeps it for up to 30 days](https://developers.openai.com/api/docs/guides/your-data) to check for misuse, unless the law or safety needs require keeping it longer. | Your image request, and any image you ask her to edit |
 | **Parallel Web Systems** | Web search and reading webpages | The search words Cappuccina uses for your question, the addresses (URLs) of webpages she reads, and what she is looking for on those pages |
-| **Google** | Sign-in, Gmail and Calendar | What's needed to sign you in and to do what you asked in Gmail or Calendar |
+| **Google** | Sign-in | What's needed to sign you in |
 | **FMHY guide server** (fmhy-mcp.ken.tools) | Looks up free-media sites | The search words Cappuccina uses |
 | **Cloudflare** | Delivers the website and protects it | Your requests to Cappuccina, including your IP address |
 | **One.com / Dogado.de** | Hosts our server and stores your data | All the data we store |
@@ -102,7 +106,7 @@ Each webpage Cappuccina builds has a preview link. **Anyone who has the link can
 
 - **Chats, files, images and webpages:** until you delete them. Deleting a chat also deletes its messages, attached files, images and webpage.
 - **Memories:** until you delete them. Memories are not deleted when you delete a chat. You can delete them one by one or all at once in **Settings → Memory**.
-- **Gmail and Calendar tokens:** until you disconnect the service in **Settings → Connections**, or delete your account. When you disconnect, we delete the token from our server. To also remove Cappuccina's access on Google's side, go to your [Google Account permissions](https://myaccount.google.com/permissions). When you delete your account, we remove that access for you.
+- **Gmail and Calendar tokens** (only if you connected them before we turned them off): until you delete your account, or ask us to delete them by emailing mahaer.mahmud@gmail.com. To remove Cappuccina's access on Google's side right away, go to your [Google Account permissions](https://myaccount.google.com/permissions). When you delete your account, we delete the tokens and remove that access for you.
 - **Sign-in sessions:** up to 30 days, or until you sign out.
 - **Your account:** until you delete it in **Settings → Account → Danger Zone**. When you do, we delete your account and everything linked to it right away. Copies in our backups are deleted within 30 days. Information we already sent to the providers in section 4 is kept for as long as their own policies say, such as up to 30 days at OpenAI.
 
@@ -113,7 +117,7 @@ We may keep some information longer if the law requires it, or to deal with a sa
 You can always:
 
 - **see and change** your chats, memories and settings in the app;
-- **delete** chats, files, memories, Gmail and Calendar connections, and your whole account;
+- **delete** chats, files, memories and your whole account;
 - **turn memory off** so Cappuccina doesn't save or use memories;
 - **download** the webpages Cappuccina builds for you;
 - **remove Cappuccina's access to your Google account** at any time in your [Google Account permissions](https://myaccount.google.com/permissions).
@@ -129,7 +133,7 @@ Depending on where you live, you may also have the right to:
 
 To use any of these rights, email us at mahaer.mahmud@gmail.com. We may need to check that the request comes from you. We'll answer within 30 days. We don't treat you differently for using your rights.
 
-**For people in the European Economic Area, the UK and Switzerland:** we use your information because we need it to provide the Service you asked for (our contract with you); because you agreed (for example, connecting Gmail or Calendar, or turning on Adult mode); for our legitimate interest in keeping the Service secure and fixing problems; and to follow the law.
+**For people in the European Economic Area, the UK and Switzerland:** we use your information because we need it to provide the Service you asked for (our contract with you); because you agreed (for example, turning on Adult mode, or connecting Gmail or Calendar before we turned them off); for our legitimate interest in keeping the Service secure and fixing problems; and to follow the law.
 
 ## 8. Where your information is stored
 
