@@ -650,6 +650,7 @@ img.user-avatar {
   cursor: pointer;
   transition: background 120ms ease, color 120ms ease;
 }
+a.user-menu-item { text-decoration: none; }
 .user-menu-item svg { width: 1.1em; height: 1.1em; flex: none; opacity: 0.85; }
 .user-menu-item:hover { background: var(--hover-tint); color: var(--ink); }
 .user-menu-item.danger { color: var(--danger); }

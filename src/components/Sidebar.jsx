@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { ChatIcon, TrashIcon, PlusIcon, SearchIcon, CloseIcon, DotsIcon, PencilIcon, LogoutIcon, GearIcon } from './Icons'
+import { ChatIcon, TrashIcon, PlusIcon, SearchIcon, CloseIcon, DotsIcon, PencilIcon, LogoutIcon, GearIcon, StarIcon } from './Icons'
 import { TypewriterTitle } from './TypewriterTitle'
 import { ChatTitle } from './ChatTitle'
 import { EmojiText } from '../lib/emoji'
@@ -288,6 +288,16 @@ export function Sidebar({ chats, activeChatId, onSelect, onNewChat, onDelete, on
                 <GearIcon />
                 {t('settings.title')}
               </button>
+              {/* Backstage is its own page (backstage/index.html), so a real link. */}
+              <a
+                href="/backstage/"
+                role="menuitem"
+                className="user-menu-item"
+                onClick={() => setAccountMenu(false)}
+              >
+                <StarIcon />
+                {t('sidebar.backstage')}
+              </a>
               <button
                 type="button"
                 role="menuitem"

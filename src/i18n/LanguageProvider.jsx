@@ -71,7 +71,8 @@ export function translateRich(lang, key, vars) {
 
 const LanguageContext = createContext(null)
 
-export function LanguageProvider({ children }) {
+// `titleKey` names the tab title, so a page other than the app can use its own.
+export function LanguageProvider({ children, titleKey = 'app.title' }) {
   const [stored, setStored] = useState(readStoredLang)
   // True while a language dialog is on screen, so other first-run dialogs wait.
   const [pickerOpen, setPickerOpen] = useState(false)
@@ -83,8 +84,8 @@ export function LanguageProvider({ children }) {
   useEffect(() => {
     document.documentElement.lang = lang
     document.documentElement.dir = dir
-    document.title = translate(lang, 'app.title')
-  }, [lang, dir])
+    document.title = translate(lang, titleKey)
+  }, [lang, dir, titleKey])
 
   const setLang = useCallback((code) => {
     if (!byCode[code]) return
