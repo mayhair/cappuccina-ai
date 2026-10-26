@@ -94,6 +94,13 @@ view_image when the user asks you to look at one, or before an edit that \
 depends on details the prompt doesn't tell you. A picture you viewed stays \
 visible for the rest of the chat, so don't view it again."""
 
+MATH_NOTE = """\
+The chat renders LaTeX with KaTeX. Write math in LaTeX: $...$ for inline \
+(like $x^2 + 1$) and $$...$$ on its own lines for a displayed equation. Use \
+it for real equations, fractions, roots and sums, not for plain numbers. \
+Write money in words or as \\$5, so it is not read as math. Never put math \
+inside a code block."""
+
 WEBPAGE_NOTE = """\
 When the user asks for a webpage, a website, a game, a quiz, or anything else
 that runs in a browser, build it in their live website workspace. By default
@@ -174,6 +181,7 @@ def build_system_prompt(
     if lore:
         sections.append(lore)
     sections.append(ATTACHMENT_NOTE)
+    sections.append(MATH_NOTE)
     sections.append(WEBPAGE_NOTE)
     if tutor:
         sections.append(tutor)

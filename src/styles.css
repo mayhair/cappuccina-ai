@@ -1060,6 +1060,8 @@ img.user-avatar {
   border-radius: 6px;
   background: var(--code-bg);
 }
+.bubble .md-math-block { display: block; margin: 0.6em 0; overflow-x: auto; overflow-y: hidden; }
+.bubble .md-math-block .katex-display { margin: 0; }
 .bubble a { color: var(--pink-ink); text-decoration: underline; text-underline-offset: 2px; }
 
 /* ---------- copy message ---------- */

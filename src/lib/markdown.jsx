@@ -1,6 +1,16 @@
 import { Fragment } from 'react'
 import { renderEmoji } from './emoji'
 import { highlightFence } from './highlightCode'
+import katex from 'katex'
+import 'katex/dist/katex.min.css'
+
+// KaTeX output is built from a fixed set of tags and escaped text, and
+// `trust: false` blocks \href/\includegraphics, so it is safe to inject.
+// Bad LaTeX (or a half-streamed formula) renders as KaTeX's red error text
+// instead of throwing.
+function renderMath(tex, displayMode) {
+  return katex.renderToString(tex, { displayMode, throwOnError: false, trust: false })
+}
 
 // Minimal markdown -> React elements. Rendering to elements keeps untrusted
 // model output injection-safe; fenced code is escaped and tokenized by
@@ -25,14 +35,22 @@ const INLINE = new RegExp(
     '(?<![\\w@./-])((?:www\\.)?(?:[a-z0-9-]+\\.)+(?:' +
       BARE_DOMAIN_TLDS +
       ')(?:\\/[^\\s<>()\\[\\]]*[^\\s<>()\\[\\].,!?;:])?)', // 9  bare domain
+    /\$\$([\s\S]+?)\$\$/.source, // 10  $$display$$
+    /\\\(([\s\S]+?)\\\)/.source, // 11  \(inline\)
+    /\\\[([\s\S]+?)\\\]/.source, // 12  \[display\]
+    /\$([^\s$](?:[^$\n]*?[^\s$])?)\$(?!\d)/.source, // 13  $inline$ (not "$5 and $10")
   ].join('|'),
   'g',
 )
 
 const SAFE_HREF = /^(https?:\/\/|mailto:)/i
 
+const MATH_OPEN = /^\s*(\$\$|\\\[)/
+const MATH_CLOSE = { $$: /\$\$\s*$/, '\\[': /\\\]\s*$/ }
+
 const isBlockStart = (line) =>
   /^\s*```/.test(line) ||
+  MATH_OPEN.test(line) ||
   /^#{1,6}\s+/.test(line) ||
   /^\s*(-{3,}|\*{3,}|_{3,})\s*$/.test(line) ||
   /^\s*>\s?/.test(line) ||
@@ -82,6 +100,21 @@ function renderInline(text, prefix) {
           {m[9]}
         </a>,
       )
+    } else if (m[10] !== undefined || m[12] !== undefined) {
+      out.push(
+        <span
+          key={key}
+          className="md-math-block"
+          dangerouslySetInnerHTML={{ __html: renderMath(m[10] ?? m[12], true) }}
+        />,
+      )
+    } else if (m[11] !== undefined || m[13] !== undefined) {
+      out.push(
+        <span
+          key={key}
+          dangerouslySetInnerHTML={{ __html: renderMath(m[11] ?? m[13], false) }}
+        />,
+      )
     }
     last = m.index + m[0].length
   }
@@ -125,6 +158,39 @@ function renderBlocks(text, prefix) {
         </pre>,
       )
       continue
+    }
+
+    // Display math: $$ ... $$ or \[ ... \], on one line or spread over several.
+    const math = line.match(MATH_OPEN)
+    if (math) {
+      const close = MATH_CLOSE[math[1]]
+      const rest = line.slice(line.indexOf(math[1]) + 2)
+      const body = []
+      let j = i
+      let closed = false
+      let cur = rest
+      for (;;) {
+        if (close.test(cur) && (j > i || cur.trim().length > 0)) {
+          body.push(cur.replace(close, ''))
+          closed = true
+          break
+        }
+        body.push(cur)
+        j++
+        if (j >= lines.length) break
+        cur = lines[j]
+      }
+      if (closed) {
+        i = j + 1
+        out.push(
+          <div
+            key={key()}
+            className="md-math-block"
+            dangerouslySetInnerHTML={{ __html: renderMath(body.join('\n'), true) }}
+          />,
+        )
+        continue
+      }
     }
 
     const heading = line.match(/^(#{1,6})\s+(.+?)\s*#*\s*$/)
