@@ -102,37 +102,84 @@ const venvPython = process.platform === "win32"
 const python = existsSync(venvPython) ? venvPython : "python";
 const vite = path.join(root, "node_modules", "vite", "bin", "vite.js");
 
-function kill(proc) {
-  if (!proc || proc.exitCode !== null || proc.signalCode) return;
-  if (process.platform === "win32") {
-    // /T kills the whole tree (uvicorn --reload spawns a child)
-    spawn("taskkill", ["/pid", String(proc.pid), "/T", "/F"], { stdio: "ignore" });
-  } else {
-    try { process.kill(-proc.pid, "SIGTERM"); } catch { proc.kill("SIGTERM"); }
-  }
+const running = (proc) => proc && proc.exitCode === null && !proc.signalCode;
+
+function exited(proc) {
+  return running(proc) ? new Promise((r) => proc.once("exit", r)) : Promise.resolve();
 }
 
+function kill(proc, force) {
+  if (!running(proc)) return Promise.resolve();
+  if (process.platform === "win32") {
+    // /T kills the whole tree (uvicorn --reload spawns a child). Without /F,
+    // taskkill can't stop console apps, so Windows only has a forced kill.
+    return new Promise((r) => {
+      spawn("taskkill", ["/pid", String(proc.pid), "/T", "/F"], { stdio: "ignore" }).once("close", r);
+    });
+  }
+  const sig = force ? "SIGKILL" : "SIGTERM";
+  try { process.kill(-proc.pid, sig); } catch { proc.kill(sig); }
+  return Promise.resolve();
+}
+
+const withTimeout = (promise, ms) => Promise.race([promise, new Promise((r) => setTimeout(r, ms))]);
+
+// Waits for the children to exit before exiting, so their shutdown logs don't
+// spill out after the shell prompt has come back.
 let shuttingDown = false;
-function shutdown(code) {
+async function shutdown(code, { signal = false } = {}) {
   if (shuttingDown) return;
   shuttingDown = true;
-  console.log("\nStopping backend...");
-  kill(backend);
-  kill(frontend);
+  console.log("\nStopping...");
+  // npm has already given the prompt back (see relayOutput), so stay quiet.
+  if (signal && relayOutput) muted = true;
+  const children = [backend, frontend];
+  // On Windows, Ctrl+C already reached the children (same console), so let them
+  // stop on their own. Everywhere else, ask them to stop.
+  if (!(signal && process.platform === "win32")) {
+    await Promise.all(children.map((p) => kill(p, process.platform === "win32")));
+  }
+  await withTimeout(Promise.all(children.map(exited)), 5000);
+  await Promise.all(children.map((p) => kill(p, true)));
+  await withTimeout(Promise.all(children.map(exited)), 2000);
+  if (!muted) console.log("Stopped.");
   process.exit(code);
 }
 
-const backend = spawn(python, ["-m", "uvicorn", "app.main:app", "--port", API_PORT, "--reload"], {
+// On Windows, npm answers Ctrl+C by killing its script shell outright and
+// returns to the prompt while we are still shutting down. Under npm there we
+// relay the children's output ourselves, so it can be muted after Ctrl+C
+// instead of spilling over the prompt.
+const relayOutput = process.platform === "win32" && !!process.env.npm_lifecycle_event;
+let muted = false;
+
+function startChild(command, args, { cwd, env }) {
+  const proc = spawn(command, args, {
+    cwd,
+    env: { ...process.env, ...(relayOutput ? env : {}) },
+    stdio: relayOutput ? ["inherit", "pipe", "pipe"] : "inherit",
+    detached: process.platform !== "win32",
+  });
+  if (relayOutput) {
+    proc.stdout.on("data", (chunk) => { if (!muted) process.stdout.write(chunk); });
+    proc.stderr.on("data", (chunk) => { if (!muted) process.stderr.write(chunk); });
+  }
+  return proc;
+}
+
+const backend = startChild(python, [
+  "-m", "uvicorn", "app.main:app", "--port", API_PORT, "--reload",
+  ...(relayOutput ? ["--use-colors"] : []),
+], {
   cwd: path.join(root, "backend"),
-  stdio: "inherit",
-  detached: process.platform !== "win32",
+  env: { PYTHONUNBUFFERED: "1" }, // piped Python output is block-buffered otherwise
 });
 console.log(`Backend on :${API_PORT} (pid ${backend.pid}), waiting for startup...`);
 
 let frontend;
 backend.on("exit", (code) => { if (!shuttingDown) shutdown(code ?? 1); });
-process.on("SIGINT", () => shutdown(0));
-process.on("SIGTERM", () => shutdown(0));
+process.on("SIGINT", () => shutdown(0, { signal: true }));
+process.on("SIGTERM", () => shutdown(0, { signal: true }));
 
 // Any HTTP response means startup is complete: with --reload the socket accepts
 // connections early, but requests are only answered once the app has started.
@@ -154,10 +201,9 @@ if (!(await waitForBackend())) {
   console.warn("Backend did not answer within 120s; starting the frontend anyway.");
 }
 
-frontend = spawn(process.execPath, [vite, "--port", WEB_PORT], {
+frontend = startChild(process.execPath, [vite, "--port", WEB_PORT], {
   cwd: root,
-  stdio: "inherit",
-  detached: process.platform !== "win32",
+  env: { FORCE_COLOR: "1" },
 });
 console.log(`Frontend on :${WEB_PORT} (proxies /api -> :${API_PORT}). Ctrl+C stops both.`);
 frontend.on("exit", (code) => { if (!shuttingDown) shutdown(code ?? 1); });
