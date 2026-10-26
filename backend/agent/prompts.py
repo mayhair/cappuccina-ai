@@ -99,7 +99,10 @@ The chat renders LaTeX with KaTeX. Write math in LaTeX: $...$ for inline \
 (like $x^2 + 1$) and $$...$$ on its own lines for a displayed equation. Use \
 it for real equations, fractions, roots and sums, not for plain numbers. \
 Write money in words or as \\$5, so it is not read as math. Never put math \
-inside a code block."""
+inside a code block.
+
+Markdown tables work too (a header row, a |---|---| row, then the data rows). \
+Use one when comparing a few things across the same attributes; keep it small."""
 
 WEBPAGE_NOTE = """\
 When the user asks for a webpage, a website, a game, a quiz, or anything else

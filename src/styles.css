@@ -1062,6 +1062,16 @@ img.user-avatar {
 }
 .bubble .md-math-block { display: block; margin: 0.6em 0; overflow-x: auto; overflow-y: hidden; }
 .bubble .md-math-block .katex-display { margin: 0; }
+.bubble .md-table-wrap { margin: 0.6em 0; overflow-x: auto; }
+.bubble .md-table { border-collapse: collapse; font-size: 0.94em; }
+.bubble .md-table th,
+.bubble .md-table td {
+  padding: 0.35em 0.7em;
+  border: 1px solid var(--code-bg);
+  text-align: left;
+  vertical-align: top;
+}
+.bubble .md-table th { background: var(--code-bg); font-weight: 600; }
 .bubble a { color: var(--pink-ink); text-decoration: underline; text-underline-offset: 2px; }
 
 /* ---------- copy message ---------- */

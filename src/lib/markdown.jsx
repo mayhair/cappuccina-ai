@@ -48,6 +48,29 @@ const SAFE_HREF = /^(https?:\/\/|mailto:)/i
 const MATH_OPEN = /^\s*(\$\$|\\\[)/
 const MATH_CLOSE = { $$: /\$\$\s*$/, '\\[': /\\\]\s*$/ }
 
+// GFM table: a header row with pipes, then a delimiter row like |---|:--:|.
+const TABLE_DELIM = /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/
+const isTableStart = (lines, i) =>
+  i + 1 < lines.length &&
+  lines[i].includes('|') &&
+  lines[i + 1].includes('|') &&
+  TABLE_DELIM.test(lines[i + 1])
+
+function splitRow(line) {
+  const cells = line
+    .trim()
+    .replace(/^\|/, '')
+    .replace(/(?<!\\)\|$/, '')
+    .split(/(?<!\\)\|/)
+  return cells.map((c) => c.trim().replace(/\\\|/g, '|'))
+}
+
+const alignOf = (cell) => {
+  const c = cell.trim()
+  if (c.startsWith(':') && c.endsWith(':')) return 'center'
+  return c.endsWith(':') ? 'right' : c.startsWith(':') ? 'left' : undefined
+}
+
 const isBlockStart = (line) =>
   /^\s*```/.test(line) ||
   MATH_OPEN.test(line) ||
@@ -269,9 +292,48 @@ function renderBlocks(text, prefix) {
       continue
     }
 
+    if (isTableStart(lines, i)) {
+      const head = splitRow(line)
+      const aligns = splitRow(lines[i + 1]).map(alignOf)
+      i += 2
+      const rows = []
+      while (i < lines.length && lines[i].trim() && lines[i].includes('|')) {
+        rows.push(splitRow(lines[i]))
+        i++
+      }
+      const k = key()
+      out.push(
+        <div key={k} className="md-table-wrap">
+          <table className="md-table">
+            <thead>
+              <tr>
+                {head.map((c, ci) => (
+                  <th key={ci} style={{ textAlign: aligns[ci] }}>
+                    {renderInline(c, `${k}-h${ci}`)}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r, ri) => (
+                <tr key={ri}>
+                  {head.map((_, ci) => (
+                    <td key={ci} style={{ textAlign: aligns[ci] }}>
+                      {renderInline(r[ci] ?? '', `${k}-${ri}-${ci}`)}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>,
+      )
+      continue
+    }
+
     const para = [line]
     i++
-    while (i < lines.length && lines[i].trim() && !isBlockStart(lines[i])) {
+    while (i < lines.length && lines[i].trim() && !isBlockStart(lines[i]) && !isTableStart(lines, i)) {
       para.push(lines[i])
       i++
     }
