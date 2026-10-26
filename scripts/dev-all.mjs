@@ -127,16 +127,37 @@ const backend = spawn(python, ["-m", "uvicorn", "app.main:app", "--port", API_PO
   stdio: "inherit",
   detached: process.platform !== "win32",
 });
-console.log(`Backend on :${API_PORT} (pid ${backend.pid})`);
+console.log(`Backend on :${API_PORT} (pid ${backend.pid}), waiting for startup...`);
 
-const frontend = spawn(process.execPath, [vite, "--port", WEB_PORT], {
+let frontend;
+backend.on("exit", (code) => { if (!shuttingDown) shutdown(code ?? 1); });
+process.on("SIGINT", () => shutdown(0));
+process.on("SIGTERM", () => shutdown(0));
+
+// Any HTTP response means startup is complete: with --reload the socket accepts
+// connections early, but requests are only answered once the app has started.
+async function waitForBackend(timeoutMs = 120_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline && !shuttingDown) {
+    try {
+      await fetch(`http://127.0.0.1:${API_PORT}/`, { signal: AbortSignal.timeout(2000) });
+      return true;
+    } catch {
+      await new Promise((r) => setTimeout(r, 500));
+    }
+  }
+  return false;
+}
+
+if (!(await waitForBackend())) {
+  if (shuttingDown) await new Promise(() => {}); // shutdown() is exiting
+  console.warn("Backend did not answer within 120s; starting the frontend anyway.");
+}
+
+frontend = spawn(process.execPath, [vite, "--port", WEB_PORT], {
   cwd: root,
   stdio: "inherit",
   detached: process.platform !== "win32",
 });
 console.log(`Frontend on :${WEB_PORT} (proxies /api -> :${API_PORT}). Ctrl+C stops both.`);
-
-backend.on("exit", (code) => { if (!shuttingDown) shutdown(code ?? 1); });
 frontend.on("exit", (code) => { if (!shuttingDown) shutdown(code ?? 1); });
-process.on("SIGINT", () => shutdown(0));
-process.on("SIGTERM", () => shutdown(0));
