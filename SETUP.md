@@ -118,7 +118,11 @@ with a rootful WSL machine the ports that containers publish are not forwarded
 to Windows, so the backend and the tests cannot reach `127.0.0.1:5432`.
 Docker Desktop works as well — use `docker compose` for every command here.
 
-**Every time you start working** (repo root):
+**Every time you start working** (repo root). `npm run dev:all` does this for
+you: when `DATABASE_URL` points at `127.0.0.1`/`localhost` and nothing listens on
+that port, it starts the Podman machine if needed, starts the `postgres`
+container (or creates it with `compose up`), and waits until it is ready. To do
+it by hand:
 
 ```powershell
 # Windows (PowerShell)

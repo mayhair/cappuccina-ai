@@ -1,11 +1,100 @@
-import { spawn } from "node:child_process";
-import { existsSync } from "node:fs";
+import { spawn, spawnSync } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
+import net from "node:net";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const API_PORT = process.env.API_PORT || "8000";
 const WEB_PORT = process.env.WEB_PORT || "5173";
+const DEFAULT_DATABASE_URL = "postgresql://cappuccina:cappuccina@127.0.0.1:5432/cappuccina";
+
+// DATABASE_URL as the backend will see it: the environment wins over backend/.env.
+function databaseUrl() {
+  if (process.env.DATABASE_URL) return process.env.DATABASE_URL;
+  const envFile = path.join(root, "backend", ".env");
+  if (existsSync(envFile)) {
+    const m = readFileSync(envFile, "utf8").match(/^\s*DATABASE_URL\s*=\s*["']?([^"'\r\n#]*)/m);
+    if (m && m[1].trim()) return m[1].trim();
+  }
+  return DEFAULT_DATABASE_URL;
+}
+
+function portOpen(host, port, timeoutMs = 1000) {
+  return new Promise((resolve) => {
+    const sock = net.connect({ host, port });
+    const done = (ok) => { sock.destroy(); resolve(ok); };
+    sock.setTimeout(timeoutMs, () => done(false));
+    sock.once("connect", () => done(true));
+    sock.once("error", () => done(false));
+  });
+}
+
+function run(cli, args, opts = {}) {
+  return spawnSync(cli, args, { cwd: root, encoding: "utf8", ...opts });
+}
+
+// Starts the compose.yaml postgres container when DATABASE_URL points at it and
+// nothing is listening yet. A remote or socket DATABASE_URL is left alone.
+async function ensurePostgres() {
+  let url;
+  try { url = new URL(databaseUrl()); } catch { return; }
+  const host = url.hostname.replace(/^\[|\]$/g, "");
+  if (!["127.0.0.1", "localhost", "::1"].includes(host)) return;
+  const port = Number(url.port || 5432);
+  if (await portOpen("127.0.0.1", port)) return;
+
+  const cli = process.env.SITE_CONTAINER_CLI || "podman";
+  const isPodman = path.basename(cli).toLowerCase().startsWith("podman");
+  if (run(cli, ["--version"]).error) {
+    console.warn(`PostgreSQL is not running on :${port} and '${cli}' was not found; start it yourself.`);
+    return;
+  }
+
+  // On Windows/macOS Podman runs containers inside a VM that must be up first.
+  if (isPodman && process.platform !== "linux") {
+    const state = run(cli, ["machine", "inspect", "--format", "{{.State}}"]).stdout?.trim();
+    if (state !== "running") {
+      console.log("Starting Podman machine...");
+      run(cli, ["machine", "start"], { stdio: "inherit" });
+    }
+  }
+
+  // Restart the existing compose container directly: plain `podman start` works
+  // even when the external compose provider can't reach the machine's API pipe.
+  const findContainer = () => run(cli, [
+    "ps", "-a", "--format", "{{.Names}}",
+    "--filter", `label=com.docker.compose.project=${path.basename(root).toLowerCase()}`,
+    "--filter", "label=com.docker.compose.service=postgres",
+  ]).stdout?.trim().split(/\r?\n/)[0];
+  let container = findContainer();
+  console.log("Starting PostgreSQL container...");
+  if (container) {
+    if (run(cli, ["start", container], { stdio: "inherit" }).status !== 0) container = undefined;
+  }
+  if (!container) {
+    const up = run(cli, ["compose", "up", "-d", "postgres"], { stdio: "inherit" });
+    container = up.status === 0 && findContainer();
+    if (!container) {
+      console.warn(`'${cli} compose up -d postgres' failed; the backend may not reach the database.`);
+      return;
+    }
+  }
+
+  // Same check as the compose healthcheck, so the backend's startup migrations don't race it.
+  const deadline = Date.now() + 60_000;
+  while (Date.now() < deadline) {
+    const ready = run(cli, ["exec", container, "pg_isready", "-U", "cappuccina", "-d", "cappuccina"]);
+    if (ready.status === 0 && await portOpen("127.0.0.1", port)) {
+      console.log(`PostgreSQL ready on :${port}`);
+      return;
+    }
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+  console.warn("PostgreSQL did not become ready within 60s; starting anyway.");
+}
+
+await ensurePostgres();
 
 const venvPython = process.platform === "win32"
   ? path.join(root, "backend", ".venv", "Scripts", "python.exe")
