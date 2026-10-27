@@ -81,6 +81,7 @@ def test_tts_job_belongs_to_one_user(signed_in, client, fish_ok):
     token = main.db.create_session(user2["id"])
 
     job_id = signed_in.post("/api/v1/tts", json={"text": "hello"}).json()["id"]
+    client.cookies.clear()
     client.cookies.set("cappuccina_session", token)
     assert client.get(f"/api/v1/tts/{job_id}").status_code == 404
 
