@@ -511,15 +511,11 @@ input { caret-color: var(--pink-strong); }
   background: var(--pink-soak);
   color: var(--pink-ink);
 }
-.chat-tag.tutor {
+.chat-tag.tutor,
+.chat-tag.story {
   border-radius: 8px;
   background: var(--pink-strong);
   color: #ffffff;
-}
-.chat-tag.story {
-  border-radius: 4px;
-  border: 1px solid var(--pink-strong);
-  background: transparent;
 }
 
 /* ---------- sidebar user bar ---------- */
