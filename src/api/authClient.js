@@ -33,6 +33,8 @@ export const setAdultMode = (enabled) =>
   request('/api/v1/auth/me', { method: 'PATCH', body: { adultMode: enabled } })
 export const setMemoryEnabled = (enabled) =>
   request('/api/v1/auth/me', { method: 'PATCH', body: { memoryEnabled: enabled } })
+export const setStoryChoices = (enabled) =>
+  request('/api/v1/auth/me', { method: 'PATCH', body: { storyChoices: enabled } })
 // Deletes the account and everything linked to it; the server clears the cookie.
 export const deleteAccount = () => request('/api/v1/auth/me', { method: 'DELETE' })
 

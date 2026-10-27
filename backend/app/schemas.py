@@ -1,3 +1,5 @@
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 
@@ -20,6 +22,38 @@ class Message(BaseModel):
     model_config = {"populate_by_name": True}
 
 
+CHAT_MODES = ("chat", "tutor", "story")
+# Story worlds, matching src/lib/storyWorlds.js. "cappuccina" is her own.
+STORY_WORLDS = (
+    "cappuccina", "fantasy", "scifi", "mystery", "historical", "everyday", "fandom", "custom",
+)
+
+
+class StorySetup(BaseModel):
+    """A story chat's world, opening and cast.
+
+    ``cast`` holds lore-book character ids and ``characters`` the user's saved
+    character ids. A setup without a world predates worlds: it is Cappuccina's
+    world with her in the scene, which is what the defaults give.
+    """
+
+    world: Literal[STORY_WORLDS] = "cappuccina"  # pyrefly: ignore [invalid-literal]
+    world_text: str = Field(default="", max_length=2000, alias="worldText")
+    scenario: str = Field(default="", max_length=2000)
+    with_cappuccina: bool = Field(default=True, alias="withCappuccina")
+    cast: list[str] = Field(default=[], max_length=12)
+    characters: list[int] = Field(default=[], max_length=12)
+    player: str = Field(default="", max_length=1000)
+
+    model_config = {"populate_by_name": True}
+
+
+class StoryCharacterRequest(BaseModel):
+    name: str
+    description: str = ""
+    voice: str = ""
+
+
 class ChatRequest(BaseModel):
     chat_id: str = Field(alias="chatId")
     # The visible path (root -> latest) the model should see.
@@ -31,6 +65,7 @@ class ChatRequest(BaseModel):
     reasoning: str = "high"
     mode: str = "chat"
     subject: str | None = None
+    story: StorySetup | None = None
     timezone: str | None = None
     generate_title: bool = Field(default=False, alias="generateTitle")
 
@@ -55,6 +90,7 @@ class UpdateProfileRequest(BaseModel):
     display_name: str | None = Field(default=None, alias="displayName")
     adult_mode: bool | None = Field(default=None, alias="adultMode")
     memory_enabled: bool | None = Field(default=None, alias="memoryEnabled")
+    story_choices: bool | None = Field(default=None, alias="storyChoices")
 
     model_config = {"populate_by_name": True}
 
@@ -71,12 +107,17 @@ class UserResponse(BaseModel):
     adult_mode: bool = Field(default=False, alias="adultMode")
     adult_mode_enabled: bool = Field(default=True, alias="adultModeEnabled")
     memory_enabled: bool = Field(default=True, alias="memoryEnabled")
+    story_choices: bool = Field(default=True, alias="storyChoices")
 
     model_config = {"populate_by_name": True}
 
 
 class MemoryRequest(BaseModel):
     content: str
+
+
+class StoryChapterRequest(BaseModel):
+    text: str
 
 
 class GmailStatusResponse(BaseModel):
@@ -98,6 +139,7 @@ class UpdateDraftRequest(BaseModel):
 class CreateChatRequest(BaseModel):
     mode: str = "chat"
     subject: str | None = None
+    story: StorySetup | None = None
 
 
 class RenameChatRequest(BaseModel):

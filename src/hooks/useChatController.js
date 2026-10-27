@@ -20,6 +20,7 @@ import {
   navigate as navigateBranchPath,
   defaultPath,
 } from '../lib/branching'
+import { modeTag, normalizeMode, wrapOoc } from '../lib/modes'
 
 const EFFORT_KEY = 'cappuccina-effort'
 const DEFAULT_TITLE = 'New chat'
@@ -67,6 +68,8 @@ export function makeChat() {
     tag: null,
     mode: 'chat',
     subject: null,
+    // Story mode's chosen scene and cast: { scenario, cast: [character ids] }.
+    story: null,
     // Every message node (all branches); activePath is the visible chain.
     messages: [],
     activePath: [],
@@ -110,9 +113,10 @@ function normalizeChat(c) {
     messages,
     activeLeafId,
     activePath: pathFromActiveLeaf(messages, activeLeafId),
-    mode: c.mode === 'tutor' ? 'tutor' : 'chat',
+    mode: normalizeMode(c.mode),
     subject: c.subject ?? null,
-    tag: c.tag ?? (c.mode === 'tutor' ? 'TUTOR' : null),
+    story: c.story ?? null,
+    tag: c.tag ?? modeTag(normalizeMode(c.mode)),
     pending: false,
   }
 }
@@ -192,7 +196,7 @@ export function useChatController(enabled, { onLocationChange } = {}) {
   const persistChat = useCallback(
     async (chat) => {
       if (!chat.pending) return chat.id
-      const created = await createChatOnServer(chat.mode, chat.subject)
+      const created = await createChatOnServer(chat.mode, chat.subject, chat.story)
       adoptServerChat(chat.id, created)
       return created.id
     },
@@ -601,6 +605,7 @@ export function useChatController(enabled, { onLocationChange } = {}) {
         reasoning,
         mode: chat.mode ?? 'chat',
         subject: chat.subject ?? null,
+        story: chat.mode === 'story' ? chat.story ?? null : null,
         generateTitle: pathMessages.length === 1,
       }, {
         onToken: (word) => {
@@ -768,15 +773,45 @@ export function useChatController(enabled, { onLocationChange } = {}) {
               ...c,
               mode,
               subject,
-              tag: mode === 'tutor' ? 'TUTOR' : null,
+              tag: modeTag(mode),
             }
           : c,
       ),
     )
   }, [])
 
-  const sendMessage = useCallback(() => {
-    const text = draft.trim()
+  // Story mode's scene and cast. Saved with the next turn (or when the chat is
+  // first persisted), like the mode itself.
+  const setStory = useCallback((chatId, story) => {
+    setChats((all) => all.map((c) => (c.id === chatId ? { ...c, story } : c)))
+  }, [])
+
+  // Send `text` as the user's next message without touching the draft: a
+  // suggested story action, or a scene starter (with its story setup).
+  const sendText = useCallback((text, story) => {
+    const content = (text ?? '').trim()
+    const base = activeChat
+    if (!base || !content || status !== 'idle') return
+    const chat = story !== undefined ? { ...base, story } : base
+    if (story !== undefined) setStory(base.id, story)
+    const visible = visibleMessages(chat).filter((m) => !m.failed)
+    const parentId = visible.length ? visible[visible.length - 1].id : null
+    runStream(chat, [
+      ...visible,
+      {
+        id: makeMessageId(),
+        parentId,
+        branchIndex: nextBranchIndex(chat.messages, parentId),
+        role: 'user',
+        content,
+      },
+    ])
+  }, [activeChat, status, runStream, setStory])
+
+  // `ooc` (story mode) sends the draft as an out-of-character note.
+  const sendMessage = useCallback((options) => {
+    const raw = draft.trim()
+    const text = options?.ooc && raw ? wrapOoc(raw) : raw
     const pending = attachments
     const chat = activeChat
     if (!chat || (!text && pending.length === 0) || status !== 'idle' || uploading) return
@@ -958,6 +993,8 @@ export function useChatController(enabled, { onLocationChange } = {}) {
     effort,
     setEffort,
     setMode,
+    setStory,
+    sendText,
     isStreaming,
     inputRef,
     typingTitleId,

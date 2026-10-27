@@ -10,7 +10,13 @@ from agent.fmhy import safety_note_for
 from agent.model import make_model
 from agent.prompts import build_messages
 from agent import tools as agent_tools
-from agent.tools import ALL_TOOLS, CALENDAR_TOOL_NAMES, GMAIL_TOOL_NAMES, MEMORY_TOOL_NAMES
+from agent.tools import (
+    ALL_TOOLS,
+    CALENDAR_TOOL_NAMES,
+    GMAIL_TOOL_NAMES,
+    MEMORY_TOOL_NAMES,
+    STORY_TOOL_NAMES,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -26,12 +32,24 @@ class AgentState(MessagesState):
     memory: bool
     memories: list[dict]
     memory_total: int
+    story: dict | None
+    story_note: str
+    story_choices: bool
 
 
-def _tools_for(tool_list: list, gmail: bool, calendar: bool, memory: bool = True) -> list:
+def _tools_for(
+    tool_list: list,
+    gmail: bool,
+    calendar: bool,
+    memory: bool = True,
+    story_choices: bool = False,
+) -> list:
     """The tools the model is offered: Google tools only when that service is
-    linked, memory tools only while the user has memory on."""
+    linked, memory tools only while the user has memory on, and suggested
+    story actions only in story mode with that setting on."""
     hidden: set[str] = set()
+    if not story_choices:
+        hidden |= STORY_TOOL_NAMES
     if not gmail:
         hidden |= GMAIL_TOOL_NAMES
     if not calendar:
@@ -164,7 +182,11 @@ def build_graph(tools=None):
         gmail = state.get("gmail", True)
         calendar = state.get("calendar", True)
         memory = state.get("memory", True)
-        model = make_model(state["reasoning"], _tools_for(tool_list, gmail, calendar, memory))
+        story_choices = state["mode"] == "story" and state.get("story_choices", False)
+        model = make_model(
+            state["reasoning"],
+            _tools_for(tool_list, gmail, calendar, memory, story_choices),
+        )
         messages = build_messages(
             state["mode"],
             state.get("subject"),
@@ -176,6 +198,8 @@ def build_graph(tools=None):
             memory=memory,
             memories=state.get("memories"),
             memory_total=state.get("memory_total"),
+            story=state.get("story"),
+            story_note=state.get("story_note", ""),
         )
         return {"messages": [model.invoke(messages)]}
 

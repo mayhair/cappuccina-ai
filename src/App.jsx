@@ -292,6 +292,8 @@ export default function App() {
     effort,
     setEffort,
     setMode,
+    setStory,
+    sendText,
     isStreaming,
     inputRef,
     typingTitleId,
@@ -529,6 +531,8 @@ export default function App() {
           onEffort={setEffort}
           mode={activeChat.mode ?? 'chat'}
           onMode={(mode, subject) => setMode(activeChatId, mode, subject)}
+          onSendText={sendText}
+          onStory={(story) => setStory(activeChatId, story)}
           attachments={attachments}
           uploading={uploading}
           attachError={attachError}

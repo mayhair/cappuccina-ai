@@ -2,6 +2,7 @@ import asyncio
 import base64
 import io
 import json
+import logging
 import re
 import time
 import zipfile
@@ -22,6 +23,8 @@ from agent.content import flatten_content
 from agent.fmhy import load_fmhy_tools
 from agent.graph import build_graph, is_viewed_image_message, viewed_images_message_for
 from agent import memory as memory_rules
+from agent import lorebook
+from agent import story as story_book
 from agent.title import generate_title
 from agent.tools import (
     ALL_TOOLS,
@@ -49,6 +52,11 @@ from app.config import (
     MEMORY_INJECT_LIMIT,
     MEMORY_MAX_CHARS,
     MEMORY_MAX_PER_USER,
+    STORY_CHAPTER_SIZE,
+    STORY_CHARACTER_MAX_PER_USER,
+    STORY_CHARACTER_NAME_MAX,
+    STORY_CHARACTER_TEXT_MAX,
+    STORY_CONTEXT_BUDGET,
 )
 from app.google_oauth import ServiceNotConnected
 from app.ratelimit import rate_limited_user
@@ -62,6 +70,7 @@ from app.webpage_preview import (
     webpage_mime,
 )
 from app.schemas import (
+    CHAT_MODES,
     CalendarStatusResponse,
     ChatRequest,
     ChatResponse,
@@ -72,6 +81,9 @@ from app.schemas import (
     SaveWebpageFileRequest,
     SetActiveBranchRequest,
     SetWebpageVersionRequest,
+    StoryChapterRequest,
+    StoryCharacterRequest,
+    StorySetup,
     TtsJobResponse,
     TtsRequest,
     ToolCall,
@@ -601,9 +613,44 @@ def _resolve_timezone(req: ChatRequest, user) -> str:
     return "UTC"
 
 
+def _story_context(req: ChatRequest) -> tuple[list, str]:
+    """For a story chat: the visible path to send and the "story so far" note.
+
+    Chapters that apply to this branch ride along as a note; the raw history
+    stays whole until it passes the context budget, and then only messages a
+    chapter already covers are left out.
+    """
+    if req.mode != "story":
+        return list(req.messages), ""
+    path_uids = [m.id or "" for m in req.messages]
+    chapters = story_book.chapters_on_path(db.list_story_chapters(req.chat_id), path_uids)
+    sizes = [len(m.content or "") for m in req.messages]
+    drop = story_book.trim_start(
+        sizes, story_book.covered_until(chapters, path_uids), STORY_CONTEXT_BUDGET
+    )
+    return list(req.messages[drop:]), story_book.story_note(chapters)
+
+
+def _resolved_story(setup: StorySetup | None, user) -> dict | None:
+    """The story setup for the prompt, with saved characters loaded by owner.
+
+    Only character ids travel in the request; their text is read here, scoped
+    to this user, so a story can never pull in someone else's character.
+    """
+    if setup is None:
+        return None
+    story = setup.model_dump(by_alias=True)
+    story["characters"] = [
+        {"name": r["name"], "description": r["description"], "voice": r["voice"]}
+        for r in db.get_story_characters(user["id"], setup.characters)
+    ]
+    return story
+
+
 def _state(req: ChatRequest, user) -> dict:
     messages = []
-    for m in req.messages:
+    visible, story_note = _story_context(req)
+    for m in visible:
         if m.role == "assistant":
             # Pictures this reply viewed go first, as they did during the run:
             # the reply's text was written after looking at them.
@@ -642,6 +689,9 @@ def _state(req: ChatRequest, user) -> dict:
             else []
         ),
         "memory_total": db.count_memories(user["id"]) if memory else 0,
+        "story": _resolved_story(req.story, user),
+        "story_note": story_note,
+        "story_choices": bool(user["story_choices"]),
     }
 
 
@@ -660,6 +710,7 @@ def _user_response(user) -> UserResponse:
         adultMode=ADULT_MODE_ENABLED and bool(user["adult_mode"]),
         adultModeEnabled=ADULT_MODE_ENABLED,
         memoryEnabled=bool(user["memory_enabled"]),
+        storyChoices=bool(user["story_choices"]),
     )
 
 
@@ -741,6 +792,8 @@ async def update_me(
         db.update_user_adult_mode(user["id"], req.adult_mode)
     if req.memory_enabled is not None:
         db.set_memory_enabled(user["id"], req.memory_enabled)
+    if req.story_choices is not None:
+        db.set_story_choices(user["id"], req.story_choices)
     return _user_response(db.get_user_by_id(user["id"]))
 
 
@@ -817,6 +870,205 @@ async def delete_user_memory(memory_id: str, user=Depends(current_user)) -> dict
 @app.delete("/api/v1/memories")
 async def delete_all_user_memories(user=Depends(current_user)) -> dict:
     return {"ok": True, "deleted": db.delete_all_memories(user["id"])}
+
+
+# ---------- story chapters (the "Story so far" panel) ----------
+# The same rows the post-turn summarizer writes. The client shows the ones whose
+# end uid is on the branch being viewed, plus hand-written notes (no uids).
+
+STORY_CHAPTER_MAX_CHARS = 4000
+
+
+def _story_character_json(row) -> dict:
+    return {
+        "id": row["id"],
+        "name": row["name"],
+        "description": row["description"],
+        "voice": row["voice"],
+        "createdAt": row["created_at"],
+        "updatedAt": row["updated_at"],
+    }
+
+
+def _story_character_fields_or_400(req: StoryCharacterRequest) -> tuple[str, str, str]:
+    name = " ".join(req.name.split())
+    description = req.description.strip()
+    voice = req.voice.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="A character needs a name")
+    if len(name) > STORY_CHARACTER_NAME_MAX:
+        raise HTTPException(
+            status_code=400, detail=f"Keep the name under {STORY_CHARACTER_NAME_MAX} characters"
+        )
+    if max(len(description), len(voice)) > STORY_CHARACTER_TEXT_MAX:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Keep each field under {STORY_CHARACTER_TEXT_MAX} characters",
+        )
+    return name, description, voice
+
+
+@app.get("/api/v1/story/characters")
+async def list_story_characters(user=Depends(current_user)) -> dict:
+    return {
+        "characters": [_story_character_json(r) for r in db.list_story_characters(user["id"])],
+        "limit": STORY_CHARACTER_MAX_PER_USER,
+        "nameMax": STORY_CHARACTER_NAME_MAX,
+        "textMax": STORY_CHARACTER_TEXT_MAX,
+    }
+
+
+@app.post("/api/v1/story/characters", status_code=201)
+async def create_story_character(
+    req: StoryCharacterRequest, user=Depends(current_user)
+) -> dict:
+    name, description, voice = _story_character_fields_or_400(req)
+    if db.count_story_characters(user["id"]) >= STORY_CHARACTER_MAX_PER_USER:
+        raise HTTPException(
+            status_code=409,
+            detail=f"You have {STORY_CHARACTER_MAX_PER_USER} characters. Delete one to make room.",
+        )
+    return _story_character_json(
+        db.create_story_character(user["id"], name, description, voice)
+    )
+
+
+@app.patch("/api/v1/story/characters/{character_id}")
+async def update_story_character(
+    character_id: int, req: StoryCharacterRequest, user=Depends(current_user)
+) -> dict:
+    name, description, voice = _story_character_fields_or_400(req)
+    row = db.update_story_character(user["id"], character_id, name, description, voice)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Character not found")
+    return _story_character_json(row)
+
+
+@app.delete("/api/v1/story/characters/{character_id}")
+async def delete_story_character(character_id: int, user=Depends(current_user)) -> dict:
+    if not db.delete_story_character(user["id"], character_id):
+        raise HTTPException(status_code=404, detail="Character not found")
+    return {"ok": True}
+
+
+@app.get("/api/v1/lore/characters")
+async def list_lore_characters(user=Depends(current_user)) -> list[dict]:
+    """The lore book's cast, for story mode's cast picker."""
+    return [
+        {"id": c.id, "name": c.name, "blurb": c.blurb, "hasLook": c.ref_path is not None}
+        for c in lorebook.CHARACTERS
+    ]
+
+
+def _chapter_json(row) -> dict:
+    return {
+        "id": row["id"],
+        "startUid": row["start_uid"],
+        "endUid": row["end_uid"],
+        "text": row["text"],
+        "edited": bool(row["edited"]),
+        "createdAt": row["created_at"],
+        "updatedAt": row["updated_at"],
+    }
+
+
+def _chapter_text_or_400(text: str) -> str:
+    text = (text or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="A chapter can't be empty")
+    if len(text) > STORY_CHAPTER_MAX_CHARS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Keep a chapter under {STORY_CHAPTER_MAX_CHARS} characters",
+        )
+    return text
+
+
+def _owned_chat_id_or_404(user, chat_id: str) -> str:
+    if db.get_chat(user["id"], chat_id) is None:
+        raise HTTPException(status_code=404, detail="Chat not found")
+    return chat_id
+
+
+@app.get("/api/v1/chats/{chat_id}/story/chapters")
+async def list_story_chapters(chat_id: str, user=Depends(current_user)) -> dict:
+    _owned_chat_id_or_404(user, chat_id)
+    return {
+        "chapters": [_chapter_json(r) for r in db.list_story_chapters(chat_id)],
+        "maxChars": STORY_CHAPTER_MAX_CHARS,
+        "chapterSize": STORY_CHAPTER_SIZE,
+    }
+
+
+@app.post("/api/v1/chats/{chat_id}/story/chapters", status_code=201)
+async def create_story_chapter(
+    chat_id: str, req: StoryChapterRequest, user=Depends(current_user)
+) -> dict:
+    _owned_chat_id_or_404(user, chat_id)
+    text = _chapter_text_or_400(req.text)
+    return _chapter_json(db.create_story_chapter(chat_id, text, edited=True))
+
+
+@app.patch("/api/v1/chats/{chat_id}/story/chapters/{chapter_id}")
+async def update_story_chapter(
+    chat_id: str, chapter_id: int, req: StoryChapterRequest, user=Depends(current_user)
+) -> dict:
+    _owned_chat_id_or_404(user, chat_id)
+    row = db.update_story_chapter(chat_id, chapter_id, _chapter_text_or_400(req.text))
+    if row is None:
+        raise HTTPException(status_code=404, detail="Chapter not found")
+    return _chapter_json(row)
+
+
+@app.delete("/api/v1/chats/{chat_id}/story/chapters/{chapter_id}")
+async def delete_story_chapter(
+    chat_id: str, chapter_id: int, user=Depends(current_user)
+) -> dict:
+    _owned_chat_id_or_404(user, chat_id)
+    if not db.delete_story_chapter(chat_id, chapter_id):
+        raise HTTPException(status_code=404, detail="Chapter not found")
+    return {"ok": True}
+
+
+def _chapter_messages(chat_id: str, start_uid: str, end_uid: str) -> list[dict]:
+    """The stored messages from start_uid to end_uid, walking parent links."""
+    nodes = db.list_messages_by_chat([chat_id]).get(chat_id, [])
+    by_id = {n["id"]: n for n in nodes}
+    chain: list[dict] = []
+    node = by_id.get(end_uid)
+    while node is not None:
+        chain.append(node)
+        if node["id"] == start_uid:
+            break
+        node = by_id.get(node["parentId"]) if node["parentId"] else None
+    chain.reverse()
+    return chain
+
+
+@app.post("/api/v1/chats/{chat_id}/story/chapters/{chapter_id}/resummarize")
+async def resummarize_story_chapter(
+    chat_id: str, chapter_id: int, user=Depends(current_user)
+) -> dict:
+    """Write a chapter's summary again from its messages, replacing any edit."""
+    _owned_chat_id_or_404(user, chat_id)
+    rows = db.list_story_chapters(chat_id)
+    row = next((r for r in rows if r["id"] == chapter_id), None)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Chapter not found")
+    if not row["end_uid"]:
+        raise HTTPException(status_code=400, detail="A hand-written note has no messages to summarize")
+    messages = _chapter_messages(chat_id, row["start_uid"], row["end_uid"])
+    previous = next(
+        (r["text"] for r in reversed(rows) if r["id"] < chapter_id and r["end_uid"]), ""
+    )
+    try:
+        text = await story_book.summarize_section(messages, previous)
+    except Exception:
+        logger.exception("story chapter re-summarize failed")
+        text = ""
+    if not text:
+        raise HTTPException(status_code=502, detail="Couldn't summarize right now. Try again.")
+    return _chapter_json(db.update_story_chapter(chat_id, chapter_id, text, edited=False))
 
 
 # ---------- Gmail (incremental consent) ----------
@@ -1011,9 +1263,10 @@ async def list_chats(user=Depends(current_user)) -> list[dict]:
 
 @app.post("/api/v1/chats")
 async def create_chat(req: CreateChatRequest, user=Depends(current_user)) -> dict:
-    if req.mode not in ("chat", "tutor"):
+    if req.mode not in CHAT_MODES:
         raise HTTPException(status_code=400, detail="Unknown mode")
-    return db.create_chat(user["id"], mode=req.mode, subject=req.subject)
+    story = req.story.model_dump(by_alias=True) if req.story else None
+    return db.create_chat(user["id"], mode=req.mode, subject=req.subject, story=story)
 
 
 @app.patch("/api/v1/chats/{chat_id}")
@@ -1472,7 +1725,46 @@ async def delete_attachment_file(attachment_id: str, user=Depends(current_user))
 
 # ---------- chat completion ----------
 
+logger = logging.getLogger(__name__)
+
+# Fire-and-forget work that outlives a stream (story chapter summaries). The
+# set holds a reference so a running task is not garbage-collected.
+_BACKGROUND: set[asyncio.Task] = set()
+
+# At most this many chapters are written after one turn, so a long chat that
+# just switched to story mode catches up over a few turns, not in one burst.
+STORY_CHAPTERS_PER_TURN = 2
+
+
+def _start_background(coro) -> None:
+    task = asyncio.create_task(coro)
+    _BACKGROUND.add(task)
+    task.add_done_callback(_BACKGROUND.discard)
+
+
+async def _write_story_chapter(req: ChatRequest, reply: dict) -> None:
+    """Summarize the next section of a story's path once it is long enough."""
+    path = [{"id": m.id, "role": m.role, "content": m.content} for m in req.messages]
+    path.append(reply)
+    uids = [m["id"] or "" for m in path]
+    try:
+        for _ in range(STORY_CHAPTERS_PER_TURN):
+            chapters = story_book.chapters_on_path(db.list_story_chapters(req.chat_id), uids)
+            section = story_book.pending_section(chapters, uids, STORY_CHAPTER_SIZE)
+            if section is None:
+                return
+            start, end = section
+            previous = next((c["text"] for c in reversed(chapters) if c.get("end_uid")), "")
+            text = await story_book.summarize_section(path[start:end], previous)
+            if not text:
+                return
+            db.create_story_chapter(req.chat_id, text, uids[start], uids[end - 1])
+    except Exception:
+        logger.exception("story chapter summary failed")
+
 def _owned_chat_or_404(user, req: ChatRequest):
+    if req.mode not in CHAT_MODES:
+        raise HTTPException(status_code=400, detail="Unknown mode")
     chat = db.get_chat(user["id"], req.chat_id)
     if chat is None:
         raise HTTPException(status_code=404, detail="Chat not found")
@@ -1561,6 +1853,7 @@ def _sync_history(chat_id: str, req: ChatRequest) -> str | None:
         mode=req.mode,
         subject=req.subject,
         clear_subject=req.subject is None,
+        story=req.story.model_dump(by_alias=True) if req.story else None,
     )
     if not req.messages:
         return None
@@ -1916,6 +2209,9 @@ async def _stream_chat_events(req: ChatRequest, user: dict):
             db.set_chat_active_leaf(
                 user["id"], req.chat_id, req.reply_id
             )
+        if req.mode == "story" and req.reply_id and final_text:
+            reply = {"id": req.reply_id, "role": "assistant", "content": final_text}
+            _start_background(_write_story_chapter(req, reply))
 
 
 @app.post("/api/v1/chat/stream")

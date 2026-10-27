@@ -1,18 +1,17 @@
 import { useEffect, useState } from 'react'
-import { CapIcon, ChatIcon, CheckIcon, ChevronIcon } from './Icons'
+import { BookIcon, CapIcon, ChatIcon, CheckIcon, ChevronIcon } from './Icons'
 import { useLanguage } from '../i18n/LanguageProvider'
+import { CHAT_MODES } from '../lib/modes'
 
-const MODES = [
-  { value: 'chat', icon: ChatIcon },
-  { value: 'tutor', icon: CapIcon },
-]
+const ICONS = { chat: ChatIcon, tutor: CapIcon, story: BookIcon }
+const MODES = CHAT_MODES.map((value) => ({ value, icon: ICONS[value] }))
 
 // A compact chip showing the chat mode; it opens an upward picker that says
 // what each mode does.
 export function ModeSwitch({ mode, onMode, disabled }) {
   const { t } = useLanguage()
   const [open, setOpen] = useState(false)
-  const current = mode === 'tutor' ? 'tutor' : 'chat'
+  const current = CHAT_MODES.includes(mode) ? mode : 'chat'
   const CurrentIcon = MODES.find((m) => m.value === current).icon
 
   useEffect(() => {
@@ -28,7 +27,7 @@ export function ModeSwitch({ mode, onMode, disabled }) {
     <div className="mode-switch">
       <button
         type="button"
-        className={`effort-pill mode-chip${current === 'tutor' ? ' is-tutor' : ''}`}
+        className={`effort-pill mode-chip${current !== 'chat' ? ` is-${current}` : ''}`}
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
         aria-haspopup="dialog"

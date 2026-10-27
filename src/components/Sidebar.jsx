@@ -183,7 +183,7 @@ export function Sidebar({ chats, activeChatId, onSelect, onNewChat, onDelete, on
                 <ChatTitle text={shownTitle(c.title)} />
               )}
               {c.tag && (
-                <span className={`chat-tag${c.tag === 'TUTOR' ? ' tutor' : ''}`}>{c.tag === 'TUTOR' ? t('mode.tutor') : c.tag}</span>
+                <span className={`chat-tag${c.tag === 'TUTOR' ? ' tutor' : c.tag === 'STORY' ? ' story' : ''}`}>{c.tag === 'TUTOR' ? t('mode.tutor') : c.tag === 'STORY' ? t('mode.story') : c.tag}</span>
               )}
               {!editing && (
                 <button
