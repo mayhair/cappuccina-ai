@@ -298,8 +298,8 @@ def build_graph(tools=None):
             story=state.get("story"),
             story_note=state.get("story_note", ""),
         )
-        # No reasoning field: picking a few options needs no thinking.
-        model = make_model("").bind_tools([tool], tool_choice=tool.name)
+        # Reasoning off: picking a few options needs no thinking.
+        model = make_model("off").bind_tools([tool], tool_choice=tool.name)
         try:
             reply = model.with_config(tags=[STORY_CHOICES_TAG]).invoke(messages)
         except Exception:
