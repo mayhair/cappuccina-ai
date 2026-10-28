@@ -150,8 +150,8 @@ function worldDefaults(world, previous) {
 }
 
 // Who the user plays: one of their saved characters (picked like a radio,
-// click again to unpick), plus free-form notes. With no saved characters yet
-// it nudges them to make one in Settings.
+// click again to unpick), plus free-form notes. A button to Settings always
+// leads, as it does under "Your characters".
 function PlayerPicker({ story, onChange, onManageCharacters }) {
   const { t } = useLanguage()
   const { characters: mine } = useMyCharacters()
@@ -167,7 +167,13 @@ function PlayerPicker({ story, onChange, onManageCharacters }) {
 
   return (
     <div className="story-player">
-      {mine?.length > 0 ? (
+      {onManageCharacters && (
+        <button type="button" className="story-manage" onClick={onManageCharacters}>
+          <GearIcon aria-hidden="true" />
+          {t('story.playerCreate')}
+        </button>
+      )}
+      {mine?.length > 0 && (
         <>
           <p className="settings-hint">{t('story.playerHint')}</p>
           <div className="story-cast" role="radiogroup" aria-label={t('story.player')}>
@@ -186,14 +192,6 @@ function PlayerPicker({ story, onChange, onManageCharacters }) {
             ))}
           </div>
         </>
-      ) : (
-        mine &&
-        onManageCharacters && (
-          <button type="button" className="story-manage" onClick={onManageCharacters}>
-            <GearIcon aria-hidden="true" />
-            {t('story.playerCreate')}
-          </button>
-        )
       )}
       <textarea
         className="settings-input story-own"

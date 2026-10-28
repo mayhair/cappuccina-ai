@@ -200,6 +200,10 @@ const replyShown = (page, n) =>
 
   await page.click('.story-scene:has-text("The dragon’s bargain")');
   check("no inline character form in the picker", (await page.$$(".story-cast-editor .character-form")).length === 0);
+  check(
+    "Who you play keeps its Settings button with characters saved",
+    (await page.$$('.story-player .story-manage:has-text("Make a character to play as")')).length === 1,
+  );
   await page.click('.story-player .story-chip:has-text("Bo")');
   check(
     "played character leaves the cast picker",
