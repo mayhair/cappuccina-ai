@@ -4230,7 +4230,7 @@ html[dir='rtl'] .sky img { transform: scaleX(-1); }
 }
 .story-player .settings-hint { margin: 0; text-align: center; }
 .story-disclosure {
-  margin-top: 0.4rem;
+  margin-top: 0.5rem;
   border: none;
   background: transparent;
   color: var(--ink-soft);
@@ -4250,8 +4250,17 @@ html[dir='rtl'] .sky img { transform: scaleX(-1); }
   border: 1px solid var(--hairline);
   background: var(--glass-strong);
   text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.45rem;
 }
-.story-bar-cast > .settings-hint { margin: 0 auto 0.5rem; }
+.story-bar-cast > .settings-hint { margin: 0; }
+/* Section headings in the panel match the cast editor's own, with a little
+   more room above since each starts a new section. */
+.story-bar-cast > .story-label { margin-top: 0.7rem; font-size: 12px; }
+.story-bar-cast > .story-player,
+.story-bar-cast > .story-cast-editor { width: 100%; }
 .character-form { display: flex; flex-direction: column; gap: 0.55rem; width: 100%; }
 .character-form label { display: flex; flex-direction: column; gap: 0.2rem; font-size: 13px; font-weight: 700; color: var(--ink-soft); }
 .character-form .settings-input { width: 100%; resize: vertical; }
