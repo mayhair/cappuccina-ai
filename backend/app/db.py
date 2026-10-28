@@ -827,12 +827,18 @@ def append_chat_message(chat_id: str, role: str, content: str,
     """Append a message to the tree, deriving its sibling order when parented.
 
     ``branch_index`` follows the same max+1 rule the client uses, so the two
-    stay in lockstep without the client having to precompute it.
+    stay in lockstep without the client having to precompute it. The chat row
+    is locked first so concurrent appends can't read the same max and hand two
+    siblings one index; the lock releases when the transaction commits.
     """
     with connection() as conn:
         if parent_uid is None:
             branch_index = 0
         else:
+            conn.execute(
+                "SELECT 1 FROM chats WHERE id = %(chat_id)s FOR UPDATE",
+                {"chat_id": chat_id},
+            )
             row = conn.execute(
                 "SELECT MAX(branch_index) AS mx FROM messages"
                 " WHERE chat_id = %(chat_id)s AND parent_uid = %(parent_uid)s",

@@ -116,6 +116,24 @@ def test_append_message_parents_and_orders_siblings(isolated_db):
     assert (by_id["a2"]["parentId"], by_id["a2"]["branchIndex"]) == ("u1", 1)
 
 
+def test_concurrent_sibling_appends_get_distinct_indexes(isolated_db):
+    from concurrent.futures import ThreadPoolExecutor
+
+    _, chat = _user_and_chat()
+    db.replace_chat_messages(chat["id"], [_node("u1", None, 0, "user", "hi")])
+
+    def add(i):
+        db.append_chat_message(
+            chat["id"], role="assistant", content=str(i), uid=f"a{i}", parent_uid="u1"
+        )
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        list(pool.map(add, range(8)))
+
+    by_id = _stored(chat["id"])
+    assert sorted(by_id[f"a{i}"]["branchIndex"] for i in range(8)) == list(range(8))
+
+
 def test_append_without_parent_is_a_root(isolated_db):
     _, chat = _user_and_chat()
     db.append_chat_message(chat["id"], role="assistant", content="loose", uid="a0")
