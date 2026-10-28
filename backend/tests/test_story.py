@@ -189,6 +189,45 @@ def test_story_state_loads_only_the_users_own_characters(signed_in):
     assert story["world"] == "fantasy" and story["withCappuccina"] is True
 
 
+def test_the_users_own_character_is_who_they_play():
+    from agent.prompts import build_system_prompt
+
+    prompt = build_system_prompt(
+        "story",
+        None,
+        story={
+            "world": "fantasy",
+            "player": "Starts the story hurt",
+            "playerCharacter": {"name": "Aria", "description": "An elf ranger", "voice": ""},
+        },
+    )
+    plays = prompt.split("## Who the user plays")[1]
+    assert "The user plays Aria" in plays
+    assert "### Aria\nAn elf ranger" in plays
+    assert "Their notes for this story: Starts the story hurt" in plays
+    assert "## The cast" not in prompt
+
+
+def test_the_played_character_is_loaded_by_owner_and_left_out_of_the_cast(signed_in):
+    from app import db
+    from app.main import _resolved_story
+    from app.schemas import StorySetup
+
+    me = db.get_user_by_google_sub("google-sub-1")
+    aria = db.create_story_character(me["id"], "Aria", "An elf ranger", "")
+    bo = db.create_story_character(me["id"], "Bo", "", "")
+    other = db.create_google_user("other@example.com", "Other", "google-sub-2")
+    theirs = db.create_story_character(other["id"], "Secret", "Not yours", "")
+
+    story = _resolved_story(
+        StorySetup(characters=[aria["id"], bo["id"]], playerCharacter=aria["id"]), me
+    )
+    assert story["playerCharacter"]["name"] == "Aria"
+    assert [c["name"] for c in story["characters"]] == ["Bo"]
+    stolen = _resolved_story(StorySetup(playerCharacter=theirs["id"]), me)
+    assert stolen["playerCharacter"] is None
+
+
 def test_story_setup_rejects_unknown_worlds(signed_in):
     bad = signed_in.post("/api/v1/chats", json={"mode": "story", "story": {"world": "moon"}})
     assert bad.status_code == 422

@@ -57,6 +57,8 @@ function CastEditor({ story, onChange, onManageCharacters, disabled }) {
   const herWorld = (story.world ?? 'cappuccina') === 'cappuccina'
   const cast = story.cast ?? []
   const picked = story.characters ?? []
+  // The character the user plays is theirs to voice, not part of the cast.
+  const others = (mine ?? []).filter((c) => c.id !== story.playerCharacter)
   const [loreOpen, setLoreOpen] = useState(herWorld || cast.length > 0)
 
   return (
@@ -83,9 +85,9 @@ function CastEditor({ story, onChange, onManageCharacters, disabled }) {
           {t('story.character.manage')}
         </button>
       )}
-      {mine?.length > 0 && (
+      {others.length > 0 && (
         <div className="story-cast" role="group" aria-label={t('story.yourCharacters')}>
-          {mine.map((c) => (
+          {others.map((c) => (
             <Chip
               key={c.id}
               on={picked.includes(c.id)}
@@ -143,7 +145,69 @@ function worldDefaults(world, previous) {
     cast: scene?.cast ?? [],
     characters: previous?.characters ?? [],
     player: previous?.player ?? '',
+    playerCharacter: previous?.playerCharacter ?? null,
   }
+}
+
+// Who the user plays: one of their saved characters (picked like a radio,
+// click again to unpick), plus free-form notes. With no saved characters yet
+// it nudges them to make one in Settings.
+function PlayerPicker({ story, onChange, onManageCharacters }) {
+  const { t } = useLanguage()
+  const { characters: mine } = useMyCharacters()
+  const playing = mine?.find((c) => c.id === story.playerCharacter)
+
+  const pick = (id) =>
+    onChange((s) =>
+      s.playerCharacter === id
+        ? { ...s, playerCharacter: null }
+        : // Playing a character takes them out of the cast she voices.
+          { ...s, playerCharacter: id, characters: (s.characters ?? []).filter((x) => x !== id) },
+    )
+
+  return (
+    <div className="story-player">
+      {mine?.length > 0 ? (
+        <>
+          <p className="settings-hint">{t('story.playerHint')}</p>
+          <div className="story-cast" role="radiogroup" aria-label={t('story.player')}>
+            {mine.map((c) => (
+              <button
+                key={c.id}
+                type="button"
+                role="radio"
+                aria-checked={story.playerCharacter === c.id}
+                className={`story-chip${story.playerCharacter === c.id ? ' on' : ''}`}
+                title={c.description}
+                onClick={() => pick(c.id)}
+              >
+                {c.name}
+              </button>
+            ))}
+          </div>
+        </>
+      ) : (
+        mine &&
+        onManageCharacters && (
+          <button type="button" className="story-manage" onClick={onManageCharacters}>
+            <GearIcon aria-hidden="true" />
+            {t('story.playerCreate')}
+          </button>
+        )
+      )}
+      <textarea
+        className="settings-input story-own"
+        rows={2}
+        maxLength={1000}
+        value={story.player}
+        placeholder={
+          playing ? t('story.playerNotesPlaceholder', { name: playing.name }) : t('story.playerPlaceholder')
+        }
+        aria-label={playing ? t('story.playerNotes') : t('story.player')}
+        onChange={(e) => onChange((s) => ({ ...s, player: e.target.value }))}
+      />
+    </div>
+  )
 }
 
 // Shown in an empty story chat: pick a world, an opening and a cast; then the
@@ -251,15 +315,8 @@ export function StoryStart({ onStart, onManageCharacters, disabled }) {
           onChange={(e) => setCustom(e.target.value)}
         />
       )}
-      <input
-        className="settings-input story-own"
-        type="text"
-        maxLength={1000}
-        value={story.player}
-        placeholder={t('story.playerPlaceholder')}
-        aria-label={t('story.player')}
-        onChange={(e) => setStory((s) => ({ ...s, player: e.target.value }))}
-      />
+      <h2 className="story-label">{t('story.player')}</h2>
+      <PlayerPicker story={story} onChange={setStory} onManageCharacters={onManageCharacters} />
 
       <h2 className="story-label">{t('story.step.cast')}</h2>
       <CastEditor key={story.world} story={story} onChange={setStory} onManageCharacters={onManageCharacters} />

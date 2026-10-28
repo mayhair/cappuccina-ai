@@ -640,10 +640,20 @@ def _resolved_story(setup: StorySetup | None, user) -> dict | None:
     if setup is None:
         return None
     story = setup.model_dump(by_alias=True)
-    story["characters"] = [
-        {"name": r["name"], "description": r["description"], "voice": r["voice"]}
-        for r in db.get_story_characters(user["id"], setup.characters)
-    ]
+    player_id = setup.player_character
+    # The user's own character never doubles as a cast member she voices.
+    cast_ids = [i for i in setup.characters if i != player_id]
+    rows = db.get_story_characters(
+        user["id"], cast_ids + ([player_id] if player_id is not None else [])
+    )
+
+    def fields(r):
+        return {"name": r["name"], "description": r["description"], "voice": r["voice"]}
+
+    story["characters"] = [fields(r) for r in rows if r["id"] != player_id]
+    story["playerCharacter"] = next(
+        (fields(r) for r in rows if r["id"] == player_id), None
+    )
     return story
 
 

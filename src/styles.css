@@ -4221,6 +4221,14 @@ html[dir='rtl'] .sky img { transform: scaleX(-1); }
 }
 .story-manage:hover { background: var(--pink-strong); color: #ffffff; }
 .story-manage svg { width: 16px; height: 16px; flex: none; }
+.story-player {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  width: min(100%, 720px);
+}
+.story-player .settings-hint { margin: 0; text-align: center; }
 .story-disclosure {
   margin-top: 0.4rem;
   border: none;

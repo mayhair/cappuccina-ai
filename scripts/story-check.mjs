@@ -183,7 +183,10 @@ const replyShown = (page, n) =>
 // ---------- another world, Cappuccina as narrator, a saved character ----------
 {
   const { page, errors, bodies } = await openApp({
-    library: [{ id: 100, name: "Aria", description: "An elf ranger who trusts no one", voice: "" }],
+    library: [
+      { id: 100, name: "Aria", description: "An elf ranger who trusts no one", voice: "" },
+      { id: 101, name: "Bo", description: "A knight", voice: "" },
+    ],
   });
   await page.click('.story-world:has-text("Fantasy")');
   check("fantasy scenes shown", (await page.$$('.story-scene:has-text("A stranger at the tavern")')).length === 1);
@@ -196,10 +199,15 @@ const replyShown = (page, n) =>
   check("hint says she narrates", (await page.textContent(".story-switch-hint")).includes("narrator"));
 
   await page.click('.story-scene:has-text("The dragon’s bargain")');
-  await page.fill('input[aria-label="Who you play"]', "A nervous young knight");
   check("no inline character form in the picker", (await page.$$(".story-cast-editor .character-form")).length === 0);
-  await page.click('.story-chip:has-text("Aria")');
-  check("saved character cast", (await page.$$('.story-chip.on:has-text("Aria")')).length === 1);
+  await page.click('.story-player .story-chip:has-text("Bo")');
+  check(
+    "played character leaves the cast picker",
+    (await page.$$('.story-cast-editor .story-chip:has-text("Bo")')).length === 0,
+  );
+  await page.fill('textarea[aria-label="Notes on who you play"]', "A nervous young knight");
+  await page.click('.story-cast-editor .story-chip:has-text("Aria")');
+  check("saved character cast", (await page.$$('.story-cast-editor .story-chip.on:has-text("Aria")')).length === 1);
 
   await page.click(".story-go");
   await replyShown(page, 1);
@@ -211,7 +219,8 @@ const replyShown = (page, n) =>
       story?.scenario?.includes("dragon") &&
       story?.player === "A nervous young knight" &&
       story?.cast?.length === 0 &&
-      JSON.stringify(story?.characters) === "[100]",
+      JSON.stringify(story?.characters) === "[100]" &&
+      story?.playerCharacter === 101,
     JSON.stringify(story),
   );
   check("story bar names the world", (await page.textContent(".story-bar-world")).includes("Fantasy"));
@@ -224,8 +233,8 @@ const replyShown = (page, n) =>
   const app = await openApp({ library: [{ id: 100, name: "Aria", description: "", voice: "" }] });
   const { page, errors } = app;
   await page.click('.story-world:has-text("Fantasy")');
-  await page.waitForSelector('.story-chip:has-text("Aria")', { timeout: 5000 });
-  await page.click(".story-manage");
+  await page.waitForSelector('.story-cast-editor .story-chip:has-text("Aria")', { timeout: 5000 });
+  await page.click(".story-cast-editor .story-manage");
   await page.waitForSelector(".character-row", { timeout: 5000 });
   check("manage link opens the character library", (await page.textContent(".character-row")).includes("Aria"));
   await page.click('.character-row button[aria-label="Edit Aria"]');
@@ -236,7 +245,8 @@ const replyShown = (page, n) =>
   await page.waitForSelector(".character-row", { state: "detached", timeout: 5000 });
   check(
     "cast picker shows the edit made in Settings",
-    (await page.$$('.story-chip:has-text("Aria the Bold")')).length === 1,
+    (await page.$$('.story-cast-editor .story-chip:has-text("Aria the Bold")')).length === 1 &&
+      (await page.$$('.story-player .story-chip:has-text("Aria the Bold")')).length === 1,
   );
   check("no console errors (library link)", errors.length === 0, errors.join("\n"));
   await page.close();
@@ -246,6 +256,10 @@ const replyShown = (page, n) =>
 {
   const { page, errors, bodies } = await openApp();
   await page.click('.story-world:has-text("Fandom")');
+  check(
+    "with no characters yet, Who you play offers to make one",
+    (await page.$$('.story-player .story-manage:has-text("Make a character to play as")')).length === 1,
+  );
   check("fandom begin disabled until described", await page.isDisabled(".story-go"));
   await page.fill('textarea[aria-label="Fandom"]', "Pokémon, in Kanto");
   check("fandom begin enabled once described", !(await page.isDisabled(".story-go")));

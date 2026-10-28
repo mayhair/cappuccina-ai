@@ -33,7 +33,8 @@ class StorySetup(BaseModel):
     """A story chat's world, opening and cast.
 
     ``cast`` holds lore-book character ids and ``characters`` the user's saved
-    character ids. A setup without a world predates worlds: it is Cappuccina's
+    character ids. ``player_character`` is the saved character the user plays
+    as, and ``player`` any notes on who they play. A setup without a world predates worlds: it is Cappuccina's
     world with her in the scene, which is what the defaults give.
     """
 
@@ -44,6 +45,7 @@ class StorySetup(BaseModel):
     cast: list[str] = Field(default=[], max_length=12)
     characters: list[int] = Field(default=[], max_length=12)
     player: str = Field(default="", max_length=1000)
+    player_character: int | None = Field(default=None, alias="playerCharacter")
 
     model_config = {"populate_by_name": True}
 
