@@ -21,7 +21,12 @@ from sse_starlette.sse import EventSourceResponse
 
 from agent.content import flatten_content
 from agent.fmhy import load_fmhy_tools
-from agent.graph import build_graph, is_viewed_image_message, viewed_images_message_for
+from agent.graph import (
+    STORY_CHOICES_TAG,
+    build_graph,
+    is_viewed_image_message,
+    viewed_images_message_for,
+)
 from agent import memory as memory_rules
 from agent import lorebook
 from agent import story as story_book
@@ -345,6 +350,17 @@ def _redact_webpage_parts(items: list) -> list:
             item = {**item, "args": _webpage_tool_args(WEBPAGE_FILE_TOOL, item["args"])}
         out.append(item)
     return out
+
+
+def _reply_text(messages) -> str:
+    """The run's last assistant text. A story turn can end on its suggested
+    next moves, so the final message may be a tool result, not the reply."""
+    for msg in reversed(messages):
+        if isinstance(msg, AIMessage):
+            text = flatten_content(msg.content)
+            if text:
+                return text
+    return flatten_content(messages[-1].content) if messages else ""
 
 
 def _final_extras(messages) -> tuple[str, list[ToolCall], list[dict]]:
@@ -1900,10 +1916,11 @@ async def chat(req: ChatRequest, user=Depends(rate_limited_user)) -> ChatRespons
         _record_build(req.chat_id, build)
         messages = result["messages"]
         reasoning, tool_calls, parts = _final_extras(messages)
+        reply = _reply_text(messages)
         db.append_chat_message(
             req.chat_id,
             role="assistant",
-            content=flatten_content(messages[-1].content),
+            content=reply,
             reasoning=reasoning,
             tools=_serialize_tool_calls(tool_calls),
             parts=parts,
@@ -1911,7 +1928,7 @@ async def chat(req: ChatRequest, user=Depends(rate_limited_user)) -> ChatRespons
             thought_seconds=thought_seconds,
         )
         return ChatResponse(
-            content=flatten_content(messages[-1].content),
+            content=reply,
             reasoning=reasoning,
             tool_calls=tool_calls,
         )
@@ -1981,6 +1998,9 @@ async def _stream_chat_events(req: ChatRequest, user: dict):
         version="v2",
     ):
         kind = event["event"]
+        if kind.startswith("on_chat_model") and STORY_CHOICES_TAG in (event.get("tags") or ()):
+            # The hidden next-moves call: only its tool run is shown.
+            continue
         if kind == "on_chat_model_start":
             # A streamed call the graph never ran (an unknown tool name) would
             # otherwise leave its card spinning: close it as failed.
