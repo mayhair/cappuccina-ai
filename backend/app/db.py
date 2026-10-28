@@ -737,20 +737,46 @@ _INSERT_MESSAGE = (
 )
 
 
-def replace_chat_messages(chat_id: str, messages: list[dict]) -> None:
-    """Full-tree sync: replaces stored messages with the given tree.
+# Re-syncing an unchanged node is a no-op: the upsert only rewrites a row when
+# one of its columns actually differs, so a turn writes just the new nodes (and
+# any the client edited) instead of the whole history.
+_UPSERT_MESSAGE = (
+    _INSERT_MESSAGE
+    + " ON CONFLICT (chat_id, uid) DO UPDATE SET"
+    " parent_uid = EXCLUDED.parent_uid, branch_index = EXCLUDED.branch_index,"
+    " role = EXCLUDED.role, content = EXCLUDED.content, reasoning = EXCLUDED.reasoning,"
+    " tools = EXCLUDED.tools, parts = EXCLUDED.parts,"
+    " thinking_done = EXCLUDED.thinking_done, thought_seconds = EXCLUDED.thought_seconds"
+    " WHERE (messages.parent_uid, messages.branch_index, messages.role, messages.content,"
+    " messages.reasoning, messages.tools, messages.parts, messages.thinking_done,"
+    " messages.thought_seconds)"
+    " IS DISTINCT FROM (EXCLUDED.parent_uid, EXCLUDED.branch_index, EXCLUDED.role,"
+    " EXCLUDED.content, EXCLUDED.reasoning, EXCLUDED.tools, EXCLUDED.parts,"
+    " EXCLUDED.thinking_done, EXCLUDED.thought_seconds)"
+)
 
-    The client is treated as authoritative for message structure during this
-    transition; each node carries its uid, parent link and sibling order. The
-    assistant reply is appended by append_chat_message(). The swap commits as
-    one transaction, so a concurrent read (the sidebar refreshing, another
-    device syncing) can never catch the tree half-replaced.
+
+def replace_chat_messages(chat_id: str, messages: list[dict]) -> None:
+    """Full-tree sync: the stored messages become the given tree.
+
+    The client is treated as authoritative for message structure; each node
+    carries its uid, parent link and sibling order. Nodes the tree no longer
+    has are deleted, new ones inserted, and changed ones updated in place, so
+    unchanged history (and its created_at) is left alone. The assistant reply
+    is appended by append_chat_message(). The sync commits as one transaction,
+    so a concurrent read (the sidebar refreshing, another device syncing) can
+    never catch the tree half-replaced.
     """
+    uids = [m.get("uid") for m in messages]
     with connection() as conn:
-        conn.execute("DELETE FROM messages WHERE chat_id = %(chat_id)s", {"chat_id": chat_id})
+        conn.execute(
+            "DELETE FROM messages WHERE chat_id = %(chat_id)s"
+            " AND (uid IS NULL OR NOT uid = ANY(%(uids)s))",
+            {"chat_id": chat_id, "uids": uids},
+        )
         with conn.cursor() as cur:
             cur.executemany(
-                _INSERT_MESSAGE,
+                _UPSERT_MESSAGE,
                 [
                     {
                         "chat_id": chat_id,

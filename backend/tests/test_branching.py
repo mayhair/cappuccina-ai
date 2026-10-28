@@ -60,6 +60,46 @@ def test_replace_messages_is_idempotent(isolated_db):
     assert [m["id"] for m in messages] == ["u1", "a1"]
 
 
+def _rows(chat_id):
+    return {
+        r["uid"]: r
+        for r in db._fetchall(
+            "SELECT uid, xmin::text AS version, content FROM messages"
+            " WHERE chat_id = %(chat_id)s",
+            {"chat_id": chat_id},
+        )
+    }
+
+
+def test_replace_messages_leaves_unchanged_rows_alone(isolated_db):
+    _, chat = _user_and_chat()
+    tree = [_node("u1", None, 0, "user", "hi"), _node("a1", "u1", 0, "assistant", "yo")]
+    db.replace_chat_messages(chat["id"], tree)
+    before = _rows(chat["id"])
+
+    db.replace_chat_messages(chat["id"], [*tree, _node("u2", "a1", 0, "user", "more")])
+
+    after = _rows(chat["id"])
+    # xmin changes whenever a row is rewritten; untouched history keeps it.
+    assert after["u1"]["version"] == before["u1"]["version"]
+    assert after["a1"]["version"] == before["a1"]["version"]
+    assert after["u2"]["content"] == "more"
+
+
+def test_replace_messages_updates_edits_and_drops_removed_nodes(isolated_db):
+    _, chat = _user_and_chat()
+    db.replace_chat_messages(
+        chat["id"],
+        [_node("u1", None, 0, "user", "hi"), _node("a1", "u1", 0, "assistant", "yo")],
+    )
+
+    db.replace_chat_messages(chat["id"], [_node("u1", None, 0, "user", "hello")])
+
+    rows = _rows(chat["id"])
+    assert set(rows) == {"u1"}
+    assert rows["u1"]["content"] == "hello"
+
+
 def test_append_message_parents_and_orders_siblings(isolated_db):
     _, chat = _user_and_chat()
     db.replace_chat_messages(chat["id"], [_node("u1", None, 0, "user", "hi")])

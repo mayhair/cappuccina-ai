@@ -3,8 +3,10 @@ import base64
 import io
 import json
 import re
+import threading
 import time
 import zipfile
+from collections import OrderedDict
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -425,6 +427,39 @@ def _flag_tool_results(
                         tool[flag] = True
 
 
+# Uploaded and generated pictures never change once written (each id names
+# one file), so their data URLs are kept between turns instead of re-reading
+# and re-encoding every picture in the history on every send. The rows are
+# still looked up per turn, so ownership and deletion are checked as before.
+_DATA_URL_CACHE_LIMIT = 64 * 1024 * 1024  # characters, about one byte each
+_data_urls: OrderedDict[Path, str] = OrderedDict()
+_data_urls_size = 0
+_data_urls_lock = threading.Lock()
+
+
+def _image_data_url(path: Path, mime: str) -> str | None:
+    """A ``data:`` URL for a stored picture, or None when its file is gone."""
+    global _data_urls_size
+    with _data_urls_lock:
+        url = _data_urls.get(path)
+        if url is not None:
+            _data_urls.move_to_end(path)
+            return url
+    try:
+        raw = path.read_bytes()
+    except OSError:
+        return None
+    url = f"data:{mime};base64,{base64.b64encode(raw).decode('ascii')}"
+    with _data_urls_lock:
+        if path not in _data_urls:
+            _data_urls[path] = url
+            _data_urls_size += len(url)
+        while _data_urls_size > _DATA_URL_CACHE_LIMIT and len(_data_urls) > 1:
+            _, dropped = _data_urls.popitem(last=False)
+            _data_urls_size -= len(dropped)
+    return url
+
+
 def _attachment_blocks(parts, user_id: str) -> list[dict]:
     """LLM content blocks for a user turn's attachment parts.
 
@@ -446,18 +481,12 @@ def _attachment_blocks(parts, user_id: str) -> list[dict]:
         if row is None:
             continue
         if row["kind"] == "image":
-            path = db.attachment_file_path(row["id"], row["filename"])
-            try:
-                raw = path.read_bytes()
-            except OSError:
-                continue
-            encoded = base64.b64encode(raw).decode("ascii")
-            blocks.append(
-                {
-                    "type": "image_url",
-                    "image_url": {"url": f"data:{row['mime']};base64,{encoded}"},
-                }
+            url = _image_data_url(
+                db.attachment_file_path(row["id"], row["filename"]), row["mime"]
             )
+            if url is None:
+                continue
+            blocks.append({"type": "image_url", "image_url": {"url": url}})
             blocks.append(
                 {
                     "type": "text",
@@ -512,12 +541,10 @@ def _viewed_image_message(parts, user_id: str) -> HumanMessage | None:
         row = db.get_image(user_id, image_id)
         if row is None:
             continue
-        try:
-            raw = db.image_file_path(row["id"], row["mime"]).read_bytes()
-        except OSError:
+        url = _image_data_url(db.image_file_path(row["id"], row["mime"]), row["mime"])
+        if url is None:
             continue
-        encoded = base64.b64encode(raw).decode("ascii")
-        viewed.append((row["id"], f"data:{row['mime']};base64,{encoded}"))
+        viewed.append((row["id"], url))
     return viewed_images_message_for(viewed)
 
 
