@@ -309,18 +309,19 @@ def test_graph_hides_tools_for_unlinked_google_services():
     names = {t.name for t in _tools_for(ALL_TOOLS, gmail=True, calendar=False)}
     assert GMAIL_TOOL_NAMES <= names
     assert not names & CALENDAR_TOOL_NAMES
-    everything = _tools_for(ALL_TOOLS, True, True, story_choices=True)
-    assert len(everything) == len(ALL_TOOLS)
+    everything = _tools_for(ALL_TOOLS, True, True)
+    assert len(everything) == len(ALL_TOOLS) - 1  # all but suggest_actions
 
 
-def test_graph_offers_story_actions_only_when_enabled():
+def test_story_actions_are_never_offered_to_the_model():
+    # The graph asks for next moves itself, so the model never sees the tool.
     from agent.graph import _tools_for
     from agent.tools import ALL_TOOLS, STORY_TOOL_NAMES
 
     names = {t.name for t in _tools_for(ALL_TOOLS, True, True)}
     assert not names & STORY_TOOL_NAMES
-    names = {t.name for t in _tools_for(ALL_TOOLS, True, True, story_choices=True)}
-    assert STORY_TOOL_NAMES <= names
+    names = {t.name for t in _tools_for(ALL_TOOLS, True, True, story={"world": "cappuccina"})}
+    assert not names & STORY_TOOL_NAMES
 
 
 def test_suggest_actions_cleans_and_caps_options():

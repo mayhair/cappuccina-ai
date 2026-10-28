@@ -147,6 +147,7 @@ const replyShown = (page, n) =>
   await page.waitForSelector(".story-choice", { timeout: 5000 });
   const options = await page.$$eval(".story-choice", (els) => els.map((e) => e.textContent));
   check("choice buttons rendered", options.length === 2, options.join(" | "));
+  check("next moves show no tool card or thinking block", (await page.$$(".thinking")).length === 0);
   await page.click('.story-choice:has-text("Check the back room")');
   await replyShown(page, 2);
   check("choice sent as the user's message", bodies[1]?.messages?.at(-1)?.content === "Check the back room");

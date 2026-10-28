@@ -62,6 +62,8 @@ function messageSegments(message) {
     (p) =>
       p.type !== 'image' &&
       p.type !== 'webpage' &&
+      // Story mode's next moves show as buttons under the reply, not a card.
+      !(p.type === 'tool' && p.name === 'suggest_actions') &&
       (p.type !== 'text' || (p.text ?? '').trim() !== ''),
   )
   const content = message.content ?? ''

@@ -55,21 +55,20 @@ def _tools_for(
     gmail: bool,
     calendar: bool,
     memory: bool = True,
-    story_choices: bool = False,
     story: dict | None = None,
 ) -> list:
     """The tools the model is offered: Google tools only when that service is
-    linked, memory tools only while the user has memory on, and suggested
-    story actions only in story mode with that setting on. ``story`` is set
-    only in story mode, which also drops the tools a story never uses, and
-    lore_lookup unless the story uses her lore book."""
+    linked, and memory tools only while the user has memory on. Suggested
+    story moves are never offered: the graph asks for them itself (see
+    story_choices in build_graph). ``story`` is set only in story mode, which
+    also drops the tools a story never uses, and lore_lookup unless the
+    story uses her lore book."""
     hidden: set[str] = set()
     if story is not None:
         hidden |= STORY_HIDDEN_TOOL_NAMES
         if not story_uses_lore(story):
             hidden.add("lore_lookup")
-    if not story_choices:
-        hidden |= STORY_TOOL_NAMES
+    hidden |= STORY_TOOL_NAMES
     if not gmail:
         hidden |= GMAIL_TOOL_NAMES
     if not calendar:
@@ -247,11 +246,10 @@ def build_graph(tools=None):
         calendar = state.get("calendar", True)
         memory = state.get("memory", True)
         story_mode = state["mode"] == "story"
-        story_choices = story_mode and state.get("story_choices", False)
         story = (state.get("story") or {}) if story_mode else None
         model = make_model(
             state["reasoning"],
-            _tools_for(tool_list, gmail, calendar, memory, story_choices, story),
+            _tools_for(tool_list, gmail, calendar, memory, story),
         )
         messages = build_messages(
             state["mode"],
