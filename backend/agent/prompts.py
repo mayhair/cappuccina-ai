@@ -81,6 +81,17 @@ GOOGLE_NOT_LINKED = (
 _TUTOR_PERSONA_TRIM = {"Likes and dislikes", "Things she would say"}
 _TUTOR_VOICE_TRIM = {"Sample exchanges"}
 
+# A story needs none of the free-media, Google or teaching rules: their tools
+# are not offered in story mode (see agent.graph._tools_for). The lore rule
+# goes too unless the story uses her lore book.
+_STORY_BOUNDARY_TRIM = {
+    "Free media and where to watch things",
+    "Email (Gmail)",
+    "Calendar (Google Calendar)",
+    "Teaching honesty",
+}
+_LORE_RULES = {"Interaction with lore"}
+
 # Story mode narrates, so the chat-bubble rhythm and the chat-shaped samples go.
 # Its own boundaries keep only the safety block that matches the user's age.
 _STORY_VOICE_TRIM = {"Chat rhythm", "Sample exchanges"}
@@ -272,6 +283,13 @@ def story_setup(story: dict | None) -> str:
     return "\n\n".join(parts)
 
 
+def story_uses_lore(story: dict | None) -> bool:
+    """Whether a story is set in her world or casts lore-book characters, so
+    the lore book (and lore_lookup) belongs in it."""
+    story = story or {}
+    return _story_world(story) == "cappuccina" or bool(_lore_cast(story))
+
+
 def _story_sections(story: dict | None) -> tuple[str, bool, bool]:
     """Story mode's instructions, whether she is in the scene, and whether the
     lore book belongs in the prompt."""
@@ -285,7 +303,7 @@ def _story_sections(story: dict | None) -> tuple[str, bool, bool]:
     setup = story_setup(story)
     if setup:
         text = f"{text}\n\n{setup}"
-    return text, in_scene, her_world or bool(_lore_cast(story))
+    return text, in_scene, story_uses_lore(story)
 
 
 def build_system_prompt(
@@ -325,6 +343,10 @@ def build_system_prompt(
         boundaries = BOUNDARIES
     if not memory:
         boundaries = _without_sections(boundaries, _MEMORY_RULES)
+    story_mode = mode == "story"
+    if story_mode:
+        trim = _STORY_BOUNDARY_TRIM if lore else _STORY_BOUNDARY_TRIM | _LORE_RULES
+        boundaries = _without_sections(boundaries, trim)
     unlinked: list[str] = []
     if not gmail:
         boundaries = _without_sections(boundaries, _GMAIL_RULES)
@@ -332,7 +354,7 @@ def build_system_prompt(
     if not calendar:
         boundaries = _without_sections(boundaries, _CALENDAR_RULES)
         unlinked.append("Google Calendar")
-    if unlinked:
+    if unlinked and not story_mode:
         hint = GOOGLE_NOT_LINKED.format(services=" or ".join(unlinked))
         boundaries = f"{boundaries}\n\n{hint}"
     sections = [boundaries]
@@ -343,8 +365,10 @@ def build_system_prompt(
     if lore:
         sections.append(lore)
     sections.append(ATTACHMENT_NOTE)
-    sections.append(MATH_NOTE)
-    sections.append(WEBPAGE_NOTE)
+    # A story has no equations to typeset and no webpage tools.
+    if not story_mode:
+        sections.append(MATH_NOTE)
+        sections.append(WEBPAGE_NOTE)
     if tutor:
         sections.append(tutor)
     if story_text:

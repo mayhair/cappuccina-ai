@@ -6,9 +6,9 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, START, MessagesState, StateGraph
 from langgraph.prebuilt import ToolNode
 
-from agent.fmhy import safety_note_for
+from agent.fmhy import FMHY_TOOL_NAMES, safety_note_for
 from agent.model import make_model
-from agent.prompts import build_messages
+from agent.prompts import build_messages, story_uses_lore
 from agent import tools as agent_tools
 from agent.tools import (
     ALL_TOOLS,
@@ -16,6 +16,7 @@ from agent.tools import (
     GMAIL_TOOL_NAMES,
     MEMORY_TOOL_NAMES,
     STORY_TOOL_NAMES,
+    WEBPAGE_TOOL_NAMES,
 )
 
 logger = logging.getLogger(__name__)
@@ -37,17 +38,36 @@ class AgentState(MessagesState):
     story_choices: bool
 
 
+# What a story never needs: building webpages, email, calendar, equations and
+# the free-media guide. Leaving them out saves their schemas on every story
+# turn and keeps the narrator in the story.
+STORY_HIDDEN_TOOL_NAMES = (
+    WEBPAGE_TOOL_NAMES
+    | GMAIL_TOOL_NAMES
+    | CALENDAR_TOOL_NAMES
+    | FMHY_TOOL_NAMES
+    | {"solve_equation"}
+)
+
+
 def _tools_for(
     tool_list: list,
     gmail: bool,
     calendar: bool,
     memory: bool = True,
     story_choices: bool = False,
+    story: dict | None = None,
 ) -> list:
     """The tools the model is offered: Google tools only when that service is
     linked, memory tools only while the user has memory on, and suggested
-    story actions only in story mode with that setting on."""
+    story actions only in story mode with that setting on. ``story`` is set
+    only in story mode, which also drops the tools a story never uses, and
+    lore_lookup unless the story uses her lore book."""
     hidden: set[str] = set()
+    if story is not None:
+        hidden |= STORY_HIDDEN_TOOL_NAMES
+        if not story_uses_lore(story):
+            hidden.add("lore_lookup")
     if not story_choices:
         hidden |= STORY_TOOL_NAMES
     if not gmail:
@@ -182,10 +202,12 @@ def build_graph(tools=None):
         gmail = state.get("gmail", True)
         calendar = state.get("calendar", True)
         memory = state.get("memory", True)
-        story_choices = state["mode"] == "story" and state.get("story_choices", False)
+        story_mode = state["mode"] == "story"
+        story_choices = story_mode and state.get("story_choices", False)
+        story = (state.get("story") or {}) if story_mode else None
         model = make_model(
             state["reasoning"],
-            _tools_for(tool_list, gmail, calendar, memory, story_choices),
+            _tools_for(tool_list, gmail, calendar, memory, story_choices, story),
         )
         messages = build_messages(
             state["mode"],

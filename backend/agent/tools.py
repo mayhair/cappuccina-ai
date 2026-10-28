@@ -1117,6 +1117,10 @@ MEMORY_TOOL_NAMES = frozenset(
 )
 # Offered only in story mode, and only while the user has suggested actions on.
 STORY_TOOL_NAMES = frozenset({"suggest_actions"})
+# The webpage workspace tools.
+WEBPAGE_TOOL_NAMES = frozenset(
+    {"write_webpage_file", "add_webpage_asset", "read_webpage_file", "webpage_shell", "check_webpage"}
+)
 
 # Human-friendly names for UI display ("Called Tool: ...").
 TOOL_DISPLAY_NAMES = {

@@ -130,6 +130,52 @@ def test_other_worlds_leave_her_lore_out_and_make_her_the_narrator():
     assert "## Who she is" in prompt
 
 
+def test_story_prompt_leaves_out_what_a_story_never_needs():
+    from agent.prompts import MATH_NOTE, WEBPAGE_NOTE, build_system_prompt
+
+    prompt = build_system_prompt("story", None, story={"world": "fantasy"}, gmail=False)
+    for gone in (
+        "## Free media and where to watch things",
+        "## Email (Gmail)",
+        "## Calendar (Google Calendar)",
+        "## Google services",
+        "## Teaching honesty",
+        "## Interaction with lore",
+        MATH_NOTE,
+        WEBPAGE_NOTE,
+    ):
+        assert gone not in prompt, gone
+    assert "## Honesty about being an AI" in prompt
+    assert "## Story mode" in prompt
+
+    her_world = build_system_prompt("story", None, story={"world": "cappuccina"})
+    assert "## Interaction with lore" in her_world
+    assert "## Your lore book" in her_world
+    # Chat keeps all of it.
+    chat = build_system_prompt("chat", None)
+    assert WEBPAGE_NOTE in chat and "## Free media and where to watch things" in chat
+
+
+def test_story_mode_offers_only_the_tools_a_story_uses():
+    from types import SimpleNamespace
+
+    from agent.graph import _tools_for
+    from agent.tools import ALL_TOOLS
+
+    tools = ALL_TOOLS + [SimpleNamespace(name="fmhy_search")]
+    fantasy = {t.name for t in _tools_for(tools, True, True, story={"world": "fantasy"})}
+    for gone in ("write_webpage_file", "webpage_shell", "check_webpage", "search_emails",
+                 "create_event", "solve_equation", "fmhy_search", "lore_lookup"):
+        assert gone not in fantasy, gone
+    for kept in ("generate_image", "image_edit", "view_image", "read_attachment",
+                 "web_search", "read_webpage", "save_memory"):
+        assert kept in fantasy, kept
+    her_world = {t.name for t in _tools_for(tools, True, True, story={})}
+    assert "lore_lookup" in her_world
+    chat = {t.name for t in _tools_for(tools, True, True)}
+    assert {"write_webpage_file", "fmhy_search", "solve_equation"} <= chat
+
+
 def test_lore_cast_brings_the_lore_book_into_another_world():
     from agent.prompts import build_system_prompt
 
