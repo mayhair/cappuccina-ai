@@ -71,7 +71,12 @@ def _write_sharded(path: Path, data: bytes) -> None:
     path.write_bytes(data)
 
 
+# A session ends after SESSION_TTL without use, and SESSION_MAX_AGE after
+# sign-in however active it stays. Use renews it only once less than
+# SESSION_RENEW_WINDOW is left, so most requests do not write.
 SESSION_TTL = timedelta(days=30)
+SESSION_MAX_AGE = timedelta(days=90)
+SESSION_RENEW_WINDOW = SESSION_TTL / 2
 
 POOL_MIN_SIZE = 1
 POOL_MAX_SIZE = 10
@@ -553,11 +558,21 @@ def create_session(user_id: str) -> str:
 def get_user_for_session(token: str) -> dict | None:
     if not token:
         return None
-    return _fetchone(
-        "SELECT u.* FROM sessions s JOIN users u ON u.id = s.user_id"
+    row = _fetchone(
+        "SELECT u.*, s.expires_at < now() + %(renew_window)s AS renew"
+        " FROM sessions s JOIN users u ON u.id = s.user_id"
         " WHERE s.token = %(token)s AND s.expires_at > now()",
-        {"token": token},
+        {"token": token, "renew_window": SESSION_RENEW_WINDOW},
     )
+    if row is None:
+        return None
+    if row.pop("renew"):
+        _execute(
+            "UPDATE sessions SET expires_at = LEAST(now() + %(ttl)s, created_at + %(max_age)s)"
+            " WHERE token = %(token)s",
+            {"token": token, "ttl": SESSION_TTL, "max_age": SESSION_MAX_AGE},
+        )
+    return row
 
 
 def delete_session(token: str) -> None:

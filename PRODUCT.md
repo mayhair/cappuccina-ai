@@ -36,7 +36,7 @@ A character-embodied companion and tutor that can also build things. Generic cha
 
 Users open Cappuccina in a laptop or mobile browser. They can install it as a progressive web app from the browser's install option.
 
-Sign-in is Google-only. Each session lasts up to 30 days through one cookie.
+Sign-in is Google-only. Each session uses one cookie. It ends after 30 days without use, and always 90 days after sign-in.
 
 Sessions are casual. A user can switch between hanging out, getting homework help, and building a webpage in the same day. Each chat keeps its own conversation and, if used, its own webpage project.
 
@@ -48,7 +48,7 @@ The app shows an early-alpha notice and a 13+ age gate.
 
 Live features:
 
-- Google sign-in, a 30-day session cookie, and account deletion that removes the account, chats, files, images, webpages, memories and Google connections.
+- Google sign-in, a session cookie (30 days idle, 90 days at most), and account deletion that removes the account, chats, files, images, webpages, memories and Google connections.
 - Streaming chat with Low, High and Max reasoning effort.
 - Chat and Tutor modes. Tutor mode teaches step by step and has no subject picker.
 - Message editing, regeneration and branch history, so a user can move between versions of a conversation.
