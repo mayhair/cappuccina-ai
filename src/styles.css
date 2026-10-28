@@ -4251,6 +4251,7 @@ html[dir='rtl'] .sky img { transform: scaleX(-1); }
   background: var(--glass-strong);
   text-align: center;
 }
+.story-bar-cast > .settings-hint { margin: 0 auto 0.5rem; }
 .character-form { display: flex; flex-direction: column; gap: 0.55rem; width: 100%; }
 .character-form label { display: flex; flex-direction: column; gap: 0.2rem; font-size: 13px; font-weight: 700; color: var(--ink-soft); }
 .character-form .settings-input { width: 100%; resize: vertical; }
