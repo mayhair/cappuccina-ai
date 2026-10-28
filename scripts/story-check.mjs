@@ -228,6 +228,28 @@ const replyShown = (page, n) =>
     JSON.stringify(story),
   );
   check("story bar names the world", (await page.textContent(".story-bar-world")).includes("Fantasy"));
+
+  // Who you play can change mid-story from the bar, for the next message on.
+  await page.click('.story-bar-btn:has-text("Cast")');
+  await page.waitForSelector(".story-bar-cast .story-player .story-chip", { timeout: 5000 });
+  check(
+    "story bar shows who you play",
+    (await page.$$('.story-bar-cast .story-player .story-chip.on:has-text("Bo")')).length === 1,
+  );
+  await page.click('.story-bar-cast .story-player .story-chip:has-text("Aria")');
+  check(
+    "a character you now play leaves the bar's cast",
+    (await page.$$('.story-bar-cast .story-cast-editor .story-chip:has-text("Aria")')).length === 0,
+  );
+  await page.fill('textarea[aria-label="Message Cappuccina"]', "I draw my bow.");
+  await page.keyboard.press("Enter");
+  await replyShown(page, 2);
+  const switched = bodies[1]?.story;
+  check(
+    "next message carries the new player character",
+    switched?.playerCharacter === 100 && JSON.stringify(switched?.characters) === "[]",
+    JSON.stringify(switched),
+  );
   check("no console errors (fantasy)", errors.length === 0, errors.join("\n"));
   await page.close();
 }

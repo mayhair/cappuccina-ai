@@ -152,7 +152,7 @@ function worldDefaults(world, previous) {
 // Who the user plays: one of their saved characters (picked like a radio,
 // click again to unpick), plus free-form notes. A button to Settings always
 // leads, as it does under "Your characters".
-function PlayerPicker({ story, onChange, onManageCharacters }) {
+function PlayerPicker({ story, onChange, onManageCharacters, disabled }) {
   const { t } = useLanguage()
   const { characters: mine } = useMyCharacters()
   const playing = mine?.find((c) => c.id === story.playerCharacter)
@@ -185,6 +185,7 @@ function PlayerPicker({ story, onChange, onManageCharacters }) {
                 aria-checked={story.playerCharacter === c.id}
                 className={`story-chip${story.playerCharacter === c.id ? ' on' : ''}`}
                 title={c.description}
+                disabled={disabled}
                 onClick={() => pick(c.id)}
               >
                 {c.name}
@@ -197,7 +198,8 @@ function PlayerPicker({ story, onChange, onManageCharacters }) {
         className="settings-input story-own"
         rows={2}
         maxLength={1000}
-        value={story.player}
+        value={story.player ?? ''}
+        disabled={disabled}
         placeholder={
           playing ? t('story.playerNotesPlaceholder', { name: playing.name }) : t('story.playerPlaceholder')
         }
@@ -361,6 +363,15 @@ export function StoryBar({ chat, onStory, onManageCharacters, disabled }) {
       {castOpen && (
         <div className="story-bar-cast">
           <p className="settings-hint">{t('story.castHint')}</p>
+          <h3 className="story-label">{t('story.player')}</h3>
+          {/* PlayerPicker hands over updater functions; the bar saves plain setups. */}
+          <PlayerPicker
+            story={story}
+            disabled={disabled}
+            onChange={(update) => onStory(typeof update === 'function' ? update(story) : update)}
+            onManageCharacters={onManageCharacters}
+          />
+          <h3 className="story-label">{t('story.step.cast')}</h3>
           <CastEditor story={story} disabled={disabled} onChange={onStory} onManageCharacters={onManageCharacters} />
         </div>
       )}
