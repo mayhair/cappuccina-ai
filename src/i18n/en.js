@@ -117,6 +117,7 @@ export default {
   'controls.group': "Chat controls",
   'controls.openSidebar': "Open sidebar",
   'controls.search': "Search",
+  'effort.off': "Off",
   'effort.low': "Low",
   'effort.high': "High",
   'effort.max': "Max",

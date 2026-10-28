@@ -141,7 +141,7 @@ MEMORY_MAX_PER_USER = 200
 # reachable through the search_memories tool.
 MEMORY_INJECT_LIMIT = 25
 
-REASONING_LEVELS = {"low", "high", "max"}
+REASONING_LEVELS = {"off", "low", "high", "max"}
 
 TUTOR_SUFFIX = """
 You are now in TUTOR MODE{for_subject}. Don't just give answers — teach. \

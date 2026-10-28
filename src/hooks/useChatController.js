@@ -40,6 +40,7 @@ const EMPTY_WEBPAGE = {
 }
 
 export const EFFORTS = [
+  { label: 'Off', value: 'off' },
   { label: 'Low', value: 'low' },
   { label: 'High', value: 'high' },
   { label: 'Max', value: 'max' },

@@ -115,6 +115,7 @@ export default {
   'controls.group': "Chat controls",
   'controls.openSidebar': "Sidebar kholein",
   'controls.search': "Talash",
+  'effort.off': "Band",
   'effort.low': "Kam",
   'effort.high': "Zyada",
   'effort.max': "Intehai",
