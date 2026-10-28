@@ -47,9 +47,9 @@ const streamBody = (n) =>
   ].join("");
 
 // One mocked app per scenario, opened on a new chat switched to Story mode.
-async function openApp() {
+async function openApp({ library = [] } = {}) {
   const page = await browser.newPage({ viewport: { width: 1400, height: 950 } });
-  const app = { page, errors: [], bodies: [], created: null, library: [] };
+  const app = { page, errors: [], bodies: [], created: null, library };
   page.on(
     "console",
     (m) => m.type() === "error" && !m.text().startsWith("Failed to load resource") && app.errors.push(m.text()),
@@ -80,6 +80,12 @@ async function openApp() {
     const row = { id: 100 + app.library.length, ...route.request().postDataJSON() };
     app.library.push(row);
     return route.fulfill(json(row, 201));
+  });
+  await page.route("**/api/v1/story/characters/*", async (route) => {
+    const id = Number(route.request().url().split("/").pop());
+    const row = app.library.find((c) => c.id === id);
+    Object.assign(row, route.request().postDataJSON());
+    return route.fulfill(json(row));
   });
   await page.route("**/api/v1/memories**", (route) => route.fulfill(json([])));
   await page.route("**/api/v1/chat/stream", (route) => {
@@ -174,9 +180,11 @@ const replyShown = (page, n) =>
   await page.close();
 }
 
-// ---------- another world, Cappuccina as narrator, a new character ----------
+// ---------- another world, Cappuccina as narrator, a saved character ----------
 {
-  const { page, errors, bodies } = await openApp();
+  const { page, errors, bodies } = await openApp({
+    library: [{ id: 100, name: "Aria", description: "An elf ranger who trusts no one", voice: "" }],
+  });
   await page.click('.story-world:has-text("Fantasy")');
   check("fantasy scenes shown", (await page.$$('.story-scene:has-text("A stranger at the tavern")')).length === 1);
   check("Cappuccina defaults to narrator outside her world", !(await page.isChecked(".story-switch input")));
@@ -189,13 +197,9 @@ const replyShown = (page, n) =>
 
   await page.click('.story-scene:has-text("The dragon’s bargain")');
   await page.fill('input[aria-label="Who you play"]', "A nervous young knight");
-  await page.click(".story-chip-add");
-  await page.fill('.story-new-character input[placeholder^="For example: Aria"]', "Aria");
-  await page.fill(".story-new-character textarea", "An elf ranger who trusts no one");
-  // Enter in the name field saves the character; it must not start the story.
-  await page.press('.story-new-character input[placeholder^="For example: Aria"]', "Enter");
-  await page.waitForSelector('.story-chip.on:has-text("Aria")', { timeout: 5000 });
-  check("new character saved and cast", true);
+  check("no inline character form in the picker", (await page.$$(".story-cast-editor .character-form")).length === 0);
+  await page.click('.story-chip:has-text("Aria")');
+  check("saved character cast", (await page.$$('.story-chip.on:has-text("Aria")')).length === 1);
 
   await page.click(".story-go");
   await replyShown(page, 1);
@@ -212,6 +216,29 @@ const replyShown = (page, n) =>
   );
   check("story bar names the world", (await page.textContent(".story-bar-world")).includes("Fantasy"));
   check("no console errors (fantasy)", errors.length === 0, errors.join("\n"));
+  await page.close();
+}
+
+// ---------- the cast picker links to the library in Settings ----------
+{
+  const app = await openApp({ library: [{ id: 100, name: "Aria", description: "", voice: "" }] });
+  const { page, errors } = app;
+  await page.click('.story-world:has-text("Fantasy")');
+  await page.waitForSelector('.story-chip:has-text("Aria")', { timeout: 5000 });
+  await page.click(".story-manage");
+  await page.waitForSelector(".character-row", { timeout: 5000 });
+  check("manage link opens the character library", (await page.textContent(".character-row")).includes("Aria"));
+  await page.click('.character-row button[aria-label="Edit Aria"]');
+  await page.fill('.character-row input[maxlength="80"]', "Aria the Bold");
+  await page.click('.character-row .settings-save');
+  await page.waitForSelector('.character-row:has-text("Aria the Bold")', { timeout: 5000 });
+  await page.keyboard.press("Escape");
+  await page.waitForSelector(".character-row", { state: "detached", timeout: 5000 });
+  check(
+    "cast picker shows the edit made in Settings",
+    (await page.$$('.story-chip:has-text("Aria the Bold")')).length === 1,
+  );
+  check("no console errors (library link)", errors.length === 0, errors.join("\n"));
   await page.close();
 }
 

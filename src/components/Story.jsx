@@ -1,11 +1,10 @@
 import { useEffect, useState } from 'react'
-import { PencilIcon, RetryIcon, TrashIcon } from './Icons'
-import { CharacterForm, useMyCharacters } from './CharacterManager'
+import { GearIcon, PencilIcon, RetryIcon, TrashIcon } from './Icons'
+import { useMyCharacters } from './CharacterManager'
 import { useLanguage } from '../i18n/LanguageProvider'
 import { STORY_WORLDS, storyWorld } from '../lib/storyWorlds'
 import {
   createChapter,
-  createMyCharacter,
   deleteChapter,
   listChapters,
   listCharacters,
@@ -49,34 +48,16 @@ function Chip({ on, onClick, title, disabled, children }) {
 const toggled = (list, id) => (list.includes(id) ? list.filter((x) => x !== id) : [...list, id])
 
 // Who is in the scene: Cappuccina herself (a switch), the user's saved
-// characters (with an inline "new character" form), and the lore book's cast.
+// characters (made and edited in Settings), and the lore book's cast.
 // Outside her world the lore cast is tucked behind a disclosure.
-function CastEditor({ story, onChange, disabled }) {
+function CastEditor({ story, onChange, onManageCharacters, disabled }) {
   const { t } = useLanguage()
   const lore = useLoreCharacters()
-  const { characters: mine, setCharacters: setMine } = useMyCharacters()
-  const [creating, setCreating] = useState(false)
-  const [saving, setSaving] = useState(false)
-  const [error, setError] = useState('')
+  const { characters: mine } = useMyCharacters()
   const herWorld = (story.world ?? 'cappuccina') === 'cappuccina'
   const cast = story.cast ?? []
   const picked = story.characters ?? []
   const [loreOpen, setLoreOpen] = useState(herWorld || cast.length > 0)
-
-  const create = async (fields) => {
-    setSaving(true)
-    setError('')
-    try {
-      const row = await createMyCharacter(fields)
-      setMine((list) => [...(list ?? []), row])
-      onChange({ ...story, characters: [...picked, row.id] })
-      setCreating(false)
-    } catch (err) {
-      setError(err.message || t('settings.error.generic'))
-    } finally {
-      setSaving(false)
-    }
-  }
 
   return (
     <div className="story-cast-editor">
@@ -96,35 +77,27 @@ function CastEditor({ story, onChange, disabled }) {
       </p>
 
       <h3 className="story-label">{t('story.yourCharacters')}</h3>
-      <div className="story-cast" role="group" aria-label={t('story.yourCharacters')}>
-        {(mine ?? []).map((c) => (
-          <Chip
-            key={c.id}
-            on={picked.includes(c.id)}
-            title={c.description}
-            disabled={disabled}
-            onClick={() => onChange({ ...story, characters: toggled(picked, c.id) })}
-          >
-            {c.name}
-          </Chip>
-        ))}
-        {!creating && (
-          <button
-            type="button"
-            className="story-chip story-chip-add"
-            disabled={disabled}
-            onClick={() => setCreating(true)}
-          >
-            {t('story.character.new')}
-          </button>
-        )}
-      </div>
-      {creating && (
-        <div className="story-new-character">
-          <CharacterForm saving={saving} onSave={create} onCancel={() => setCreating(false)} />
+      {onManageCharacters && (
+        <button type="button" className="story-manage" onClick={onManageCharacters}>
+          <GearIcon aria-hidden="true" />
+          {t('story.character.manage')}
+        </button>
+      )}
+      {mine?.length > 0 && (
+        <div className="story-cast" role="group" aria-label={t('story.yourCharacters')}>
+          {mine.map((c) => (
+            <Chip
+              key={c.id}
+              on={picked.includes(c.id)}
+              title={c.description}
+              disabled={disabled}
+              onClick={() => onChange({ ...story, characters: toggled(picked, c.id) })}
+            >
+              {c.name}
+            </Chip>
+          ))}
         </div>
       )}
-      {error && <p className="settings-msg error" role="alert">{error}</p>}
 
       {lore.length > 0 && (
         <>
@@ -175,7 +148,7 @@ function worldDefaults(world, previous) {
 
 // Shown in an empty story chat: pick a world, an opening and a cast; then the
 // opening line goes out as the first message.
-export function StoryStart({ onStart, disabled }) {
+export function StoryStart({ onStart, onManageCharacters, disabled }) {
   const { t } = useLanguage()
   const [story, setStory] = useState(() => worldDefaults(STORY_WORLDS[0]))
   const [sceneId, setSceneId] = useState(STORY_WORLDS[0].scenes[0].id)
@@ -289,7 +262,7 @@ export function StoryStart({ onStart, disabled }) {
       />
 
       <h2 className="story-label">{t('story.step.cast')}</h2>
-      <CastEditor key={story.world} story={story} onChange={setStory} />
+      <CastEditor key={story.world} story={story} onChange={setStory} onManageCharacters={onManageCharacters} />
 
       <button type="submit" className="settings-save story-go" disabled={disabled || !ready}>
         {t('story.begin')}
@@ -300,7 +273,7 @@ export function StoryStart({ onStart, disabled }) {
 
 // Above a running story: its world, who is in the scene, and the "Story so
 // far" notes.
-export function StoryBar({ chat, onStory, disabled }) {
+export function StoryBar({ chat, onStory, onManageCharacters, disabled }) {
   const { t } = useLanguage()
   const [castOpen, setCastOpen] = useState(false)
   const [notesOpen, setNotesOpen] = useState(false)
@@ -333,7 +306,7 @@ export function StoryBar({ chat, onStory, disabled }) {
       {castOpen && (
         <div className="story-bar-cast">
           <p className="settings-hint">{t('story.castHint')}</p>
-          <CastEditor story={story} disabled={disabled} onChange={onStory} />
+          <CastEditor story={story} disabled={disabled} onChange={onStory} onManageCharacters={onManageCharacters} />
         </div>
       )}
       {notesOpen && (

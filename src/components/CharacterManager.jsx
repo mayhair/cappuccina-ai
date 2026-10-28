@@ -13,9 +13,8 @@ const TEXT_MAX = 1500
 
 // Name, description and voice for a story character. Only the name is
 // required: a fandom character can be just a name she already knows.
-// Not a <form>: it also sits inside the story start form, and a nested form
-// would submit (and start the story) along with it. Enter in a one-line field
-// saves instead.
+// Not a <form>: Enter in a one-line field saves, and Escape cancels the form
+// without closing the Settings dialog around it.
 export function CharacterForm({ initial, onSave, onCancel, saving }) {
   const { t } = useLanguage()
   const [name, setName] = useState(initial?.name ?? '')
@@ -96,18 +95,30 @@ export function CharacterForm({ initial, onSave, onCancel, saving }) {
   )
 }
 
-// The user's saved characters, loaded once per mount. `add` puts a freshly
-// created one in place without a refetch.
+const CHANGED_EVENT = 'story-characters-changed'
+
+// Tells every mounted character list to reload, e.g. a story's cast picker
+// after the user edited a character in Settings.
+export function announceCharactersChanged() {
+  window.dispatchEvent(new Event(CHANGED_EVENT))
+}
+
+// The user's saved characters, loaded on mount and again whenever another
+// list announces a change. `setCharacters` updates this list in place.
 export function useMyCharacters() {
   const [characters, setCharacters] = useState(null)
   const [loadFailed, setLoadFailed] = useState(false)
   useEffect(() => {
     let canceled = false
-    listMyCharacters()
-      .then((d) => !canceled && setCharacters(d.characters))
-      .catch(() => !canceled && setLoadFailed(true))
+    const load = () =>
+      listMyCharacters()
+        .then((d) => !canceled && setCharacters(d.characters))
+        .catch(() => !canceled && setLoadFailed(true))
+    load()
+    window.addEventListener(CHANGED_EVENT, load)
     return () => {
       canceled = true
+      window.removeEventListener(CHANGED_EVENT, load)
     }
   }, [])
   return { characters, setCharacters, loadFailed }
@@ -128,6 +139,7 @@ export function CharacterManager() {
     setError('')
     try {
       await action()
+      announceCharactersChanged()
     } catch (err) {
       setError(err.message || t('settings.error.generic'))
     } finally {

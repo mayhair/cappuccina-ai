@@ -213,6 +213,7 @@ export default {
   'story.yourCharacters': "Your characters",
   'story.fromHerWorld': "From Cappuccina’s world",
   'story.character.new': "+ New character",
+  'story.character.manage': "Create and edit your characters in Settings",
   'story.character.name': "Name",
   'story.character.namePlaceholder': "For example: Aria, or Pikachu",
   'story.character.description': "Who they are",

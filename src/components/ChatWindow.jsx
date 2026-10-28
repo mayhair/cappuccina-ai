@@ -1349,7 +1349,7 @@ function Composer({
   )
 }
 
-export function ChatWindow({ chat, user, isStreaming, draft, onDraft, onSend, onRetry, onEdit, onRegenerate, onNavigateBranch, onDraftSent, onEventDeleted, onMemoryUndone, onManageMemory, onOpenWebpage, inputRef, effort, onEffort, mode, onMode, onSendText, onStory, attachments = [], uploading = false, attachError = '', onAttach, onRemoveAttachment }) {
+export function ChatWindow({ chat, user, isStreaming, draft, onDraft, onSend, onRetry, onEdit, onRegenerate, onNavigateBranch, onDraftSent, onEventDeleted, onMemoryUndone, onManageMemory, onManageCharacters, onOpenWebpage, inputRef, effort, onEffort, mode, onMode, onSendText, onStory, attachments = [], uploading = false, attachError = '', onAttach, onRemoveAttachment }) {
   const { t } = useLanguage()
   const listRef = useRef(null)
   const storyMode = mode === 'story'
@@ -1464,10 +1464,10 @@ export function ChatWindow({ chat, user, isStreaming, draft, onDraft, onSend, on
     <>
       <div className="message-list" ref={listRef} aria-label={t('chat.conversation', { title: chat.title })}>
         {storyMode && chat.messages.length > 0 && (
-          <StoryBar chat={chat} onStory={onStory} disabled={isStreaming} />
+          <StoryBar chat={chat} onStory={onStory} onManageCharacters={onManageCharacters} disabled={isStreaming} />
         )}
         {storyMode && chat.messages.length === 0 && !isStreaming && (
-          <StoryStart onStart={onSendText} disabled={isStreaming} />
+          <StoryStart onStart={onSendText} onManageCharacters={onManageCharacters} disabled={isStreaming} />
         )}
         {!storyMode && chat.messages.length === 0 && !isStreaming && (
           <div className="welcome" role="status">

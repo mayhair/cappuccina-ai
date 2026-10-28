@@ -525,6 +525,7 @@ export default function App() {
           onEventDeleted={(eventId) => markEventDeleted(activeChatId, eventId)}
           onMemoryUndone={(toolName, memoryId) => markMemoryUndone(activeChatId, toolName, memoryId)}
           onManageMemory={() => openSettings('memory')}
+          onManageCharacters={() => openSettings('story')}
           onOpenWebpage={openCanvasPage}
           inputRef={inputRef}
           effort={effort}
