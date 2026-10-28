@@ -6,6 +6,8 @@
 //                                 | webpage {webpageId,path,files,content}
 //                                 | done | title {title} (first message only, after done)
 
+import { request } from './http'
+
 function buildRequest({ chatId, messages, tree, replyId, reasoning, mode, subject, generateTitle }) {
   return {
     chatId,
@@ -71,64 +73,32 @@ export async function sendStreaming({ chatId, messages, tree, replyId, reasoning
 
 // ---------- chat CRUD (server-side storage) ----------
 
-async function jsonFetch(url, options = {}) {
-  const res = await fetch(url, { credentials: 'include', ...options })
-  if (!res.ok) throw new Error(`${url} failed: ${res.status}`)
-  return res.json()
-}
-
-export const listChats = () => jsonFetch('/api/v1/chats')
+export const listChats = () => request('/api/v1/chats')
 
 export const createChatOnServer = (mode = 'chat', subject = null) =>
-  jsonFetch('/api/v1/chats', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ mode, subject }),
-  })
+  request('/api/v1/chats', { method: 'POST', body: { mode, subject } })
 
 export const renameChatOnServer = (chatId, title) =>
-  jsonFetch(`/api/v1/chats/${chatId}`, {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ title }),
-  })
+  request(`/api/v1/chats/${chatId}`, { method: 'PATCH', body: { title } })
 
 export const deleteChatOnServer = (chatId) =>
-  jsonFetch(`/api/v1/chats/${chatId}`, { method: 'DELETE' })
+  request(`/api/v1/chats/${chatId}`, { method: 'DELETE' })
 
 // Remember which branch tail the user is viewing (follows them across devices).
 export const setActiveBranchOnServer = (chatId, leafId) =>
-  jsonFetch(`/api/v1/chats/${chatId}/active-branch`, {
+  request(`/api/v1/chats/${chatId}/active-branch`, {
     method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ leafId: leafId ?? null }),
+    body: { leafId: leafId ?? null },
   })
 
 // ---------- attachments (user uploads) ----------
 
-export async function uploadAttachment(chatId, file) {
+export function uploadAttachment(chatId, file) {
   const form = new FormData()
   form.append('chatId', chatId)
   form.append('file', file)
-  const res = await fetch('/api/v1/attachments', {
-    method: 'POST',
-    credentials: 'include',
-    body: form,
-  })
-  if (!res.ok) {
-    let detail = `Upload failed (${res.status})`
-    try {
-      const body = await res.json()
-      if (body?.detail) detail = body.detail
-    } catch {
-      // non-JSON error body
-    }
-    const err = new Error(detail)
-    err.status = res.status
-    throw err
-  }
-  return res.json()
+  return request('/api/v1/attachments', { method: 'POST', form })
 }
 
 export const deleteAttachment = (attachmentId) =>
-  jsonFetch(`/api/v1/attachments/${attachmentId}`, { method: 'DELETE' })
+  request(`/api/v1/attachments/${attachmentId}`, { method: 'DELETE' })

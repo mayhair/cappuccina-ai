@@ -7,20 +7,11 @@
 // Iterations are addressed by versionId: the canvas lists them, activates one,
 // diffs one on demand, and saves a manual edit against the one it rendered.
 
+import { responseError } from './http'
+
 async function requestJson(url, init) {
   const res = await fetch(url, { credentials: 'include', ...init })
-  if (!res.ok) {
-    let detail = `request failed: ${res.status}`
-    try {
-      const body = await res.json()
-      if (body?.detail) detail = body.detail
-    } catch {
-      // not JSON (or empty body): keep the generic message
-    }
-    const err = new Error(detail)
-    err.status = res.status
-    throw err
-  }
+  if (!res.ok) throw await responseError(res)
   return res.json()
 }
 
@@ -75,16 +66,7 @@ export function getWebpageVersionDiff(chatId, versionId, against) {
 // The whole site as a zip, for rehosting or sending: {blob, filename}.
 export async function downloadWebpageZip(chatId) {
   const res = await fetch(`/api/v1/webpages/${chatId}/download`, { credentials: 'include' })
-  if (!res.ok) {
-    let detail = `request failed: ${res.status}`
-    try {
-      const body = await res.json()
-      if (body?.detail) detail = body.detail
-    } catch {
-      // not JSON: keep the generic message
-    }
-    throw new Error(detail)
-  }
+  if (!res.ok) throw await responseError(res)
   const named = /filename="([^"]+)"/.exec(res.headers.get('Content-Disposition') ?? '')
   return { blob: await res.blob(), filename: named?.[1] ?? 'website.zip' }
 }

@@ -401,49 +401,28 @@ def _final_extras(messages) -> tuple[str, list[ToolCall], list[dict]]:
     return reasoning, tool_calls, parts
 
 
-def _mark_sent_drafts(chats: list[dict], sent_ids: set[str]) -> None:
-    """Flag stored draft_email tool parts whose draft has already been sent.
+def _flag_tool_results(
+    chats: list[dict], tool_name: str, id_key: str, ids: set[str], flag: str
+) -> None:
+    """Set ``flag`` on stored ``tool_name`` parts whose result's ``id_key`` is in ``ids``.
 
-    Done at read time so it survives full-history syncs from the client.
+    Done at read time so it survives full-history syncs from the client: a
+    sent draft or a deleted event is recorded server-side, not in the message.
     """
-    if not sent_ids:
+    if not ids:
         return
     for chat in chats:
         for message in chat.get("messages", []):
             for key in ("parts", "tools"):
                 for tool in message.get(key) or []:
-                    if not isinstance(tool, dict) or tool.get("name") != "draft_email":
+                    if not isinstance(tool, dict) or tool.get("name") != tool_name:
                         continue
                     try:
                         data = json.loads(tool.get("result") or "")
                     except (ValueError, TypeError):
                         continue
-                    if isinstance(data, dict) and data.get("draft_id") in sent_ids:
-                        tool["sent"] = True
-
-
-def _mark_deleted_events(chats: list[dict], deleted_ids: set[str]) -> None:
-    """Flag stored propose_event_deletion tool parts whose event is gone.
-
-    Done at read time so it survives full-history syncs from the client.
-    """
-    if not deleted_ids:
-        return
-    for chat in chats:
-        for message in chat.get("messages", []):
-            for key in ("parts", "tools"):
-                for tool in message.get(key) or []:
-                    if (
-                        not isinstance(tool, dict)
-                        or tool.get("name") != "propose_event_deletion"
-                    ):
-                        continue
-                    try:
-                        data = json.loads(tool.get("result") or "")
-                    except (ValueError, TypeError):
-                        continue
-                    if isinstance(data, dict) and data.get("event_id") in deleted_ids:
-                        tool["deleted"] = True
+                    if isinstance(data, dict) and data.get(id_key) in ids:
+                        tool[flag] = True
 
 
 def _attachment_blocks(parts, user_id: str) -> list[dict]:
@@ -1004,8 +983,16 @@ async def calendar_delete_event(event_id: str, user=Depends(current_user)) -> di
 @app.get("/api/v1/chats")
 async def list_chats(user=Depends(current_user)) -> list[dict]:
     chats = db.list_chats(user["id"])
-    _mark_sent_drafts(chats, db.get_sent_draft_ids(user["id"]))
-    _mark_deleted_events(chats, db.get_deleted_event_ids(user["id"]))
+    _flag_tool_results(
+        chats, "draft_email", "draft_id", db.get_sent_draft_ids(user["id"]), "sent"
+    )
+    _flag_tool_results(
+        chats,
+        "propose_event_deletion",
+        "event_id",
+        db.get_deleted_event_ids(user["id"]),
+        "deleted",
+    )
     return chats
 
 

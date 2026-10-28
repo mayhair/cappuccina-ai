@@ -148,12 +148,17 @@ def get_message(user_id: str, message_id: str, body_limit: int = 4000) -> dict:
     }
 
 
-def create_draft(user_id: str, to: str, subject: str, body: str) -> dict:
+def _raw_message(to: str, subject: str, body: str) -> str:
+    """A plain-text email as the base64url "raw" string the Gmail API takes."""
     message = EmailMessage()
     message["To"] = to
     message["Subject"] = subject
     message.set_content(body)
-    raw = base64.urlsafe_b64encode(message.as_bytes()).decode("ascii")
+    return base64.urlsafe_b64encode(message.as_bytes()).decode("ascii")
+
+
+def create_draft(user_id: str, to: str, subject: str, body: str) -> dict:
+    raw = _raw_message(to, subject, body)
     draft = _request(user_id, "POST", "/drafts", json={"message": {"raw": raw}})
     return {
         "draft_id": draft.get("id", ""),
@@ -174,12 +179,7 @@ def update_draft(user_id: str, draft_id: str, to: str, subject: str, body: str) 
         gone_cls=DraftGone,
     )
 
-    message = EmailMessage()
-    message["To"] = to
-    message["Subject"] = subject
-    message.set_content(body)
-    raw = base64.urlsafe_b64encode(message.as_bytes()).decode("ascii")
-    payload: dict = {"message": {"raw": raw}}
+    payload: dict = {"message": {"raw": _raw_message(to, subject, body)}}
     thread_id = (existing.get("message") or {}).get("threadId")
     if thread_id:
         payload["message"]["threadId"] = thread_id

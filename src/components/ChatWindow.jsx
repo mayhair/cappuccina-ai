@@ -10,6 +10,7 @@ import { branchPosition } from '../lib/branching'
 import { useVoiceInput } from '../hooks/useVoiceInput'
 import { sendDraft, updateDraft } from '../api/gmailClient'
 import { deleteEvent } from '../api/calendarClient'
+import { formatBytes } from '../lib/format'
 import { createMemory, deleteMemory, updateMemory } from '../api/memoryClient'
 import { useLanguage } from '../i18n/LanguageProvider'
 
@@ -252,13 +253,6 @@ const ATTACH_ACCEPT = [
   '.woff', '.woff2', '.ttf', '.otf', '.ico',
 ].join(',')
 
-function formatSize(bytes) {
-  if (!bytes) return ''
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
-}
-
 // An attachment part references a server-stored file by id (see
 // backend/app/main.py); the bytes/text never travel with the message.
 function attachmentFromPart(part) {
@@ -285,7 +279,7 @@ function AttachmentPreview({ attachment }) {
     <a className="msg-attachment file" href={href} target="_blank" rel="noreferrer">
       <FileIcon />
       <span className="msg-attachment-name">{attachment.name}</span>
-      {attachment.size ? <span className="msg-attachment-size">{formatSize(attachment.size)}</span> : null}
+      {attachment.size ? <span className="msg-attachment-size">{formatBytes(attachment.size)}</span> : null}
     </a>
   )
 }
@@ -782,11 +776,8 @@ function ThinkingBlock({ parts: segmentParts, streaming, fallbackSeconds = null 
 
   // Auto-expand while thinking runs, auto-close once it's done. Any manual
   // click on the block head or on a tool call inside it takes over for good.
-  const [open, setOpen] = useState(!done)
-  const [manual, setManual] = useState(false)
-  useEffect(() => {
-    if (!manual) setOpen(!done)
-  }, [done, manual])
+  const [manualOpen, setManualOpen] = useState(null)
+  const open = manualOpen ?? !done
 
   if (parts.length === 0) return null
 
@@ -795,10 +786,7 @@ function ThinkingBlock({ parts: segmentParts, streaming, fallbackSeconds = null 
       <button
         type="button"
         className="thinking-head"
-        onClick={() => {
-          setManual(true)
-          setOpen((o) => !o)
-        }}
+        onClick={() => setManualOpen(!open)}
         aria-expanded={open}
       >
         <span>{label}</span>
@@ -811,7 +799,7 @@ function ThinkingBlock({ parts: segmentParts, streaming, fallbackSeconds = null 
               <ToolCallBlock
                 key={p.id ?? `tool-${i}`}
                 tool={p}
-                onManualToggle={() => setManual(true)}
+                onManualToggle={() => setManualOpen(open)}
               />
             ) : (
               <p key={`r-${i}`} className="thinking-reasoning">

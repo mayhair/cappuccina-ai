@@ -6,7 +6,7 @@ git repo, so only test_sitebox.py talks to Podman.
 
 import json
 
-from app import db, sitebox
+from app import db, documents, sitebox
 
 PAGE = "<!doctype html><title>Hi</title><link rel='stylesheet' href='styles.css'>"
 CSS = "body { background: pink; }"
@@ -188,7 +188,7 @@ def test_read_round_trip_listing_and_binary(isolated_db):
     described = _read(user, chat, "logo.png")
     assert "logo.png is a picture in the site folder" in described
     assert "image/png" in described
-    assert f"{len(PNG)} bytes" in described
+    assert documents.human_size(len(PNG)) in described
 
 
 # ---------- webpage_shell ----------
