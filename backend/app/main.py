@@ -4,8 +4,10 @@ import io
 import json
 import logging
 import re
+import threading
 import time
 import zipfile
+from collections import OrderedDict
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -429,49 +431,61 @@ def _final_extras(messages) -> tuple[str, list[ToolCall], list[dict]]:
     return reasoning, tool_calls, parts
 
 
-def _mark_sent_drafts(chats: list[dict], sent_ids: set[str]) -> None:
-    """Flag stored draft_email tool parts whose draft has already been sent.
+def _flag_tool_results(
+    chats: list[dict], tool_name: str, id_key: str, ids: set[str], flag: str
+) -> None:
+    """Set ``flag`` on stored ``tool_name`` parts whose result's ``id_key`` is in ``ids``.
 
-    Done at read time so it survives full-history syncs from the client.
+    Done at read time so it survives full-history syncs from the client: a
+    sent draft or a deleted event is recorded server-side, not in the message.
     """
-    if not sent_ids:
+    if not ids:
         return
     for chat in chats:
         for message in chat.get("messages", []):
             for key in ("parts", "tools"):
                 for tool in message.get(key) or []:
-                    if not isinstance(tool, dict) or tool.get("name") != "draft_email":
+                    if not isinstance(tool, dict) or tool.get("name") != tool_name:
                         continue
                     try:
                         data = json.loads(tool.get("result") or "")
                     except (ValueError, TypeError):
                         continue
-                    if isinstance(data, dict) and data.get("draft_id") in sent_ids:
-                        tool["sent"] = True
+                    if isinstance(data, dict) and data.get(id_key) in ids:
+                        tool[flag] = True
 
 
-def _mark_deleted_events(chats: list[dict], deleted_ids: set[str]) -> None:
-    """Flag stored propose_event_deletion tool parts whose event is gone.
+# Uploaded and generated pictures never change once written (each id names
+# one file), so their data URLs are kept between turns instead of re-reading
+# and re-encoding every picture in the history on every send. The rows are
+# still looked up per turn, so ownership and deletion are checked as before.
+_DATA_URL_CACHE_LIMIT = 64 * 1024 * 1024  # characters, about one byte each
+_data_urls: OrderedDict[Path, str] = OrderedDict()
+_data_urls_size = 0
+_data_urls_lock = threading.Lock()
 
-    Done at read time so it survives full-history syncs from the client.
-    """
-    if not deleted_ids:
-        return
-    for chat in chats:
-        for message in chat.get("messages", []):
-            for key in ("parts", "tools"):
-                for tool in message.get(key) or []:
-                    if (
-                        not isinstance(tool, dict)
-                        or tool.get("name") != "propose_event_deletion"
-                    ):
-                        continue
-                    try:
-                        data = json.loads(tool.get("result") or "")
-                    except (ValueError, TypeError):
-                        continue
-                    if isinstance(data, dict) and data.get("event_id") in deleted_ids:
-                        tool["deleted"] = True
+
+def _image_data_url(path: Path, mime: str) -> str | None:
+    """A ``data:`` URL for a stored picture, or None when its file is gone."""
+    global _data_urls_size
+    with _data_urls_lock:
+        url = _data_urls.get(path)
+        if url is not None:
+            _data_urls.move_to_end(path)
+            return url
+    try:
+        raw = path.read_bytes()
+    except OSError:
+        return None
+    url = f"data:{mime};base64,{base64.b64encode(raw).decode('ascii')}"
+    with _data_urls_lock:
+        if path not in _data_urls:
+            _data_urls[path] = url
+            _data_urls_size += len(url)
+        while _data_urls_size > _DATA_URL_CACHE_LIMIT and len(_data_urls) > 1:
+            _, dropped = _data_urls.popitem(last=False)
+            _data_urls_size -= len(dropped)
+    return url
 
 
 def _attachment_blocks(parts, user_id: str) -> list[dict]:
@@ -495,18 +509,12 @@ def _attachment_blocks(parts, user_id: str) -> list[dict]:
         if row is None:
             continue
         if row["kind"] == "image":
-            path = db.attachment_file_path(row["id"], row["filename"])
-            try:
-                raw = path.read_bytes()
-            except OSError:
-                continue
-            encoded = base64.b64encode(raw).decode("ascii")
-            blocks.append(
-                {
-                    "type": "image_url",
-                    "image_url": {"url": f"data:{row['mime']};base64,{encoded}"},
-                }
+            url = _image_data_url(
+                db.attachment_file_path(row["id"], row["filename"]), row["mime"]
             )
+            if url is None:
+                continue
+            blocks.append({"type": "image_url", "image_url": {"url": url}})
             blocks.append(
                 {
                     "type": "text",
@@ -561,12 +569,10 @@ def _viewed_image_message(parts, user_id: str) -> HumanMessage | None:
         row = db.get_image(user_id, image_id)
         if row is None:
             continue
-        try:
-            raw = db.image_file_path(row["id"], row["mime"]).read_bytes()
-        except OSError:
+        url = _image_data_url(db.image_file_path(row["id"], row["mime"]), row["mime"])
+        if url is None:
             continue
-        encoded = base64.b64encode(raw).decode("ascii")
-        viewed.append((row["id"], f"data:{row['mime']};base64,{encoded}"))
+        viewed.append((row["id"], url))
     return viewed_images_message_for(viewed)
 
 
@@ -1282,8 +1288,16 @@ async def calendar_delete_event(event_id: str, user=Depends(current_user)) -> di
 @app.get("/api/v1/chats")
 async def list_chats(user=Depends(current_user)) -> list[dict]:
     chats = db.list_chats(user["id"])
-    _mark_sent_drafts(chats, db.get_sent_draft_ids(user["id"]))
-    _mark_deleted_events(chats, db.get_deleted_event_ids(user["id"]))
+    _flag_tool_results(
+        chats, "draft_email", "draft_id", db.get_sent_draft_ids(user["id"]), "sent"
+    )
+    _flag_tool_results(
+        chats,
+        "propose_event_deletion",
+        "event_id",
+        db.get_deleted_event_ids(user["id"]),
+        "deleted",
+    )
     return chats
 
 

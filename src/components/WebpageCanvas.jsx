@@ -19,6 +19,7 @@ import {
   getWebpageVersionDiff,
   previewFileUrl,
 } from '../api/webpageClient'
+import { formatBytes } from '../lib/format'
 import { SaveWebpageNotice, shouldShowSaveNotice } from './SaveWebpageNotice'
 import { useLanguage } from '../i18n/LanguageProvider'
 
@@ -53,15 +54,6 @@ function mediaKind(name, mime) {
   if (AUDIO_EXTENSIONS.includes(ext)) return 'audio'
   if (VIDEO_EXTENSIONS.includes(ext)) return 'video'
   return null
-}
-
-// How a file's size reads: "812 KB".
-function formatBytes(bytes) {
-  const size = Number(bytes) || 0
-  if (size <= 0) return ''
-  if (size < 1024) return `${size} B`
-  if (size < 1024 * 1024) return `${Math.round(size / 1024)} KB`
-  return `${(size / (1024 * 1024)).toFixed(1)} MB`
 }
 
 // "AI run · 2 files · +8 −1" (or the edit's own label): what one iteration did.

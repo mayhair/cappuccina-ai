@@ -153,7 +153,7 @@ STORY_CHARACTER_MAX_PER_USER = 100
 STORY_CHARACTER_NAME_MAX = 80
 STORY_CHARACTER_TEXT_MAX = 1500
 
-REASONING_LEVELS = {"low", "high", "max"}
+REASONING_LEVELS = {"off", "low", "high", "max"}
 
 TUTOR_SUFFIX = """
 You are now in TUTOR MODE{for_subject}. Don't just give answers — teach. \

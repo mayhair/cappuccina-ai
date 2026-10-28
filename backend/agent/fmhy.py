@@ -374,13 +374,14 @@ async def fmhy_media_sites(
     beginner = str(plan["beginner"])
     resolver = str(plan["resolver"])
 
-    bodies: list[tuple[str, str]] = []
-    for name in [*core, *niche]:
-        raw = await _call(
-            "fmhy_get_section", {"title_or_slug": name, "max_chars": _SECTION_MAX_CHARS}
+    names = [*core, *niche]
+    raws = await asyncio.gather(
+        *(
+            _call("fmhy_get_section", {"title_or_slug": name, "max_chars": _SECTION_MAX_CHARS})
+            for name in names
         )
-        if _has_entries(raw):
-            bodies.append((name, raw))
+    )
+    bodies = [(name, raw) for name, raw in zip(names, raws) if _has_entries(raw)]
 
     # Thorough search first; the short overview is the last resort.
     if not bodies:

@@ -74,7 +74,12 @@ def make_model(reasoning: str = DEFAULT_REASONING, tools=None, model_id: str = "
     # API (not the Responses API). Reasoning is requested through OpenRouter's
     # unified `reasoning` field, passed verbatim via extra_body so the OpenAI
     # SDK doesn't have to know about it.
-    if reasoning:
+    # "off" is the user-facing switch: it disables reasoning outright via
+    # `enabled: false`, which OpenRouter maps per provider (unlike
+    # effort="none", which some models reject).
+    if reasoning == "off":
+        extra_body["reasoning"] = {"enabled": False}
+    elif reasoning:
         extra_body["reasoning"] = {"effort": reasoning}
 
     # Provider routing. `zdr` and `data_collection: deny` restrict routing to

@@ -11,10 +11,10 @@ request, preferring the calendar's own timezone for naive input.
 
 import re
 from datetime import date, datetime, timedelta, timezone
-from zoneinfo import ZoneInfo
 
 from app import google_http
 from app.google_http import GoogleApiError
+from app.timezones import zone
 
 API_ROOT = "https://www.googleapis.com/calendar/v3/calendars/primary"
 MAX_RESULTS_CAP = 20
@@ -79,14 +79,6 @@ def _parse_local(value: str) -> datetime | None:
         return None
 
 
-def _zone(tz: str) -> ZoneInfo:
-    """Resolve an IANA name, falling back to UTC if the tz database is missing."""
-    try:
-        return ZoneInfo(tz)
-    except Exception:
-        return ZoneInfo("UTC")
-
-
 def _rfc3339(value: str, tz: str, *, end_of_day: bool = False) -> str:
     """An absolute RFC3339 timestamp for Calendar list query parameters.
 
@@ -101,7 +93,7 @@ def _rfc3339(value: str, tz: str, *, end_of_day: bool = False) -> str:
             raise ValueError(f"'{value}' is not a real date — use YYYY-MM-DD") from None
         hour, minute, second = (23, 59, 59) if end_of_day else (0, 0, 0)
         return datetime(
-            d.year, d.month, d.day, hour, minute, second, tzinfo=_zone(tz)
+            d.year, d.month, d.day, hour, minute, second, tzinfo=zone(tz)
         ).isoformat()
     parsed = _parse_local(value)
     if parsed is None:
@@ -110,7 +102,7 @@ def _rfc3339(value: str, tz: str, *, end_of_day: bool = False) -> str:
             "timestamp like 2026-09-22T15:00:00+02:00"
         )
     if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=_zone(tz))
+        parsed = parsed.replace(tzinfo=zone(tz))
     return parsed.isoformat()
 
 

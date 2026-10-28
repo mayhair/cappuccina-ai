@@ -1,12 +1,10 @@
 import base64
 import json
-import mimetypes
 import os
 import re
 import secrets
 from datetime import datetime
 from pathlib import PurePosixPath
-from zoneinfo import ZoneInfo
 
 import httpx
 from langchain_core.runnables import RunnableConfig
@@ -32,6 +30,8 @@ from app.config import (
     SITE_EXEC_TIMEOUT,
 )
 from app.google_oauth import ServiceNotConnected
+from app.timezones import zone
+from app.webpage_preview import webpage_mime
 
 
 # ponytail: parse_expr is eval-adjacent; output is text-only so risk is low. Add a symbols whitelist if tool input ever becomes structured/persistent.
@@ -563,6 +563,11 @@ def read_attachment(attachment_id: str, config: RunnableConfig, offset: int = 0)
     return header + text[start:end] + footer
 
 
+GMAIL_NOT_CONNECTED = (
+    "Gmail isn't connected yet. Ask the user to connect it in Settings, then try again."
+)
+
+
 def _gmail_unavailable(config: RunnableConfig | None) -> str | None:
     if not _user_id(config):
         return "Gmail isn't available right now."
@@ -578,7 +583,7 @@ def search_emails(query: str, config: RunnableConfig, max_results: int = 5) -> s
     try:
         results = gmail.search_messages(_user_id(config), query, max_results)
     except ServiceNotConnected:
-        return "Gmail isn't connected yet. Ask the user to connect it in Settings, then try again."
+        return GMAIL_NOT_CONNECTED
     except gmail.GmailApiError as exc:
         return f"Couldn't search the inbox ({exc})."
     if not results:
@@ -601,7 +606,7 @@ def read_email(message_id: str, config: RunnableConfig) -> str:
     try:
         message = gmail.get_message(_user_id(config), message_id)
     except ServiceNotConnected:
-        return "Gmail isn't connected yet. Ask the user to connect it in Settings, then try again."
+        return GMAIL_NOT_CONNECTED
     except gmail.GmailApiError as exc:
         return f"Couldn't read that email ({exc})."
     return (
@@ -619,7 +624,7 @@ def draft_email(to: str, subject: str, body: str, config: RunnableConfig) -> str
     try:
         draft = gmail.create_draft(_user_id(config), to, subject, body)
     except ServiceNotConnected:
-        return "Gmail isn't connected yet. Ask the user to connect it in Settings, then try again."
+        return GMAIL_NOT_CONNECTED
     except gmail.GmailApiError as exc:
         return f"Couldn't create the draft ({exc})."
     return json.dumps({"status": "draft_created", **draft})
@@ -640,11 +645,7 @@ def _calendar_unavailable(config: RunnableConfig | None) -> str | None:
 
 
 def _calendar_today(tz: str) -> str:
-    try:
-        zone = ZoneInfo(tz)
-    except Exception:
-        zone = ZoneInfo("UTC")
-    return datetime.now(zone).strftime("%A %d %B %Y")
+    return datetime.now(zone(tz)).strftime("%A %d %B %Y")
 
 
 def _format_event_line(event: dict) -> str:
@@ -858,15 +859,6 @@ def _ensure_site(config: RunnableConfig) -> dict | None:
     return site
 
 
-def _human_size(size: int) -> str:
-    """A short file size for tool messages, like "812 KB" or "1.4 MB"."""
-    if size >= 1_000_000:
-        return f"{size / 1_000_000:.1f} MB"
-    if size >= 1_000:
-        return f"{size / 1_000:.0f} KB"
-    return f"{size} bytes"
-
-
 @tool
 def write_webpage_file(path: str, content: str, config: RunnableConfig) -> str:
     """Build or update a webpage in the user's live website workspace. Use this whenever the user asks you to make a webpage, website, landing page, game, quiz, or anything else that runs in a browser. Write one file per call: start with `index.html`, then add `styles.css` and `script.js` when they help, and use folders (`src/`, `pages/`, `img/` …) whenever they make the site clearer. Link files with RELATIVE paths — `<link rel="stylesheet" href="styles.css">`, `<script src="script.js"></script>` — because the page is served from the site's own root. Fonts and libraries come from https URLs. A picture the user attached, or one you drew with generate_image, goes into the site folder with add_webpage_asset; reference it by the name you gave it there (`<img src="cat.png">`). When the user asks for a real app, a framework or a build step, use webpage_shell instead. To change a page you already made, call read_webpage_file first to see the current text, then write the whole file back. The page appears live in the canvas as you write; when you've written the last file, call check_webpage and fix what it reports, then tell the user it's ready. Never invent a webpage_id; the returned JSON describes what was written."""
@@ -912,10 +904,10 @@ def read_webpage_file(path: str, config: RunnableConfig) -> str:
     try:
         return data.decode("utf-8")
     except UnicodeDecodeError:
-        mime = mimetypes.guess_type(clean)[0] or "application/octet-stream"
+        mime = webpage_mime(clean)
         return (
             f"{clean} is a picture in the site folder ({mime}, "
-            f"{_human_size(len(data))}) — reference it from your page as {clean}."
+            f"{documents.human_size(len(data))}) — reference it from your page as {clean}."
         )
 
 

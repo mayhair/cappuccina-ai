@@ -41,6 +41,7 @@ const EMPTY_WEBPAGE = {
 }
 
 export const EFFORTS = [
+  { label: 'Off', value: 'off' },
   { label: 'Low', value: 'low' },
   { label: 'High', value: 'high' },
   { label: 'Max', value: 'max' },
@@ -956,7 +957,6 @@ export function useChatController(enabled, { onLocationChange } = {}) {
   const clearCanvasNotice = useCallback(() => setCanvasNotice(null), [])
 
   const openCanvas = useCallback(() => setCanvasOpen(true), [])
-  const toggleCanvas = useCallback(() => setCanvasOpen((open) => !open), [])
 
   const activeWebpage = activeChat ? webpages[activeChat.id] ?? EMPTY_WEBPAGE : EMPTY_WEBPAGE
   // The toggle matches the message card: a turn that built a page shows both,
@@ -1027,6 +1027,5 @@ export function useChatController(enabled, { onLocationChange } = {}) {
     saveFile,
     openCanvas,
     closeCanvas: closeWebpage,
-    toggleCanvas,
   }
 }

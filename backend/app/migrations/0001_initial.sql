@@ -1,4 +1,4 @@
--- Full schema as of the move from SQLite to PostgreSQL.
+-- Initial PostgreSQL schema.
 
 CREATE TABLE users (
     id TEXT PRIMARY KEY,

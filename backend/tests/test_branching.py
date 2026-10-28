@@ -60,6 +60,46 @@ def test_replace_messages_is_idempotent(isolated_db):
     assert [m["id"] for m in messages] == ["u1", "a1"]
 
 
+def _rows(chat_id):
+    return {
+        r["uid"]: r
+        for r in db._fetchall(
+            "SELECT uid, xmin::text AS version, content FROM messages"
+            " WHERE chat_id = %(chat_id)s",
+            {"chat_id": chat_id},
+        )
+    }
+
+
+def test_replace_messages_leaves_unchanged_rows_alone(isolated_db):
+    _, chat = _user_and_chat()
+    tree = [_node("u1", None, 0, "user", "hi"), _node("a1", "u1", 0, "assistant", "yo")]
+    db.replace_chat_messages(chat["id"], tree)
+    before = _rows(chat["id"])
+
+    db.replace_chat_messages(chat["id"], [*tree, _node("u2", "a1", 0, "user", "more")])
+
+    after = _rows(chat["id"])
+    # xmin changes whenever a row is rewritten; untouched history keeps it.
+    assert after["u1"]["version"] == before["u1"]["version"]
+    assert after["a1"]["version"] == before["a1"]["version"]
+    assert after["u2"]["content"] == "more"
+
+
+def test_replace_messages_updates_edits_and_drops_removed_nodes(isolated_db):
+    _, chat = _user_and_chat()
+    db.replace_chat_messages(
+        chat["id"],
+        [_node("u1", None, 0, "user", "hi"), _node("a1", "u1", 0, "assistant", "yo")],
+    )
+
+    db.replace_chat_messages(chat["id"], [_node("u1", None, 0, "user", "hello")])
+
+    rows = _rows(chat["id"])
+    assert set(rows) == {"u1"}
+    assert rows["u1"]["content"] == "hello"
+
+
 def test_append_message_parents_and_orders_siblings(isolated_db):
     _, chat = _user_and_chat()
     db.replace_chat_messages(chat["id"], [_node("u1", None, 0, "user", "hi")])
@@ -74,6 +114,24 @@ def test_append_message_parents_and_orders_siblings(isolated_db):
     by_id = _stored(chat["id"])
     assert (by_id["a1"]["parentId"], by_id["a1"]["branchIndex"]) == ("u1", 0)
     assert (by_id["a2"]["parentId"], by_id["a2"]["branchIndex"]) == ("u1", 1)
+
+
+def test_concurrent_sibling_appends_get_distinct_indexes(isolated_db):
+    from concurrent.futures import ThreadPoolExecutor
+
+    _, chat = _user_and_chat()
+    db.replace_chat_messages(chat["id"], [_node("u1", None, 0, "user", "hi")])
+
+    def add(i):
+        db.append_chat_message(
+            chat["id"], role="assistant", content=str(i), uid=f"a{i}", parent_uid="u1"
+        )
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        list(pool.map(add, range(8)))
+
+    by_id = _stored(chat["id"])
+    assert sorted(by_id[f"a{i}"]["branchIndex"] for i in range(8)) == list(range(8))
 
 
 def test_append_without_parent_is_a_root(isolated_db):

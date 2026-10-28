@@ -1,7 +1,7 @@
 # Cappuccina Privacy Policy
 
 Effective date: 20 October 2026  
-Last updated: 22 October 2026
+Last updated: 28 October 2026
 
 This Privacy Policy explains what information Cappuccina collects, why we collect it, who we share it with, and the choices you have. Cappuccina is the AI chatbot at [cappuccina.mayhair.net](https://cappuccina.mayhair.net). It is run by Mahaer Mahmud, an individual based in Pakistan ("we", "us" or "our"). We are responsible for your information.
 
@@ -51,7 +51,7 @@ If we turn these connections back on, we'll update this policy first. Cappuccina
 
 ### Technical information
 
-- **Cookies:** we use one cookie to keep you signed in. It lasts up to 30 days. We don't use advertising or tracking cookies.
+- **Cookies:** we use one cookie to keep you signed in. It stops working after 30 days without use, and always 90 days after you sign in. We don't use advertising or tracking cookies.
 - **Your browser's storage:** Cappuccina saves small settings on your device, such as your language, theme, reasoning effort (Low, High or Max), and which chat you had open. These stay on your device.
 - **Network and server data:** like most websites, our hosting and network providers process your IP address, browser type and request times so they can deliver the site and protect it from attacks. Our server may keep short error logs to fix problems.
 
@@ -107,7 +107,7 @@ Each webpage Cappuccina builds has a preview link. **Anyone who has the link can
 - **Chats, files, images and webpages:** until you delete them. Deleting a chat also deletes its messages, attached files, images and webpage.
 - **Memories:** until you delete them. Memories are not deleted when you delete a chat. You can delete them one by one or all at once in **Settings → Memory**.
 - **Gmail and Calendar tokens:** we deleted these when we turned the connections off, and asked Google to remove Cappuccina's access. You can check this at any time in your [Google Account permissions](https://myaccount.google.com/permissions).
-- **Sign-in sessions:** up to 30 days, or until you sign out.
+- **Sign-in sessions:** until 30 days pass without use, 90 days pass since you signed in, or you sign out, whichever comes first.
 - **Your account:** until you delete it in **Settings → Account → Danger Zone**. When you do, we delete your account and everything linked to it right away. Copies in our backups are deleted within 30 days. Information we already sent to the providers in section 4 is kept for as long as their own policies say, such as up to 30 days at OpenAI.
 
 We may keep some information longer if the law requires it, or to deal with a safety or abuse issue.

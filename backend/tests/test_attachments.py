@@ -475,6 +475,63 @@ def test_state_puts_image_attachment_in_vision_block(signed_in):
     assert image_block["image_url"]["url"].startswith("data:image/png;base64,")
 
 
+def test_state_reuses_encoded_image_across_turns(signed_in):
+    import app.main as main
+
+    chat = _chat(signed_in)
+    user = db.get_user_by_email("kid@example.com")
+    row = db.create_attachment(
+        user["id"], chat["id"], "pic.png", FAKE_PNG, kind="image",
+        mime="image/png",
+    )
+    req = _chat_request(
+        chat["id"],
+        [{"type": "attachment", "attachmentId": row["id"], "kind": "image"}],
+    )
+    first = main._state(req, user)["messages"][0].content[1]
+    # The second turn is served from the cache, so the file isn't read again.
+    db.attachment_file_path(row["id"], row["filename"]).unlink()
+    second = main._state(req, user)["messages"][0].content[1]
+    assert second == first
+
+
+def test_state_skips_cached_image_once_attachment_is_deleted(signed_in):
+    import app.main as main
+
+    chat = _chat(signed_in)
+    user = db.get_user_by_email("kid@example.com")
+    row = db.create_attachment(
+        user["id"], chat["id"], "pic.png", FAKE_PNG, kind="image",
+        mime="image/png",
+    )
+    req = _chat_request(
+        chat["id"],
+        [{"type": "attachment", "attachmentId": row["id"], "kind": "image"}],
+    )
+    main._state(req, user)
+    db.delete_attachment(user["id"], row["id"])
+    content = main._state(req, user)["messages"][0].content
+    assert content == "look at this"
+
+
+def test_image_data_url_cache_evicts_oldest_past_limit(tmp_path, monkeypatch):
+    import app.main as main
+
+    monkeypatch.setattr(main, "_data_urls", main.OrderedDict())
+    monkeypatch.setattr(main, "_data_urls_size", 0)
+    paths = []
+    for name in ("a", "b", "c"):
+        path = tmp_path / f"{name}.png"
+        path.write_bytes(b"x" * 300)
+        paths.append(path)
+    one = len(main._image_data_url(paths[0], "image/png"))
+    monkeypatch.setattr(main, "_DATA_URL_CACHE_LIMIT", one * 2)
+    main._image_data_url(paths[1], "image/png")
+    main._image_data_url(paths[2], "image/png")
+    assert list(main._data_urls) == [paths[1], paths[2]]
+    assert main._data_urls_size == one * 2
+
+
 def test_state_points_to_document_for_tool(signed_in):
     import app.main as main
 

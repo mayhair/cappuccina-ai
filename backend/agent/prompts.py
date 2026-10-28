@@ -1,10 +1,10 @@
 from datetime import datetime
 from pathlib import Path
-from zoneinfo import ZoneInfo
 
 from agent import lorebook
 from agent.memory import format_for_prompt
 from app.config import TUTOR_FOR_SUBJECT, TUTOR_SUFFIX
+from app.timezones import zone
 
 LORE_DIR = Path(__file__).resolve().parent / "lore"
 
@@ -16,11 +16,8 @@ def today(tz: str | None = None, now: datetime | None = None) -> str:
     missing (Windows ships no zoneinfo data unless ``tzdata`` is installed).
     ``now`` is injectable for tests.
     """
-    try:
-        zone = ZoneInfo(tz) if tz else ZoneInfo("UTC")
-    except Exception:
-        zone = ZoneInfo("UTC")
-    current = (now or datetime.now(zone)).astimezone(zone)
+    tz_zone = zone(tz or "UTC")
+    current = (now or datetime.now(tz_zone)).astimezone(tz_zone)
     return f"{current.day} {current.strftime('%B %Y')}"
 
 

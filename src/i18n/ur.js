@@ -116,6 +116,7 @@ export default {
   'controls.group': "چیٹ کنٹرولز",
   'controls.openSidebar': "سائیڈ بار کھولیں",
   'controls.search': "تلاش",
+  'effort.off': "بند",
   'effort.low': "کم",
   'effort.high': "زیادہ",
   'effort.max': "انتہائی",

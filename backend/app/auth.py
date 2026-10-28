@@ -24,7 +24,10 @@ def _cookie_params() -> dict:
 
 
 def set_session_cookie(response: Response, token: str) -> None:
-    response.set_cookie(value=token, max_age=30 * 24 * 3600, **_cookie_params())
+    # The cookie lives as long as the session can at most; the server enforces
+    # the idle timeout, so the cookie never has to be re-sent on renewal.
+    max_age = int(db.SESSION_MAX_AGE.total_seconds())
+    response.set_cookie(value=token, max_age=max_age, **_cookie_params())
 
 
 def clear_session_cookie(response: Response) -> None:
