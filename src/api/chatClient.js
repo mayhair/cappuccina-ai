@@ -8,7 +8,7 @@
 
 import { request } from './http'
 
-function buildRequest({ chatId, messages, tree, replyId, reasoning, mode, subject, generateTitle }) {
+function buildRequest({ chatId, messages, tree, replyId, reasoning, mode, subject, story, generateTitle }) {
   return {
     chatId,
     messages,
@@ -17,19 +17,20 @@ function buildRequest({ chatId, messages, tree, replyId, reasoning, mode, subjec
     reasoning: reasoning ?? 'high',
     mode: mode ?? 'chat',
     subject: subject ?? null,
+    story: story ?? null,
     timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
     generateTitle: generateTitle ?? false,
   }
 }
 
 // handlers: { onToken, onReasoning, onToolCall, onToolResult, onImage, onWebpage, onTitle, onDone }
-export async function sendStreaming({ chatId, messages, tree, replyId, reasoning, mode, subject, generateTitle }, handlers = {}) {
+export async function sendStreaming({ chatId, messages, tree, replyId, reasoning, mode, subject, story, generateTitle }, handlers = {}) {
   const { onToken, onReasoning, onToolCall, onToolResult, onImage, onWebpage, onTitle, onDone } = handlers
   const res = await fetch('/api/v1/chat/stream', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     credentials: 'include',
-    body: JSON.stringify(buildRequest({ chatId, messages, tree, replyId, reasoning, mode, subject, generateTitle })),
+    body: JSON.stringify(buildRequest({ chatId, messages, tree, replyId, reasoning, mode, subject, story, generateTitle })),
   })
   if (!res.ok || !res.body) throw new Error(`chat stream failed: ${res.status}`)
 
@@ -75,8 +76,8 @@ export async function sendStreaming({ chatId, messages, tree, replyId, reasoning
 
 export const listChats = () => request('/api/v1/chats')
 
-export const createChatOnServer = (mode = 'chat', subject = null) =>
-  request('/api/v1/chats', { method: 'POST', body: { mode, subject } })
+export const createChatOnServer = (mode = 'chat', subject = null, story = null) =>
+  request('/api/v1/chats', { method: 'POST', body: { mode, subject, story } })
 
 export const renameChatOnServer = (chatId, title) =>
   request(`/api/v1/chats/${chatId}`, { method: 'PATCH', body: { title } })

@@ -1,18 +1,18 @@
 import { useEffect, useState } from 'react'
-import { CapIcon, ChatIcon, CheckIcon, ChevronIcon } from './Icons'
+import { BookIcon, CapIcon, ChatIcon, CheckIcon, ChevronIcon } from './Icons'
 import { useLanguage } from '../i18n/LanguageProvider'
+import { CHAT_MODES } from '../lib/modes'
 
-const MODES = [
-  { value: 'chat', icon: ChatIcon },
-  { value: 'tutor', icon: CapIcon },
-]
+const ICONS = { chat: ChatIcon, tutor: CapIcon, story: BookIcon }
+const MODES = CHAT_MODES.map((value) => ({ value, icon: ICONS[value] }))
 
 // A compact chip showing the chat mode; it opens an upward picker that says
 // what each mode does.
-export function ModeSwitch({ mode, onMode, disabled }) {
+// `modes` is what this server offers (see availableModes in lib/modes).
+export function ModeSwitch({ mode, onMode, disabled, modes = CHAT_MODES }) {
   const { t } = useLanguage()
   const [open, setOpen] = useState(false)
-  const current = mode === 'tutor' ? 'tutor' : 'chat'
+  const current = modes.includes(mode) ? mode : 'chat'
   const CurrentIcon = MODES.find((m) => m.value === current).icon
 
   useEffect(() => {
@@ -28,7 +28,7 @@ export function ModeSwitch({ mode, onMode, disabled }) {
     <div className="mode-switch">
       <button
         type="button"
-        className={`effort-pill mode-chip${current === 'tutor' ? ' is-tutor' : ''}`}
+        className={`effort-pill mode-chip${current !== 'chat' ? ` is-${current}` : ''}`}
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
         aria-haspopup="dialog"
@@ -49,7 +49,7 @@ export function ModeSwitch({ mode, onMode, disabled }) {
             onClick={() => setOpen(false)}
           />
           <div className="effort-pop mode-pop" role="dialog" aria-label={t('mode.group')}>
-            {MODES.map(({ value, icon: Icon }) => (
+            {MODES.filter((m) => modes.includes(m.value)).map(({ value, icon: Icon }) => (
               <button
                 key={value}
                 type="button"

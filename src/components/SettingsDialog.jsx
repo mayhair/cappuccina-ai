@@ -8,6 +8,7 @@ import {
   ShieldIcon,
   GlobeIcon,
   BrainIcon,
+  BookIcon,
   ChevronIcon,
   ArrowLeftIcon,
   CheckIcon,
@@ -19,6 +20,8 @@ import { EmojiText } from '../lib/emoji'
 import { LanguagePicker } from './LanguagePicker'
 import { ThemeChoice, VoiceSwitch } from './AppearanceControls'
 import { MemoryManager } from './MemoryManager'
+import { StorySettings } from './StorySettings'
+import { CharacterManager } from './CharacterManager'
 import { useLanguage } from '../i18n/LanguageProvider'
 import { useMediaQuery } from '../hooks/useMediaQuery'
 import { updateProfile, setAdultMode, deleteAccount } from '../api/authClient'
@@ -601,6 +604,7 @@ export function SettingsDialog({
   const adultEnabled = user.adultModeEnabled !== false
   const gmailEnabled = user.gmailEnabled === true
   const calendarEnabled = user.calendarEnabled === true
+  const storyEnabled = user.storyModeEnabled !== false
 
   const sections = [
     {
@@ -677,6 +681,22 @@ export function SettingsDialog({
         </>
       ),
     },
+    ...(storyEnabled
+      ? [
+          {
+            key: 'story',
+            icon: <BookIcon />,
+            label: t('settings.nav.story'),
+            content: (
+              <>
+                <h3 className="settings-heading">{t('settings.nav.story')}</h3>
+                <StorySettings user={user} onUserUpdated={onUserUpdated} />
+                <CharacterManager />
+              </>
+            ),
+          },
+        ]
+      : []),
     ...(adultEnabled
       ? [
           {

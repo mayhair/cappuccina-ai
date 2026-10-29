@@ -127,6 +127,24 @@ def lore_lookup(name: str) -> str:
     return lorebook.lookup(name)
 
 
+MAX_STORY_ACTIONS = 3
+MAX_STORY_ACTION_CHARS = 120
+
+
+@tool
+def suggest_actions(options: list[str]) -> str:
+    """Story mode only. Offer the user 2-3 short things their character could do next, shown as buttons under your reply. Call it once, after you have written your whole turn. Write each option in the user's voice as a short action or line (for example "Follow Tralalero to the track" or "Ask Espressona what she's hiding"), make them meaningfully different, and never include an option that breaks the story boundaries. The user can always type their own action instead."""
+    cleaned = []
+    for option in options:
+        text = " ".join(str(option).split())[:MAX_STORY_ACTION_CHARS]
+        if text and text not in cleaned:
+            cleaned.append(text)
+    cleaned = cleaned[:MAX_STORY_ACTIONS]
+    if not cleaned:
+        return json.dumps({"status": "error", "error": "No options given."})
+    return json.dumps({"status": "story_choices", "options": cleaned})
+
+
 # ---------- Gmail tools ----------
 # The authenticated user id (and current chat id) are injected by LangGraph
 # through RunnableConfig; they never appear in the tool schema the model sees.
@@ -1076,7 +1094,7 @@ def search_memories(query: str, config: RunnableConfig, limit: int = 5) -> str:
     return "\n".join(f"- [{m['id']}] {m['content']}" for m in found)
 
 
-ALL_TOOLS = [solve_equation, web_search, read_webpage, lore_lookup, generate_image, image_edit, view_image, read_attachment, write_webpage_file, add_webpage_asset, read_webpage_file, webpage_shell, check_webpage, search_emails, read_email, draft_email, list_events, read_event, create_event, update_event, propose_event_deletion, save_memory, update_memory, delete_memory, search_memories]
+ALL_TOOLS = [solve_equation, web_search, read_webpage, lore_lookup, suggest_actions, generate_image, image_edit, view_image, read_attachment, write_webpage_file, add_webpage_asset, read_webpage_file, webpage_shell, check_webpage, search_emails, read_email, draft_email, list_events, read_event, create_event, update_event, propose_event_deletion, save_memory, update_memory, delete_memory, search_memories]
 
 # Tools that only work once the user has linked that Google service. The graph
 # leaves them out of the model's tool list until then, which saves their schema
@@ -1089,6 +1107,12 @@ CALENDAR_TOOL_NAMES = frozenset(
 MEMORY_TOOL_NAMES = frozenset(
     {"save_memory", "update_memory", "delete_memory", "search_memories"}
 )
+# Offered only in story mode, and only while the user has suggested actions on.
+STORY_TOOL_NAMES = frozenset({"suggest_actions"})
+# The webpage workspace tools.
+WEBPAGE_TOOL_NAMES = frozenset(
+    {"write_webpage_file", "add_webpage_asset", "read_webpage_file", "webpage_shell", "check_webpage"}
+)
 
 # Human-friendly names for UI display ("Called Tool: ...").
 TOOL_DISPLAY_NAMES = {
@@ -1096,6 +1120,7 @@ TOOL_DISPLAY_NAMES = {
     "web_search": "Web Search",
     "read_webpage": "Read Webpage",
     "lore_lookup": "Lore Book",
+    "suggest_actions": "Next Moves",
     "generate_image": "Drawing",
     "image_edit": "Edit Picture",
     "view_image": "Viewing Picture",

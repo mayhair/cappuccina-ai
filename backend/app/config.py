@@ -141,6 +141,30 @@ MEMORY_MAX_PER_USER = 200
 # reachable through the search_memories tool.
 MEMORY_INJECT_LIMIT = 25
 
+# Story mode (interactive roleplay). On by default; set to 0/false/no/off to
+# remove it: the mode picker and Settings section disappear, the API refuses
+# story chats and the story routes, and existing story chats carry on as
+# ordinary chats.
+STORY_MODE_ENABLED = os.getenv("STORY_MODE_ENABLED", "1").strip().lower() not in (
+    "",
+    "0",
+    "false",
+    "no",
+    "off",
+)
+
+# Story mode writes a "story so far" chapter summary every this many messages
+# on the branch being viewed. The full history still goes to the model until it
+# passes STORY_CONTEXT_BUDGET (rough tokens); then the oldest messages that a
+# chapter already covers are left out, oldest first.
+STORY_CHAPTER_SIZE = int(os.getenv("STORY_CHAPTER_SIZE", "30"))
+STORY_CONTEXT_BUDGET = int(os.getenv("STORY_CONTEXT_BUDGET", "400000"))
+
+# The story character library (Settings > Story mode): caps per user and field.
+STORY_CHARACTER_MAX_PER_USER = 100
+STORY_CHARACTER_NAME_MAX = 80
+STORY_CHARACTER_TEXT_MAX = 1500
+
 REASONING_LEVELS = {"off", "low", "high", "max"}
 
 TUTOR_SUFFIX = """

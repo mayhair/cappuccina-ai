@@ -1,16 +1,23 @@
 import logging
 from uuid import uuid4
 
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, START, MessagesState, StateGraph
 from langgraph.prebuilt import ToolNode
 
-from agent.fmhy import safety_note_for
+from agent.fmhy import FMHY_TOOL_NAMES, safety_note_for
 from agent.model import make_model
-from agent.prompts import build_messages
+from agent.prompts import build_messages, story_uses_lore
 from agent import tools as agent_tools
-from agent.tools import ALL_TOOLS, CALENDAR_TOOL_NAMES, GMAIL_TOOL_NAMES, MEMORY_TOOL_NAMES
+from agent.tools import (
+    ALL_TOOLS,
+    CALENDAR_TOOL_NAMES,
+    GMAIL_TOOL_NAMES,
+    MEMORY_TOOL_NAMES,
+    STORY_TOOL_NAMES,
+    WEBPAGE_TOOL_NAMES,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -28,12 +35,42 @@ class AgentState(MessagesState):
     memory: bool
     memories: list[dict]
     memory_total: int
+    story: dict | None
+    story_note: str
+    story_choices: bool
 
 
-def _tools_for(tool_list: list, gmail: bool, calendar: bool, memory: bool = True) -> list:
+# What a story never needs: building webpages, email, calendar, equations and
+# the free-media guide. Leaving them out saves their schemas on every story
+# turn and keeps the narrator in the story.
+STORY_HIDDEN_TOOL_NAMES = (
+    WEBPAGE_TOOL_NAMES
+    | GMAIL_TOOL_NAMES
+    | CALENDAR_TOOL_NAMES
+    | FMHY_TOOL_NAMES
+    | {"solve_equation"}
+)
+
+
+def _tools_for(
+    tool_list: list,
+    gmail: bool,
+    calendar: bool,
+    memory: bool = True,
+    story: dict | None = None,
+) -> list:
     """The tools the model is offered: Google tools only when that service is
-    linked, memory tools only while the user has memory on."""
+    linked, and memory tools only while the user has memory on. Suggested
+    story moves are never offered: the graph asks for them itself (see
+    story_choices in build_graph). ``story`` is set only in story mode, which
+    also drops the tools a story never uses, and lore_lookup unless the
+    story uses her lore book."""
     hidden: set[str] = set()
+    if story is not None:
+        hidden |= STORY_HIDDEN_TOOL_NAMES
+        if not story_uses_lore(story):
+            hidden.add("lore_lookup")
+    hidden |= STORY_TOOL_NAMES
     if not gmail:
         hidden |= GMAIL_TOOL_NAMES
     if not calendar:
@@ -41,6 +78,50 @@ def _tools_for(tool_list: list, gmail: bool, calendar: bool, memory: bool = True
     if not memory:
         hidden |= MEMORY_TOOL_NAMES
     return [t for t in tool_list if t.name not in hidden]
+
+
+# Models tend to finish a story turn without calling suggest_actions, so the
+# graph asks for the next moves itself with one extra call that must use the
+# tool. That call is tagged so the stream handler hides it: its text and
+# reasoning never reach the reply, only the tool card and buttons do.
+STORY_CHOICES_TAG = "story_choices"
+STORY_CHOICES_NOTE = (
+    "Now call suggest_actions with 2-3 short, different things the user's "
+    "character could do next in this scene. Do not write anything else."
+)
+
+
+def _is_ooc_reply(text: str) -> bool:
+    return text.lstrip().lower().startswith("(ooc)")
+
+
+def needs_story_choices(state) -> bool:
+    """True when a story turn just ended without suggested next moves.
+
+    Only with the user's setting on, only after an in-story reply with text,
+    and only once per run: a run that already offered moves is done.
+    """
+    if state.get("mode") != "story" or not state.get("story_choices", False):
+        return False
+    messages = state["messages"]
+    last = messages[-1] if messages else None
+    if not isinstance(last, AIMessage) or last.tool_calls:
+        return False
+    text = last.content if isinstance(last.content, str) else ""
+    if not text.strip() or _is_ooc_reply(text):
+        return False
+    for m in reversed(messages):
+        if isinstance(m, HumanMessage):
+            break
+        if any(c["name"] in STORY_TOOL_NAMES for c in getattr(m, "tool_calls", None) or []):
+            return False
+    return True
+
+
+def _only_story_tools(batch) -> bool:
+    """True when the tool batch that just ran was only suggested moves, which
+    end the turn: the reply is already written."""
+    return bool(batch) and all(getattr(m, "name", "") in STORY_TOOL_NAMES for m in batch)
 
 
 def _tool_error_message(error: Exception) -> str:
@@ -166,7 +247,12 @@ def build_graph(tools=None):
         gmail = state.get("gmail", True)
         calendar = state.get("calendar", True)
         memory = state.get("memory", True)
-        model = make_model(state["reasoning"], _tools_for(tool_list, gmail, calendar, memory))
+        story_mode = state["mode"] == "story"
+        story = (state.get("story") or {}) if story_mode else None
+        model = make_model(
+            state["reasoning"],
+            _tools_for(tool_list, gmail, calendar, memory, story),
+        )
         messages = build_messages(
             state["mode"],
             state.get("subject"),
@@ -180,6 +266,8 @@ def build_graph(tools=None):
             memory_total=state.get("memory_total"),
             gmail_enabled=state.get("gmail_enabled", True),
             calendar_enabled=state.get("calendar_enabled", True),
+            story=state.get("story"),
+            story_note=state.get("story_note", ""),
         )
         return {"messages": [model.invoke(messages)]}
 
@@ -189,7 +277,52 @@ def build_graph(tools=None):
             return "tools"
         if needs_auto_check(state["messages"]):
             return "auto_check"
+        if needs_story_choices(state):
+            return "story_choices"
         return END
+
+    def story_choices(state: AgentState):
+        """Ask for the next moves the reply left out (see STORY_CHOICES_TAG)."""
+        tool = next((t for t in tool_list if t.name == "suggest_actions"), None)
+        if tool is None:
+            return {"messages": []}
+        messages = build_messages(
+            state["mode"],
+            state.get("subject"),
+            state.get("timezone"),
+            [*state["messages"], SystemMessage(content=STORY_CHOICES_NOTE)],
+            state.get("adult", False),
+            gmail=state.get("gmail", True),
+            calendar=state.get("calendar", True),
+            memory=state.get("memory", True),
+            memories=state.get("memories"),
+            memory_total=state.get("memory_total"),
+            gmail_enabled=state.get("gmail_enabled", True),
+            calendar_enabled=state.get("calendar_enabled", True),
+            story=state.get("story"),
+            story_note=state.get("story_note", ""),
+        )
+        # Reasoning off: picking a few options needs no thinking.
+        model = make_model("off").bind_tools([tool], tool_choice=tool.name)
+        try:
+            reply = model.with_config(tags=[STORY_CHOICES_TAG]).invoke(messages)
+        except Exception:
+            logger.exception("story choices call failed")
+            return {"messages": []}
+        calls = [c for c in reply.tool_calls if c["name"] == tool.name][:1]
+        if not calls:
+            return {"messages": []}
+        # Only the tool call is kept; any text the call wrote stays hidden.
+        return {"messages": [AIMessage(content="", tool_calls=calls)]}
+
+    def after_story_choices(state: AgentState):
+        last = state["messages"][-1]
+        return "tools" if isinstance(last, AIMessage) and last.tool_calls else END
+
+    def after_tools(state: AgentState):
+        if _only_story_tools(_trailing_tool_messages(state["messages"])):
+            return END
+        return "call_model"
 
     def auto_check(state: AgentState, config: RunnableConfig):
         """Test the site the model is about to call ready.
@@ -242,11 +375,15 @@ def build_graph(tools=None):
     graph.add_node("tools", ToolNode(tool_list, handle_tool_errors=_tool_error_message))
     graph.add_node("inject_fmhy_note", inject_fmhy_note)
     graph.add_node("auto_check", auto_check)
+    graph.add_node("story_choices", story_choices)
     graph.add_edge(START, "call_model")
-    graph.add_conditional_edges("call_model", should_continue, ["tools", "auto_check", END])
+    graph.add_conditional_edges(
+        "call_model", should_continue, ["tools", "auto_check", "story_choices", END]
+    )
+    graph.add_conditional_edges("story_choices", after_story_choices, ["tools", END])
     graph.add_conditional_edges("auto_check", after_auto_check, ["call_model", END])
     graph.add_edge("tools", "inject_fmhy_note")
-    graph.add_edge("inject_fmhy_note", "call_model")
+    graph.add_conditional_edges("inject_fmhy_note", after_tools, ["call_model", END])
     return graph.compile()
 
 

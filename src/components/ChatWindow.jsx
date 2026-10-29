@@ -3,6 +3,8 @@ import { createPortal } from 'react-dom'
 import { SendIcon, ChevronIcon, WrenchIcon, CopyIcon, CheckIcon, RetryIcon, MailIcon, PencilIcon, PaperclipIcon, FileIcon, CalendarIcon, MicIcon, WindowIcon, BrainIcon } from './Icons'
 import { EffortSelector } from './EffortSelector'
 import { ModeSwitch } from './ModeSwitch'
+import { StoryBar, StoryChoices, StoryStart, choicesFromPart } from './Story'
+import { isOoc, isOocReply } from '../lib/modes'
 import { Markdown } from '../lib/markdown'
 import { highlightJson } from '../lib/highlightCode'
 import { EmojiText } from '../lib/emoji'
@@ -60,6 +62,8 @@ function messageSegments(message) {
     (p) =>
       p.type !== 'image' &&
       p.type !== 'webpage' &&
+      // Story mode's next moves show as buttons under the reply, not a card.
+      !(p.type === 'tool' && p.name === 'suggest_actions') &&
       (p.type !== 'text' || (p.text ?? '').trim() !== ''),
   )
   const content = message.content ?? ''
@@ -948,7 +952,7 @@ function EditMessageForm({ value, onChange, onSend, onCancel }) {
   )
 }
 
-function MessageRow({ message, prev, isActiveStream, user, onRetry, onDraftSent, onEventDeleted, onMemoryUndone, onManageMemory, onOpenWebpage, branch, onEdit, onRegenerate, onNavigateBranch }) {
+function MessageRow({ message, prev, isActiveStream, user, onRetry, onDraftSent, onEventDeleted, onMemoryUndone, onManageMemory, onOpenWebpage, branch, onEdit, onRegenerate, onNavigateBranch, storyMode = false, showChoices = false, onPickChoice }) {
   const { t } = useLanguage()
   const m = message
   const [editing, setEditing] = useState(false)
@@ -969,6 +973,9 @@ function MessageRow({ message, prev, isActiveStream, user, onRetry, onDraftSent,
   const memories = toolParts.map(memoryFromTool).filter(Boolean)
   const images = toolParts.map(imageFromPart).filter(Boolean)
   const webpages = webpagesFromParts(toolParts)
+  const choices = showChoices ? toolParts.map(choicesFromPart).filter(Boolean).at(-1) : null
+  // Story mode marks out-of-character turns so they read apart from the story.
+  const ooc = storyMode && (m.role === 'user' ? isOoc(m.content) : isOocReply(m.content))
   const userAttachments =
     m.role === 'user'
       ? (m.parts ?? []).map(attachmentFromPart).filter(Boolean)
@@ -988,7 +995,7 @@ function MessageRow({ message, prev, isActiveStream, user, onRetry, onDraftSent,
   // own stamp, so don't smear the total across all of them.
   const thinkingCount = segments.filter((s) => s.type === 'thinking').length
   return (
-    <div className={`msg-row ${m.role}${startsRun ? ' starts' : ''}`}>
+    <div className={`msg-row ${m.role}${startsRun ? ' starts' : ''}${ooc ? ' ooc' : ''}`}>
       {m.role === 'assistant' ? (
         <div className="msg-avatar">
           <img src="/plates/msg-avatar.webp" alt="" />
@@ -1022,6 +1029,9 @@ function MessageRow({ message, prev, isActiveStream, user, onRetry, onDraftSent,
             <div className="bubble bubble-waiting">
               <StreamingDots />
             </div>
+          )}
+          {choices && !isActiveStream && !m.failed && (
+            <StoryChoices options={choices} onPick={onPickChoice} />
           )}
           {m.content && !isActiveStream && (
             <div className="msg-actions">
@@ -1136,6 +1146,7 @@ function Composer({
   onAttach,
   onRemoveAttachment,
   mode,
+  modes,
   onMode,
   effort,
   onEffort,
@@ -1143,6 +1154,9 @@ function Composer({
 }) {
   const { t } = useLanguage()
   const composerRef = useRef(null)
+  // Story mode: the next message goes out of character as "(ooc: …)".
+  const [ooc, setOoc] = useState(false)
+  const storyMode = mode === 'story'
   const fileRef = useRef(null)
   const setComposer = useCallback((el) => {
     composerRef.current = el
@@ -1205,7 +1219,8 @@ function Composer({
 
   const submit = () => {
     if (voice.listening) voice.stop()
-    onSend()
+    onSend(storyMode && ooc ? { ooc: true } : undefined)
+    setOoc(false)
   }
 
   const handleComposerKeyDown = (e) => {
@@ -1248,7 +1263,11 @@ function Composer({
           <div className="input">
             <textarea
               rows={1}
-              placeholder={mode === 'tutor' ? t('chat.placeholderTutor') : t('chat.placeholder')}
+              placeholder={
+                storyMode
+                  ? (ooc ? t('story.placeholderOoc') : t('story.placeholder'))
+                  : mode === 'tutor' ? t('chat.placeholderTutor') : t('chat.placeholder')
+              }
               aria-label={t('chat.messageLabel')}
               value={composerValue}
               onChange={(e) => handleDraftChange(e.target.value)}
@@ -1276,7 +1295,19 @@ function Composer({
             >
               <PaperclipIcon />
             </button>
-            <ModeSwitch mode={mode} onMode={onMode} disabled={isStreaming} />
+            <ModeSwitch mode={mode} modes={modes} onMode={onMode} disabled={isStreaming} />
+            {storyMode && (
+              <button
+                type="button"
+                className={`effort-pill story-ooc${ooc ? ' on' : ''} has-tip tip-up`}
+                data-tip={t('story.oocTip')}
+                aria-pressed={ooc}
+                onClick={() => setOoc((o) => !o)}
+                disabled={isStreaming}
+              >
+                {t('story.ooc')}
+              </button>
+            )}
             <EffortSelector effort={effort} onChange={onEffort} disabled={isStreaming} />
             {/* Mic and send share one spot: the mic while there is nothing to
                 send (or while dictating), send once there is. */}
@@ -1309,9 +1340,11 @@ function Composer({
   )
 }
 
-export function ChatWindow({ chat, user, isStreaming, draft, onDraft, onSend, onRetry, onEdit, onRegenerate, onNavigateBranch, onDraftSent, onEventDeleted, onMemoryUndone, onManageMemory, onOpenWebpage, inputRef, effort, onEffort, mode, onMode, attachments = [], uploading = false, attachError = '', onAttach, onRemoveAttachment }) {
+export function ChatWindow({ chat, user, isStreaming, draft, onDraft, onSend, onRetry, onEdit, onRegenerate, onNavigateBranch, onDraftSent, onEventDeleted, onMemoryUndone, onManageMemory, onManageCharacters, onOpenWebpage, inputRef, effort, onEffort, mode, modes, onMode, onSendText, onStory, attachments = [], uploading = false, attachError = '', onAttach, onRemoveAttachment }) {
   const { t } = useLanguage()
   const listRef = useRef(null)
+  const storyMode = mode === 'story'
+  const lastIndex = chat.messages.length - 1
 
   const canAttach = !isStreaming && !uploading
 
@@ -1421,7 +1454,13 @@ export function ChatWindow({ chat, user, isStreaming, draft, onDraft, onSend, on
   return (
     <>
       <div className="message-list" ref={listRef} aria-label={t('chat.conversation', { title: chat.title })}>
-        {chat.messages.length === 0 && !isStreaming && (
+        {storyMode && chat.messages.length > 0 && (
+          <StoryBar chat={chat} onStory={onStory} onManageCharacters={onManageCharacters} disabled={isStreaming} />
+        )}
+        {storyMode && chat.messages.length === 0 && !isStreaming && (
+          <StoryStart onStart={onSendText} onManageCharacters={onManageCharacters} disabled={isStreaming} />
+        )}
+        {!storyMode && chat.messages.length === 0 && !isStreaming && (
           <div className="welcome" role="status">
             <img className="welcome-hero" src="/plates/welcome-hero.webp" alt={t('chat.welcomeAlt')} />
             <h1 className="welcome-title">{t('landing.title')}</h1>
@@ -1449,6 +1488,9 @@ export function ChatWindow({ chat, user, isStreaming, draft, onDraft, onSend, on
             onMemoryUndone={onMemoryUndone}
             onManageMemory={onManageMemory}
             onOpenWebpage={onOpenWebpage}
+            storyMode={storyMode}
+            showChoices={storyMode && i === lastIndex && !isStreaming}
+            onPickChoice={(text) => onSendText?.(text)}
           />
         ))}
       </div>
@@ -1464,6 +1506,7 @@ export function ChatWindow({ chat, user, isStreaming, draft, onDraft, onSend, on
         onAttach={onAttach}
         onRemoveAttachment={onRemoveAttachment}
         mode={mode}
+        modes={modes}
         onMode={onMode}
         effort={effort}
         onEffort={onEffort}

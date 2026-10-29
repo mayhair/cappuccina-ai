@@ -288,6 +288,13 @@ def set_memory_enabled(user_id: str, enabled: bool) -> None:
     )
 
 
+def set_story_choices(user_id: str, enabled: bool) -> None:
+    _execute(
+        "UPDATE users SET story_choices = %(v)s WHERE id = %(id)s",
+        {"v": bool(enabled), "id": user_id},
+    )
+
+
 # ---------- memories ----------
 
 def list_memories(user_id: str, limit: int | None = None) -> list[dict]:
@@ -378,6 +385,117 @@ def delete_memory(user_id: str, memory_id: str) -> bool:
 
 def delete_all_memories(user_id: str) -> int:
     return _execute("DELETE FROM memories WHERE user_id = %(uid)s", {"uid": user_id})
+
+
+# ---------- story characters (the user's character library) ----------
+
+def list_story_characters(user_id: str) -> list[dict]:
+    return _fetchall(
+        "SELECT * FROM story_characters WHERE user_id = %(uid)s ORDER BY name, id",
+        {"uid": user_id},
+    )
+
+
+def get_story_characters(user_id: str, ids: list[int]) -> list[dict]:
+    """The user's own characters among ``ids``, in the order asked for.
+
+    Ids that are gone or belong to someone else are skipped, so a story whose
+    character was deleted (or a forged id) simply leaves that one out.
+    """
+    if not ids:
+        return []
+    rows = _fetchall(
+        "SELECT * FROM story_characters WHERE user_id = %(uid)s AND id = ANY(%(ids)s)",
+        {"uid": user_id, "ids": list(ids)},
+    )
+    by_id = {r["id"]: r for r in rows}
+    return [by_id[i] for i in dict.fromkeys(ids) if i in by_id]
+
+
+def count_story_characters(user_id: str) -> int:
+    row = _fetchone(
+        "SELECT COUNT(*) AS n FROM story_characters WHERE user_id = %(uid)s",
+        {"uid": user_id},
+    )
+    return row["n"] if row else 0
+
+
+def create_story_character(user_id: str, name: str, description: str = "",
+                           voice: str = "") -> dict:
+    now = _now()
+    with connection() as conn:
+        return conn.execute(
+            "INSERT INTO story_characters (user_id, name, description, voice,"
+            " created_at, updated_at) VALUES (%(uid)s, %(name)s, %(desc)s, %(voice)s,"
+            " %(now)s, %(now)s) RETURNING *",
+            {"uid": user_id, "name": _text(name), "desc": _text(description),
+             "voice": _text(voice), "now": now},
+        ).fetchone()
+
+
+def update_story_character(user_id: str, character_id: int, name: str,
+                           description: str, voice: str) -> dict | None:
+    with connection() as conn:
+        return conn.execute(
+            "UPDATE story_characters SET name = %(name)s, description = %(desc)s,"
+            " voice = %(voice)s, updated_at = %(now)s"
+            " WHERE id = %(id)s AND user_id = %(uid)s RETURNING *",
+            {"name": _text(name), "desc": _text(description), "voice": _text(voice),
+             "now": _now(), "id": character_id, "uid": user_id},
+        ).fetchone()
+
+
+def delete_story_character(user_id: str, character_id: int) -> bool:
+    return bool(
+        _execute(
+            "DELETE FROM story_characters WHERE id = %(id)s AND user_id = %(uid)s",
+            {"id": character_id, "uid": user_id},
+        )
+    )
+
+
+# ---------- story chapters ("story so far" summaries) ----------
+
+def list_story_chapters(chat_id: str) -> list[dict]:
+    """Every chapter of a chat on any branch, oldest first."""
+    return _fetchall(
+        "SELECT * FROM story_chapters WHERE chat_id = %(chat_id)s ORDER BY id",
+        {"chat_id": chat_id},
+    )
+
+
+def create_story_chapter(chat_id: str, text: str, start_uid: str | None = None,
+                         end_uid: str | None = None, edited: bool = False) -> dict:
+    now = _now()
+    with connection() as conn:
+        return conn.execute(
+            "INSERT INTO story_chapters (chat_id, start_uid, end_uid, text, edited,"
+            " created_at, updated_at) VALUES (%(chat_id)s, %(start)s, %(end)s,"
+            " %(text)s, %(edited)s, %(now)s, %(now)s) RETURNING *",
+            {"chat_id": chat_id, "start": start_uid, "end": end_uid,
+             "text": _text(text), "edited": edited, "now": now},
+        ).fetchone()
+
+
+def update_story_chapter(chat_id: str, chapter_id: int, text: str,
+                         edited: bool = True) -> dict | None:
+    with connection() as conn:
+        return conn.execute(
+            "UPDATE story_chapters SET text = %(text)s, edited = %(edited)s,"
+            " updated_at = %(now)s WHERE id = %(id)s AND chat_id = %(chat_id)s"
+            " RETURNING *",
+            {"text": _text(text), "edited": edited, "now": _now(),
+             "id": chapter_id, "chat_id": chat_id},
+        ).fetchone()
+
+
+def delete_story_chapter(chat_id: str, chapter_id: int) -> bool:
+    return bool(
+        _execute(
+            "DELETE FROM story_chapters WHERE id = %(id)s AND chat_id = %(chat_id)s",
+            {"id": chapter_id, "chat_id": chat_id},
+        )
+    )
 
 
 # ---------- Google grants (per-service OAuth tokens) ----------
@@ -582,7 +700,8 @@ def delete_session(token: str) -> None:
 # ---------- chats ----------
 
 def create_chat(user_id: str, title: str = "New chat", mode: str = "chat",
-                subject: str | None = None, chat_id: str | None = None) -> dict:
+                subject: str | None = None, chat_id: str | None = None,
+                story: dict | None = None) -> dict:
     now = _now()
     row = {
         "id": chat_id or uuid.uuid4().hex,
@@ -590,16 +709,17 @@ def create_chat(user_id: str, title: str = "New chat", mode: str = "chat",
         "title": title,
         "mode": mode,
         "subject": subject,
+        "story": story,
         "created_at": now,
         "updated_at": now,
     }
     _execute(
-        "INSERT INTO chats (id, user_id, title, mode, subject, created_at, updated_at)"
-        " VALUES (%(id)s, %(user_id)s, %(title)s, %(mode)s, %(subject)s, %(created_at)s,"
-        " %(updated_at)s)",
-        row,
+        "INSERT INTO chats (id, user_id, title, mode, subject, story, created_at,"
+        " updated_at) VALUES (%(id)s, %(user_id)s, %(title)s, %(mode)s, %(subject)s,"
+        " %(story_json)s, %(created_at)s, %(updated_at)s)",
+        {**row, "story_json": _json(story) if story is not None else None},
     )
-    return {k: row[k] for k in ("id", "title", "mode", "subject")}
+    return {k: row[k] for k in ("id", "title", "mode", "subject", "story")}
 
 
 def get_chat(user_id: str, chat_id: str) -> dict | None:
@@ -611,7 +731,7 @@ def get_chat(user_id: str, chat_id: str) -> dict | None:
 
 def list_chats(user_id: str) -> list[dict]:
     chats = _fetchall(
-        "SELECT id, title, mode, subject,"
+        "SELECT id, title, mode, subject, story,"
         ' active_leaf_uid AS "activeLeafId" FROM chats'
         " WHERE user_id = %(user_id)s ORDER BY created_at DESC",
         {"user_id": user_id},
@@ -818,12 +938,16 @@ def replace_chat_messages(chat_id: str, messages: list[dict]) -> None:
 
 def update_chat_meta(chat_id: str, mode: str | None = None,
                      subject: str | None = None,
-                     clear_subject: bool = False) -> None:
+                     clear_subject: bool = False,
+                     story: dict | None = None) -> None:
     sets = ["updated_at = %(now)s"]
     params: dict = {"now": _now(), "chat_id": chat_id}
     if mode is not None:
         sets.append("mode = %(mode)s")
         params["mode"] = mode
+    if story is not None:
+        sets.append("story = %(story)s")
+        params["story"] = _json(story)
     if clear_subject:
         sets.append("subject = NULL")
     elif subject is not None:

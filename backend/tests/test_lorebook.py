@@ -326,7 +326,101 @@ def test_graph_hides_tools_for_unlinked_google_services():
     names = {t.name for t in _tools_for(ALL_TOOLS, gmail=True, calendar=False)}
     assert GMAIL_TOOL_NAMES <= names
     assert not names & CALENDAR_TOOL_NAMES
-    assert len(_tools_for(ALL_TOOLS, True, True)) == len(ALL_TOOLS)
+    everything = _tools_for(ALL_TOOLS, True, True)
+    assert len(everything) == len(ALL_TOOLS) - 1  # all but suggest_actions
+
+
+def test_story_actions_are_never_offered_to_the_model():
+    # The graph asks for next moves itself, so the model never sees the tool.
+    from agent.graph import _tools_for
+    from agent.tools import ALL_TOOLS, STORY_TOOL_NAMES
+
+    names = {t.name for t in _tools_for(ALL_TOOLS, True, True)}
+    assert not names & STORY_TOOL_NAMES
+    names = {t.name for t in _tools_for(ALL_TOOLS, True, True, story={"world": "cappuccina"})}
+    assert not names & STORY_TOOL_NAMES
+
+
+def test_suggest_actions_cleans_and_caps_options():
+    import json
+
+    from agent.tools import suggest_actions
+
+    out = json.loads(
+        suggest_actions.invoke(
+            {"options": ["  Run  ", "Run", "Hide", "Shout", "Sing", ""]}
+        )
+    )
+    assert out == {"status": "story_choices", "options": ["Run", "Hide", "Shout"]}
+    assert json.loads(suggest_actions.invoke({"options": []}))["status"] == "error"
+
+
+def test_chat_prompt_keeps_chat_rhythm():
+    from agent.prompts import build_system_prompt
+
+    prompt = build_system_prompt("chat", None)
+    assert "Chat-bubble length" in prompt
+    assert "at most one reference in a reply" in prompt
+    assert "## Story mode" not in prompt
+    assert "## Story boundaries" not in prompt
+
+
+def test_story_prompt_narrates_with_story_boundaries_first():
+    from agent.prompts import build_system_prompt
+
+    prompt = build_system_prompt("story", None)
+    assert "Chat-bubble length" not in prompt
+    assert "## Sample exchanges" not in prompt
+    assert "## Story mode" in prompt
+    assert "## Your lore book" in prompt
+    # The story boundaries sit with the boundaries, ahead of persona and voice.
+    assert prompt.index("## Story boundaries") < prompt.index("## Who she is")
+    assert "## Story safety for young users" in prompt
+    assert "## Story safety (adult mode)" not in prompt
+    assert "Users are young people aged 13 or older." in prompt
+
+
+def test_adult_story_prompt_swaps_story_safety():
+    from agent.prompts import build_system_prompt
+
+    prompt = build_system_prompt("story", None, adult=True)
+    assert "## Story safety (adult mode)" in prompt
+    assert "## Story safety for young users" not in prompt
+    assert "18 or older" in prompt
+    # The shared story boundaries survive the swap.
+    assert "Dark themes are allowed fiction" in prompt
+
+
+def test_story_prompt_includes_scene_and_cast_bodies_only_when_set():
+    from agent.prompts import build_system_prompt
+
+    plain = build_system_prompt("story", None)
+    assert "## The cast" not in plain
+    assert "## This story's opening" not in plain
+
+    prompt = build_system_prompt(
+        "story",
+        None,
+        story={"scenario": "Café after closing", "cast": ["espressona-signora", "nobody"]},
+    )
+    assert "Café after closing" in prompt
+    assert "## The cast" in prompt
+    assert "### Espressona Signora" in prompt
+
+
+def test_build_messages_adds_story_note_after_history():
+    from agent import prompts
+
+    history = [{"role": "user", "content": "hi"}]
+    messages = prompts.build_messages(
+        "story", None, None, history, story_note="## Story so far\n\nthey met"
+    )
+    assert messages[1] == history[0]
+    assert messages[2]["content"].startswith("## Story so far")
+    chat = prompts.build_messages(
+        "chat", None, None, history, story_note="## Story so far\n\nthey met"
+    )
+    assert not any("Story so far" in m["content"] for m in chat)
 
 
 def test_build_messages_threads_adult_flag():
