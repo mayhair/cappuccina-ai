@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="Cappuccina.jpg" alt="Ballerina Cappuccina, a cup-headed ballerina in a pink tutu" width="280">
+  <img src="Cappuccina.png" alt="Ballerina Cappuccina, a cup-headed ballerina in a pink tutu" width="280">
 </p>
 
 <h1 align="center">Cappuccina AI</h1>

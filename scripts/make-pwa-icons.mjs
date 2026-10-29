@@ -1,4 +1,4 @@
-// Renders the PWA icon set from Cappuccina.jpg into assets/icons/.
+// Renders the PWA icon set from Cappuccina.png into assets/icons/.
 // Run with: node scripts/make-pwa-icons.mjs
 // Uses headless Chromium (the playwright devDependency) so the crop and resize
 // run through the browser canvas API.
@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
-const sourcePath = join(root, 'Cappuccina.jpg')
+const sourcePath = join(root, 'Cappuccina.png')
 const outDir = join(root, 'assets', 'icons')
 
 // Square crops in source pixels of the 1024x1536 source. Both are framed like
@@ -46,7 +46,7 @@ async function drawIcon({ src, size, crop }) {
   return canvas.toDataURL('image/png').split(',')[1]
 }
 
-const src = `data:image/jpeg;base64,${(await readFile(sourcePath)).toString('base64')}`
+const src = `data:image/png;base64,${(await readFile(sourcePath)).toString('base64')}`
 await mkdir(outDir, { recursive: true })
 
 const browser = await chromium.launch({ headless: true })

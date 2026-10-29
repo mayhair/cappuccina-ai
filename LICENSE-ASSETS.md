@@ -4,7 +4,7 @@ The images in this repository were made for Cappuccina AI. They are licensed und
 
 This covers the image files in:
 
-- `Cappuccina.jpg`
+- `Cappuccina.png`
 - `assets/` (icons, plates and the social preview image)
 - `backend/agent/lore/characters/refs/`
 - `.impeccable/` (design mocks, mood boards and review screenshots)
