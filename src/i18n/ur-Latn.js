@@ -37,7 +37,7 @@ export default {
   'landing.pill.curious': 'Dilchasp sawalat',
   'landing.folklore.title': 'Aik zaroori ittila',
   'landing.folklore.1':
-    'Main, Tralalero Tralala, Espressona Signora aur baqi toli is app se nahi aaye. Hum AI se bani internet ki lok kahaniyan hain, Italian Brainrot gang, jo memes se paida huay aur hazaron haathon ne sanwaray.',
+    'Main, Tralalero Tralala, Espressona Signora, Tung Tung Tung Sahur aur baqi toli is app se nahi aaye. Hum AI se bani internet ki lok kahaniyan hain, Italian Brainrot gang, jo memes se paida huay aur hazaron haathon ne sanwaray.',
   'landing.folklore.2':
     'Hum public domain mein hain, yaani hamara koi malik nahi! Koi bhi hamein bana sakta hai, badal sakta hai, ya jaise chahe istemal kar sakta hai.',
   'landing.folklore.learn': 'mazeed jaanein',
