@@ -703,7 +703,10 @@ def _state(req: ChatRequest, user) -> dict:
             content.append({"type": "text", "text": m.content})
         content.extend(blocks)
         messages.append(HumanMessage(content=content))
-    memory = bool(user["memory_enabled"])
+    # A story is fiction: saved memories describe the user, not the character
+    # they play, and a character's traits must not be saved as facts about
+    # the user. Story chats neither see memories nor get the memory tools.
+    memory = bool(user["memory_enabled"]) and req.mode != "story"
     return {
         "messages": messages,
         "reasoning": req.reasoning,

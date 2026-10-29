@@ -274,6 +274,44 @@ def test_the_played_character_is_loaded_by_owner_and_left_out_of_the_cast(signed
     assert stolen["playerCharacter"] is None
 
 
+def test_story_chats_leave_memories_out(signed_in):
+    from agent.graph import _tools_for
+    from agent.prompts import build_messages
+    from agent.tools import ALL_TOOLS, MEMORY_TOOL_NAMES
+    from app import db
+    from app.main import _state
+    from app.schemas import ChatRequest
+
+    me = db.get_user_by_google_sub("google-sub-1")
+    db.create_memory(me["id"], "The user is a nurse in Lahore")
+    chat = signed_in.post("/api/v1/chats", json={"mode": "story"}).json()
+
+    def state_for(mode):
+        req = ChatRequest(
+            chatId=chat["id"],
+            messages=[{"role": "user", "content": "hi"}],
+            mode=mode,
+            story={"world": "fantasy"} if mode == "story" else None,
+        )
+        return _state(req, me)
+
+    story = state_for("story")
+    assert story["memory"] is False and story["memories"] == []
+    prompt = build_messages(
+        "story", None, None, [], memory=story["memory"], memories=story["memories"],
+        story=story["story"],
+    )
+    text = "\n".join(m["content"] for m in prompt)
+    assert "nurse in Lahore" not in text and "## Memory" not in text
+    tools = {t.name for t in _tools_for(ALL_TOOLS, True, True, story["memory"], story["story"])}
+    assert not tools & MEMORY_TOOL_NAMES
+
+    # Ordinary chat still gets them.
+    chat_state = state_for("chat")
+    assert chat_state["memory"] is True
+    assert any("nurse in Lahore" in m["content"] for m in chat_state["memories"])
+
+
 def test_story_setup_rejects_unknown_worlds(signed_in):
     bad = signed_in.post("/api/v1/chats", json={"mode": "story", "story": {"world": "moon"}})
     assert bad.status_code == 422
