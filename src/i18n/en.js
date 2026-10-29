@@ -38,7 +38,7 @@ export default {
   'landing.pill.curious': 'Curious questions',
   'landing.folklore.title': 'Just a heads-up',
   'landing.folklore.1':
-    'Me, Tralalero Tralala, Espressona Signora and the rest of the crew didn’t come from this app. We’re AI-generated internet folklore, the Italian Brainrot gang, born from memes and shaped by thousands of hands.',
+    'Me, Tralalero Tralala, Espressona Signora, Tung Tung Tung Sahur and the rest of the crew didn’t come from this app. We’re AI-generated internet folklore, the Italian Brainrot gang, born from memes and shaped by thousands of hands.',
   'landing.folklore.2':
     'We’re in the public domain, which means nobody owns us! Anyone can draw us, remix us, or use us however they like.',
   'landing.folklore.learn': 'learn more',
@@ -197,7 +197,7 @@ export default {
   'story.scene.race.title': "Tralalero challenges you to a race",
   'story.scene.race.setup': "Tralalero laces up his lucky blue sneakers and points at the beach. First one to the lighthouse wins.",
   'story.scene.sahur.title': "The sahur alarm",
-  'story.scene.sahur.setup': "It’s 3 a.m. and the drumming has started. Somebody in the house is refusing to wake up.",
+  'story.scene.sahur.setup': "It’s 3 a.m. and the bedug drum has started booming. Somebody in the house is refusing to wake up.",
   'story.scene.flight.title': "Ride with Bombardiro",
   'story.scene.flight.setup': "Bombardiro Crocodilo offers you a seat for a flight over the city. The weather report says “mostly clear”.",
   'story.ownTitle': "Make your own",

@@ -37,7 +37,7 @@ export default {
   'landing.pill.curious': 'Domande curiose',
   'landing.folklore.title': 'Solo un avviso',
   'landing.folklore.1':
-    'Io, Tralalero Tralala, Espressona Signora e il resto della banda non veniamo da questa app. Siamo folklore di internet generato dall’IA, la banda dell’Italian Brainrot, nata dai meme e plasmata da migliaia di mani.',
+    'Io, Tralalero Tralala, Espressona Signora, Tung Tung Tung Sahur e il resto della banda non veniamo da questa app. Siamo folklore di internet generato dall’IA, la banda dell’Italian Brainrot, nata dai meme e plasmata da migliaia di mani.',
   'landing.folklore.2':
     'Siamo di pubblico dominio, quindi non ci possiede nessuno! Chiunque può disegnarci, remixarci o usarci come preferisce.',
   'landing.folklore.learn': 'scopri di più',
@@ -416,7 +416,7 @@ export default {
   'story.scene.race.title': 'Tralalero ti sfida a una gara',
   'story.scene.race.setup': 'Tralalero si allaccia le sue scarpe blu portafortuna e indica la spiaggia. Chi arriva prima al faro vince.',
   'story.scene.sahur.title': 'La sveglia del sahur',
-  'story.scene.sahur.setup': 'Sono le 3 di notte e sono cominciati i tamburi. Qualcuno in casa si rifiuta di svegliarsi.',
+  'story.scene.sahur.setup': 'Sono le 3 di notte e il bedug ha cominciato a rimbombare. Qualcuno in casa si rifiuta di svegliarsi.',
   'story.scene.flight.title': 'In volo con Bombardiro',
   'story.scene.flight.setup': 'Bombardiro Crocodilo ti offre un posto per un volo sopra la città. Il meteo dice “prevalentemente sereno”.',
   'story.ownTitle': 'Inventalo tu',
