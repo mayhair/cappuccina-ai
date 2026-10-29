@@ -3048,7 +3048,8 @@ a.settings-save { text-decoration: none; display: inline-flex; align-items: cent
    fill with danger-colored text instead of white-on-danger. */
 .memory-danger { border-color: var(--danger); background: var(--danger-soak); color: var(--danger); }
 .memory-danger:hover { filter: brightness(1.08); }
-.memory-confirm { font-size: 13px; font-weight: 600; color: var(--ink-soft); }
+/* Own line, so both buttons always wrap together onto the row below. */
+.memory-confirm { flex-basis: 100%; text-align: end; font-size: 13px; font-weight: 600; color: var(--ink-soft); }
 
 /* ---------- memory: chat card ---------- */
 .memory-card {
