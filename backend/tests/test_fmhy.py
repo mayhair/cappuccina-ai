@@ -489,9 +489,64 @@ def test_wrapper_is_friendly_when_not_loaded(monkeypatch):
     assert "isn't available" in out
 
 
-def test_descriptions_carry_the_gating_rule():
+def test_media_sites_carries_the_scope_rule():
+    description = fmhy.fmhy_media_sites.description or ""
+    assert "right away" in description
+    assert "no confirmation step" in description
+    assert "NSFW" in description
+
+
+def test_other_tools_point_at_the_scope_rule_instead_of_repeating_it():
     for wrapper in fmhy._all_wrappers():
-        assert "insisted" in (wrapper.description or "")
+        if wrapper is fmhy.fmhy_media_sites:
+            continue
+        description = wrapper.description or ""
+        assert description.startswith(fmhy._SCOPE_POINTER)
+        assert fmhy._SCOPE not in description
+
+
+def test_descriptions_do_not_gate_on_insistence():
+    """A clear free-media request is looked up on the first try."""
+    for wrapper in fmhy._all_wrappers():
+        description = (wrapper.description or "").lower()
+        for phrase in ("insist", "last resort", "only call this after", "asked again"):
+            assert phrase not in description
+
+
+def test_media_sites_names_every_kind_and_categories():
+    description = " ".join((fmhy.fmhy_media_sites.description or "").split())
+    for kind in fmhy._MEDIA_PLAN:
+        assert kind in description
+    assert "manga" in description
+    assert "free movie sites" in description
+
+
+# ---------- free-media rules in the system prompt ----------
+
+
+def _free_media_rules(adult: bool) -> str:
+    from agent.prompts import build_system_prompt
+
+    prompt = build_system_prompt("chat", None, adult=adult)
+    start = prompt.index("## Free media and where to watch things")
+    return prompt[start : prompt.index("\n## ", start + 1)]
+
+
+def test_prompt_looks_up_free_media_straight_away():
+    for adult in (False, True):
+        rules = _free_media_rules(adult)
+        assert "straight away" in rules
+        assert "one short question" in rules
+        assert "insistent" not in rules
+        assert "Only if" not in rules
+
+
+def test_prompt_keeps_young_user_safety_with_free_media():
+    from agent.prompts import build_system_prompt
+
+    assert "## Safety for young users" in build_system_prompt("chat", None, adult=False)
+    assert "refuses random cracks" in _free_media_rules(False)
+    assert "Answer only from what the guide returns" in (fmhy.fmhy_media_sites.description or "")
 
 
 # ---------- non-leak into persisted output ----------

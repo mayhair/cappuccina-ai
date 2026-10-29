@@ -5,8 +5,8 @@ The remote server at ``FMHY_MCP_URL`` is discovered once at app startup with
 hand-written set. Re-exposing them (rather than binding the server's tools
 directly) buys three things this product needs:
 
-* gating language in the docstrings, so the model treats free-media lookups as
-  a last resort instead of a first answer;
+* descriptions that say plainly when to call them, so a clear "where can I
+  watch/read/get X for free" request is answered with a lookup on the first try;
 * an NSFW filter on the way out, so entries the FMHY dataset tags ``NSFW`` never
   reach a young user;
 * stable tool names (``fmhy_*``) that the graph keys on to inject the ad-blocker
@@ -69,14 +69,21 @@ FMHY_SAFETY_NOTE = (
 _NSFW = re.compile(r"\bNSFW\b", re.IGNORECASE)
 _NUMBERED = re.compile(r"^\s*\d+\.\s")
 
-_GATING = (
-    "Only call this after the user has clearly insisted on finding free sources "
-    "(asked again, said they can't pay, or asked specifically where to watch or "
-    "play something for free). Before that, offer the ordinary free options "
-    "instead. The FMHY guide mixes free and pirated links; say so when you use "
-    "it, prefer its starred (⭐/🌟) and official entries, and never surface "
-    "adult/NSFW entries."
+# Leads fmhy_media_sites' description, so the scope is read at tool-choice time.
+# It says when to call, not why to hold back: the old "only after the user
+# insisted" rule made the model stall on requests whose intent was obvious.
+_SCOPE = (
+    "FMHY (FreeMediaHeckYeah) is a curated community directory of free-media "
+    "websites. When the user asks where to watch, read, listen to, play or "
+    "download something for free, or wants free sites for a kind of media, look "
+    "it up right away: no confirmation step, no offer to check first. Answer "
+    "only from what the guide returns, preferring its official and starred "
+    "(🌟/⭐) entries. NSFW entries are already removed."
 )
+
+# The other wrappers carry only a pointer, so the scope isn't repeated five times
+# in every request's tool list.
+_SCOPE_POINTER = "Part of the FMHY free-media guide; same rules as fmhy_media_sites."
 
 # FMHY is a directory of websites grouped into sections, so "where can I watch
 # X" is answered by reading the right section, never by searching for the title.
@@ -358,13 +365,17 @@ async def fmhy_media_sites(
 ) -> str:
     """List the free-media sites FMHY recommends for a kind of media.
 
-    ALWAYS use this — never fmhy_search — when the user asks where to watch,
-    listen to, play or read a specific title. The guide is a directory of
-    websites grouped by category, so a title is never found by searching for it:
-    pick the category here and suggest sites from it instead. Returns the guide's
-    full site lists with the starred (🌟/⭐) picks first, so there are plenty of
-    fallbacks when one site is down or lacks the title. Pass the title only so
-    the answer can name it; it is never sent to the guide.
+    The main free-media tool. Use it — never fmhy_search — for a specific title
+    ("where can I watch Dune for free") and for a whole category ("free movie
+    sites", "where do people read manga"). Pick media_kind yourself:
+    movies_shows (movies, TV, cartoons, documentaries, live TV), anime, music
+    (songs, albums, audio), games (PC games, ROMs, emulation), books (ebooks,
+    comics, manga, light novels, textbooks, audiobooks), software (apps and
+    programs). The guide is a directory of websites grouped by category, so a
+    title is never found by searching for it: suggest sites from the list
+    instead. Returns the full site lists with the starred (🌟/⭐) picks first,
+    so there are fallbacks when one site is down or lacks the title. Pass the
+    title only so the answer can name it; it is never sent to the guide.
     """
     plan = _MEDIA_PLAN.get(media_kind)
     if plan is None:
@@ -504,9 +515,9 @@ def _all_wrappers() -> list:
     ]
 
 
-# The gating rule leads every description so it is read at tool-choice time.
 for _wrapper in _all_wrappers():
-    _wrapper.description = f"{_GATING} {_wrapper.description}"
+    _lead = _SCOPE if _wrapper is fmhy_media_sites else _SCOPE_POINTER
+    _wrapper.description = f"{_lead} {_wrapper.description}"
 
 
 def is_fmhy_tool_message(msg) -> bool:
