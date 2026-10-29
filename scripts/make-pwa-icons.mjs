@@ -13,26 +13,46 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const sourcePath = join(root, 'Cappuccina.png')
 const outDir = join(root, 'assets', 'icons')
 
-// Square crops in source pixels of the 1024x1536 source. Both are framed like
-// the chat avatar (plates/msg-avatar.webp): the latte top, part of the handle on
-// the left, her face, and the top of her shoulders. Both stop at x 750, left of
-// her waving fingers.
-const crops = {
-  // Tight crop: the cup's left side and handle are cut off at the left edge.
-  any: { x: 178, y: 72, size: 572 },
-  // Much wider crop centered on the head. Android launchers show only the
-  // middle 72/108 (about two thirds) of an adaptive icon, far less than the
-  // W3C safe zone, so the whole cup, handle included, must fit in that window.
-  // The crop starts above the source; drawIcon fills the gap with stretched
-  // sky, and that strip falls outside the visible window on Android.
-  maskable: { x: 0, y: -120, size: 900 },
+// The "any" icons: a tight square crop in pixels of the 1024x1536 source,
+// framed like the chat avatar (plates/msg-avatar.webp): the latte top, her
+// face, and the top of her shoulders. It stops at x 750, left of her waving
+// fingers, and cuts off the cup's left side and handle.
+const anyCrop = { x: 178, y: 72, size: 572 }
+
+// The maskable icons. Android launchers show only a middle window of a
+// maskable icon, and how big that window is depends on the browser that
+// installed the app. Measured from home-screen screenshots (Samsung One UI,
+// October 2026), as fractions of the icon:
+//   - Chrome installs a WebAPK and shows the middle ~85%, with no badge.
+//   - Brave and Firefox add a shortcut instead. They show only the middle
+//     60-65%, and the launcher covers the bottom-right of that window, from
+//     about 61% across and 60% down, with the browser's logo.
+// So there are two maskable icons, one per window (src/lib/pwa.js picks the
+// manifest). Both put the same view of the source in their window, so the app
+// icon looks the same whichever browser installed it. The shortcut window is
+// the average of Brave's and Firefox's.
+const maskableWindows = {
+  webapk: { x: 40 / 512, y: 38 / 512, size: 437 / 512 },
+  shortcut: { x: 98 / 512, y: 104 / 512, size: 320 / 512 },
+}
+// What every launcher shows: the whole cup, latte and handle included, with
+// her eyes, nose and mouth above the badge corner.
+const maskableView = { x: 92, y: 33, size: 770 }
+
+// The square of the source a maskable icon covers, so that maskableView lands
+// on the window. It reaches past the edges of the source; drawIcon fills that
+// part, which falls outside the window.
+function maskableCrop(win) {
+  const size = maskableView.size / win.size
+  return { x: maskableView.x - win.x * size, y: maskableView.y - win.y * size, size }
 }
 
 const targets = [
-  { file: 'icon-192.png', size: 192, mode: 'any' },
-  { file: 'icon-512.png', size: 512, mode: 'any' },
-  { file: 'maskable-512.png', size: 512, mode: 'maskable' },
-  { file: 'apple-touch-icon.png', size: 180, mode: 'any' },
+  { file: 'icon-192.png', size: 192, crop: anyCrop },
+  { file: 'icon-512.png', size: 512, crop: anyCrop },
+  { file: 'maskable-512.png', size: 512, crop: maskableCrop(maskableWindows.webapk) },
+  { file: 'maskable-shortcut-512.png', size: 512, crop: maskableCrop(maskableWindows.shortcut) },
+  { file: 'apple-touch-icon.png', size: 180, crop: anyCrop },
 ]
 
 // Runs inside the browser page. Returns the PNG as base64.
@@ -46,16 +66,28 @@ async function drawIcon({ src, size, crop }) {
   canvas.height = size
   const ctx = canvas.getContext('2d')
   ctx.imageSmoothingQuality = 'high'
+  const w = img.width
+  const h = img.height
+
   // Full-bleed square crop. The source is opaque, so there is no transparency.
-  const scale = size / crop.size
-  const left = -crop.x * scale
-  const top = -crop.y * scale
-  ctx.drawImage(img, left, top, img.width * scale, img.height * scale)
-  // A crop that starts above the source gets the top row of the source (plain
-  // sky) stretched up into the gap.
-  if (crop.y < 0) {
-    ctx.drawImage(img, 0, 0, img.width, 1, left, 0, img.width * scale, top)
+  if (crop.x >= 0 && crop.y >= 0 && crop.x + crop.size <= w && crop.y + crop.size <= h) {
+    ctx.drawImage(img, crop.x, crop.y, crop.size, crop.size, 0, 0, size, size)
+    return canvas.toDataURL('image/png').split(',')[1]
   }
+
+  // The crop reaches past the source: crop from a copy of the source whose
+  // edge pixels (night sky, mostly) are stretched outwards on every side.
+  const pad = Math.ceil(crop.size)
+  const padded = document.createElement('canvas')
+  padded.width = w + 2 * pad
+  padded.height = h + 2 * pad
+  const p = padded.getContext('2d')
+  p.drawImage(img, pad, pad)
+  p.drawImage(img, 0, 0, 1, h, 0, pad, pad, h)
+  p.drawImage(img, w - 1, 0, 1, h, pad + w, pad, pad, h)
+  p.drawImage(padded, 0, pad, padded.width, 1, 0, 0, padded.width, pad)
+  p.drawImage(padded, 0, pad + h - 1, padded.width, 1, 0, pad + h, padded.width, pad)
+  ctx.drawImage(padded, crop.x + pad, crop.y + pad, crop.size, crop.size, 0, 0, size, size)
   return canvas.toDataURL('image/png').split(',')[1]
 }
 
@@ -201,11 +233,11 @@ try {
   const page = await browser.newPage()
   await page.setContent('<!doctype html><html><body></body></html>')
   for (const t of targets) {
-    const b64 = await page.evaluate(drawIcon, { src, size: t.size, crop: crops[t.mode] })
+    const b64 = await page.evaluate(drawIcon, { src, size: t.size, crop: t.crop })
     const png = compressPng(Buffer.from(b64, 'base64'))
     await writeFile(join(outDir, t.file), png)
     console.log(
-      `wrote assets/icons/${t.file} (${t.size}x${t.size}, ${t.mode}, ${Math.round(png.length / 1024)} KB)`,
+      `wrote assets/icons/${t.file} (${t.size}x${t.size}, ${Math.round(png.length / 1024)} KB)`,
     )
   }
 } finally {

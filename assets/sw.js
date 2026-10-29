@@ -1,6 +1,6 @@
 // Cappuccina service worker. Hand-written, no libraries.
 // Bump VERSION when the caching rules change. Old caches are deleted on activate.
-const VERSION = 'v2'
+const VERSION = 'v3'
 const CACHE = `cappuccina-${VERSION}`
 
 // Only the offline fallback and the icons are precached. The app shell is not,
@@ -10,6 +10,7 @@ const PRECACHE = [
   '/icons/icon-192.png',
   '/icons/icon-512.png',
   '/icons/maskable-512.png',
+  '/icons/maskable-shortcut-512.png',
   '/icons/apple-touch-icon.png',
 ]
 

@@ -15,8 +15,13 @@
 // The manifest link is added only while someone is signed in (App.jsx calls
 // setManifestEnabled), so the browser offers to install the app only to users
 // who have an account.
+//
+// On Android, Chrome installs the app as a WebAPK, but Brave and Firefox add a
+// home-screen shortcut, which shows less of the maskable icon and has the
+// browser's logo over its bottom-right corner. Those two get a manifest whose
+// maskable icon is framed for that, so the icon looks the same in all three
+// (scripts/make-pwa-icons.mjs has the measurements).
 
-const MANIFEST_HREF = '/manifest.webmanifest'
 const SW_URL = '/sw.js'
 const DISPLAY_MODES = ['standalone', 'window-controls-overlay', 'minimal-ui']
 
@@ -86,6 +91,13 @@ export async function promptInstall() {
   }
 }
 
+function manifestHref() {
+  const ua = navigator.userAgent || ''
+  // Brave sends Chrome's user agent; navigator.brave tells it apart.
+  const shortcut = /Android/.test(ua) && (/Firefox\//.test(ua) || 'brave' in navigator)
+  return shortcut ? '/manifest-shortcut.webmanifest' : '/manifest.webmanifest'
+}
+
 export function setManifestEnabled(enabled) {
   if (typeof document === 'undefined') return
   const links = document.head.querySelectorAll('link[rel="manifest"]')
@@ -93,7 +105,7 @@ export function setManifestEnabled(enabled) {
     if (links.length === 0) {
       const link = document.createElement('link')
       link.rel = 'manifest'
-      link.href = MANIFEST_HREF
+      link.href = manifestHref()
       document.head.appendChild(link)
     }
   } else {
