@@ -20,9 +20,12 @@ const outDir = join(root, 'assets', 'icons')
 const crops = {
   // Tight crop: the cup's left side and handle are cut off at the left edge.
   any: { x: 178, y: 72, size: 572 },
-  // Wider crop, so the face, the latte and part of the handle all stay inside
-  // the maskable safe zone (a centered circle of radius 0.4 * size).
-  maskable: { x: 110, y: 60, size: 640 },
+  // Much wider crop centered on the head. Android launchers show only the
+  // middle 72/108 (about two thirds) of an adaptive icon, far less than the
+  // W3C safe zone, so the whole cup, handle included, must fit in that window.
+  // The crop starts above the source; drawIcon fills the gap with stretched
+  // sky, and that strip falls outside the visible window on Android.
+  maskable: { x: 0, y: -120, size: 900 },
 }
 
 const targets = [
@@ -44,7 +47,15 @@ async function drawIcon({ src, size, crop }) {
   const ctx = canvas.getContext('2d')
   ctx.imageSmoothingQuality = 'high'
   // Full-bleed square crop. The source is opaque, so there is no transparency.
-  ctx.drawImage(img, crop.x, crop.y, crop.size, crop.size, 0, 0, size, size)
+  const scale = size / crop.size
+  const left = -crop.x * scale
+  const top = -crop.y * scale
+  ctx.drawImage(img, left, top, img.width * scale, img.height * scale)
+  // A crop that starts above the source gets the top row of the source (plain
+  // sky) stretched up into the gap.
+  if (crop.y < 0) {
+    ctx.drawImage(img, 0, 0, img.width, 1, left, 0, img.width * scale, top)
+  }
   return canvas.toDataURL('image/png').split(',')[1]
 }
 

@@ -1,6 +1,6 @@
 // Cappuccina service worker. Hand-written, no libraries.
 // Bump VERSION when the caching rules change. Old caches are deleted on activate.
-const VERSION = 'v1'
+const VERSION = 'v2'
 const CACHE = `cappuccina-${VERSION}`
 
 // Only the offline fallback and the icons are precached. The app shell is not,
