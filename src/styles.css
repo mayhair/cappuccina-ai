@@ -147,12 +147,14 @@
   --page-bg: #10162a;
 }
 
-/* Firefox for Android reports the system navigation bar as a bottom inset even
-   though it never draws the page behind it, which left a band of empty sky
-   under the composer. Gecko gets no bottom inset; everyone else keeps it. */
-:root { --safe-bottom: env(safe-area-inset-bottom, 0px); }
-@supports (-moz-appearance: none) {
-  :root { --safe-bottom: 0px; }
+/* The bottom inset only matters where the page really is drawn behind the
+   system UI, which is the installed app (standalone and friends). In a browser
+   tab the browser keeps the page clear of its own and the OS bars, but Firefox
+   for Android still reports the navigation bar as an inset there, which left a
+   band of empty sky under the composer. So tabs get no inset, in every browser. */
+:root { --safe-bottom: 0px; }
+@media (display-mode: standalone), (display-mode: fullscreen), (display-mode: minimal-ui) {
+  :root { --safe-bottom: env(safe-area-inset-bottom, 0px); }
 }
 
 * { box-sizing: border-box; }
