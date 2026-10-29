@@ -47,7 +47,7 @@ const streamBody = (n) =>
   ].join("");
 
 // One mocked app per scenario, opened on a new chat switched to Story mode.
-async function openApp({ library = [] } = {}) {
+async function openApp({ library = [], me = {}, chats: stored = [], path = "", startStory = true } = {}) {
   const page = await browser.newPage({ viewport: { width: 1400, height: 950 } });
   const app = { page, errors: [], bodies: [], created: null, library };
   page.on(
@@ -61,10 +61,10 @@ async function openApp({ library = [] } = {}) {
     } catch {}
   });
   await page.route("**/api/v1/auth/me", (route) =>
-    route.fulfill(json({ id: "check", email: "check@example.com", displayName: "Check", storyChoices: true })),
+    route.fulfill(json({ id: "check", email: "check@example.com", displayName: "Check", storyChoices: true, ...me })),
   );
   await page.route("**/api/v1/chats", async (route) => {
-    if (route.request().method() === "GET") return route.fulfill(json([]));
+    if (route.request().method() === "GET") return route.fulfill(json(stored));
     app.created = route.request().postDataJSON();
     return route.fulfill(json({ id: "story-1", title: "New chat", mode: app.created.mode, story: app.created.story }));
   });
@@ -92,7 +92,8 @@ async function openApp({ library = [] } = {}) {
     app.bodies.push(route.request().postDataJSON());
     return route.fulfill({ status: 200, contentType: "text/event-stream", body: streamBody(app.bodies.length) });
   });
-  await page.goto(BASE, { waitUntil: "networkidle" });
+  await page.goto(BASE + path, { waitUntil: "networkidle" });
+  if (!startStory) return app;
   await page.click(".mode-chip");
   await page.click('.mode-option:has-text("Story")');
   await page.waitForSelector(".story-start", { timeout: 5000 });
@@ -299,6 +300,49 @@ const replyShown = (page, n) =>
     JSON.stringify(story),
   );
   check("no console errors (fandom)", errors.length === 0, errors.join("\n"));
+  await page.close();
+}
+
+// ---------- Story mode switched off on the server ----------
+{
+  const oldStory = {
+    id: "old-story",
+    title: "An old story",
+    mode: "story",
+    story: { world: "fantasy", withCappuccina: false },
+    messages: [
+      { id: "u1", parentId: null, role: "user", content: "Let’s start the story: The dragon’s bargain" },
+      { id: "a1", parentId: "u1", role: "assistant", content: "The dragon lowers its head." },
+    ],
+    activeLeafId: "a1",
+  };
+  const { page, errors, bodies } = await openApp({
+    me: { storyModeEnabled: false },
+    chats: [oldStory],
+    path: "/c/old-story",
+    startStory: false,
+  });
+  await page.waitForSelector('.bubble:has-text("The dragon lowers its head.")', { timeout: 5000 });
+  check("old story chat opens as an ordinary chat", (await page.$$(".story-bar")).length === 0);
+  check("mode chip says Chat", (await page.textContent(".mode-chip")).includes("Chat"));
+  await page.click(".mode-chip");
+  check("Story is not offered", (await page.$$('.mode-option:has-text("Story")')).length === 0);
+  await page.keyboard.press("Escape");
+  await page.fill('textarea[aria-label="Message Cappuccina"]', "Hello again");
+  await page.keyboard.press("Enter");
+  await replyShown(page, 1);
+  check(
+    "message goes out as an ordinary chat",
+    bodies[0]?.mode === "chat" && bodies[0]?.story === null,
+    JSON.stringify({ mode: bodies[0]?.mode, story: bodies[0]?.story }),
+  );
+  await page.goto(BASE + "/?settings=", { waitUntil: "networkidle" });
+  await page.waitForSelector(".settings-nav", { timeout: 5000 });
+  check(
+    "Settings has no Story mode section",
+    (await page.$$('.settings-nav-item:has-text("Story mode")')).length === 0,
+  );
+  check("no console errors (story off)", errors.length === 0, errors.join("\n"));
   await page.close();
 }
 

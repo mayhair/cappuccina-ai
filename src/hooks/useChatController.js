@@ -126,9 +126,18 @@ function normalizeChat(c) {
 // to move when it changes things on its own (a chat gets its server id, a
 // delete, a page appearing). The URL decides which chat is active; selectChat,
 // newChat, openCanvas and closeCanvas are the appliers the router drives.
-export function useChatController(enabled, { onLocationChange } = {}) {
+// The mode a chat is sent in: a story chat runs as an ordinary chat while the
+// server has Story mode off.
+function runMode(chat, storyOn) {
+  return chat.mode === 'story' && !storyOn ? 'chat' : chat.mode ?? 'chat'
+}
+
+export function useChatController(enabled, { onLocationChange, storyModeEnabled = true } = {}) {
   const locationRef = useRef(onLocationChange)
   locationRef.current = onLocationChange
+  // With Story mode off on the server, story chats are sent as ordinary chats.
+  const storyRef = useRef(storyModeEnabled)
+  storyRef.current = storyModeEnabled
   // Read through a ref so long-lived callbacks always use the current language.
   const { lang } = useLanguage()
   const langRef = useRef(lang)
@@ -197,7 +206,8 @@ export function useChatController(enabled, { onLocationChange } = {}) {
   const persistChat = useCallback(
     async (chat) => {
       if (!chat.pending) return chat.id
-      const created = await createChatOnServer(chat.mode, chat.subject, chat.story)
+      const mode = runMode(chat, storyRef.current)
+      const created = await createChatOnServer(mode, chat.subject, mode === 'story' ? chat.story : null)
       adoptServerChat(chat.id, created)
       return created.id
     },
@@ -604,9 +614,9 @@ export function useChatController(enabled, { onLocationChange } = {}) {
         tree: treeNodes,
         replyId,
         reasoning,
-        mode: chat.mode ?? 'chat',
+        mode: runMode(chat, storyRef.current),
         subject: chat.subject ?? null,
-        story: chat.mode === 'story' ? chat.story ?? null : null,
+        story: runMode(chat, storyRef.current) === 'story' ? chat.story ?? null : null,
         generateTitle: pathMessages.length === 1,
       }, {
         onToken: (word) => {

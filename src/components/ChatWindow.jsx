@@ -1146,6 +1146,7 @@ function Composer({
   onAttach,
   onRemoveAttachment,
   mode,
+  modes,
   onMode,
   effort,
   onEffort,
@@ -1294,7 +1295,7 @@ function Composer({
             >
               <PaperclipIcon />
             </button>
-            <ModeSwitch mode={mode} onMode={onMode} disabled={isStreaming} />
+            <ModeSwitch mode={mode} modes={modes} onMode={onMode} disabled={isStreaming} />
             {storyMode && (
               <button
                 type="button"
@@ -1339,7 +1340,7 @@ function Composer({
   )
 }
 
-export function ChatWindow({ chat, user, isStreaming, draft, onDraft, onSend, onRetry, onEdit, onRegenerate, onNavigateBranch, onDraftSent, onEventDeleted, onMemoryUndone, onManageMemory, onManageCharacters, onOpenWebpage, inputRef, effort, onEffort, mode, onMode, onSendText, onStory, attachments = [], uploading = false, attachError = '', onAttach, onRemoveAttachment }) {
+export function ChatWindow({ chat, user, isStreaming, draft, onDraft, onSend, onRetry, onEdit, onRegenerate, onNavigateBranch, onDraftSent, onEventDeleted, onMemoryUndone, onManageMemory, onManageCharacters, onOpenWebpage, inputRef, effort, onEffort, mode, modes, onMode, onSendText, onStory, attachments = [], uploading = false, attachError = '', onAttach, onRemoveAttachment }) {
   const { t } = useLanguage()
   const listRef = useRef(null)
   const storyMode = mode === 'story'
@@ -1505,6 +1506,7 @@ export function ChatWindow({ chat, user, isStreaming, draft, onDraft, onSend, on
         onAttach={onAttach}
         onRemoveAttachment={onRemoveAttachment}
         mode={mode}
+        modes={modes}
         onMode={onMode}
         effort={effort}
         onEffort={onEffort}

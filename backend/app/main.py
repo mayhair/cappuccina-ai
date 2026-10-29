@@ -53,6 +53,7 @@ from app.config import (
     CALENDAR_ENABLED,
     FISH_API_KEY,
     GMAIL_ENABLED,
+    STORY_MODE_ENABLED,
     GOOGLE_CALENDAR_SCOPES,
     GOOGLE_GMAIL_SCOPES,
     GOOGLE_LOGIN_SCOPES,
@@ -749,6 +750,7 @@ def _user_response(user) -> UserResponse:
         adultModeEnabled=ADULT_MODE_ENABLED,
         memoryEnabled=bool(user["memory_enabled"]),
         storyChoices=bool(user["story_choices"]),
+        storyModeEnabled=STORY_MODE_ENABLED,
     )
 
 
@@ -946,7 +948,20 @@ def _story_character_fields_or_400(req: StoryCharacterRequest) -> tuple[str, str
     return name, description, voice
 
 
-@app.get("/api/v1/story/characters")
+def _check_mode(mode: str) -> None:
+    if mode not in CHAT_MODES:
+        raise HTTPException(status_code=400, detail="Unknown mode")
+    if mode == "story" and not STORY_MODE_ENABLED:
+        raise HTTPException(status_code=403, detail="Story mode is turned off")
+
+
+def _story_mode_on() -> None:
+    """Route dependency: the story endpoints exist only while story mode is on."""
+    if not STORY_MODE_ENABLED:
+        raise HTTPException(status_code=404, detail="Story mode is turned off")
+
+
+@app.get("/api/v1/story/characters", dependencies=[Depends(_story_mode_on)])
 async def list_story_characters(user=Depends(current_user)) -> dict:
     return {
         "characters": [_story_character_json(r) for r in db.list_story_characters(user["id"])],
@@ -956,7 +971,7 @@ async def list_story_characters(user=Depends(current_user)) -> dict:
     }
 
 
-@app.post("/api/v1/story/characters", status_code=201)
+@app.post("/api/v1/story/characters", status_code=201, dependencies=[Depends(_story_mode_on)])
 async def create_story_character(
     req: StoryCharacterRequest, user=Depends(current_user)
 ) -> dict:
@@ -971,7 +986,7 @@ async def create_story_character(
     )
 
 
-@app.patch("/api/v1/story/characters/{character_id}")
+@app.patch("/api/v1/story/characters/{character_id}", dependencies=[Depends(_story_mode_on)])
 async def update_story_character(
     character_id: int, req: StoryCharacterRequest, user=Depends(current_user)
 ) -> dict:
@@ -982,14 +997,14 @@ async def update_story_character(
     return _story_character_json(row)
 
 
-@app.delete("/api/v1/story/characters/{character_id}")
+@app.delete("/api/v1/story/characters/{character_id}", dependencies=[Depends(_story_mode_on)])
 async def delete_story_character(character_id: int, user=Depends(current_user)) -> dict:
     if not db.delete_story_character(user["id"], character_id):
         raise HTTPException(status_code=404, detail="Character not found")
     return {"ok": True}
 
 
-@app.get("/api/v1/lore/characters")
+@app.get("/api/v1/lore/characters", dependencies=[Depends(_story_mode_on)])
 async def list_lore_characters(user=Depends(current_user)) -> list[dict]:
     """The lore book's cast, for story mode's cast picker."""
     return [
@@ -1028,7 +1043,7 @@ def _owned_chat_id_or_404(user, chat_id: str) -> str:
     return chat_id
 
 
-@app.get("/api/v1/chats/{chat_id}/story/chapters")
+@app.get("/api/v1/chats/{chat_id}/story/chapters", dependencies=[Depends(_story_mode_on)])
 async def list_story_chapters(chat_id: str, user=Depends(current_user)) -> dict:
     _owned_chat_id_or_404(user, chat_id)
     return {
@@ -1038,7 +1053,7 @@ async def list_story_chapters(chat_id: str, user=Depends(current_user)) -> dict:
     }
 
 
-@app.post("/api/v1/chats/{chat_id}/story/chapters", status_code=201)
+@app.post("/api/v1/chats/{chat_id}/story/chapters", status_code=201, dependencies=[Depends(_story_mode_on)])
 async def create_story_chapter(
     chat_id: str, req: StoryChapterRequest, user=Depends(current_user)
 ) -> dict:
@@ -1047,7 +1062,7 @@ async def create_story_chapter(
     return _chapter_json(db.create_story_chapter(chat_id, text, edited=True))
 
 
-@app.patch("/api/v1/chats/{chat_id}/story/chapters/{chapter_id}")
+@app.patch("/api/v1/chats/{chat_id}/story/chapters/{chapter_id}", dependencies=[Depends(_story_mode_on)])
 async def update_story_chapter(
     chat_id: str, chapter_id: int, req: StoryChapterRequest, user=Depends(current_user)
 ) -> dict:
@@ -1058,7 +1073,7 @@ async def update_story_chapter(
     return _chapter_json(row)
 
 
-@app.delete("/api/v1/chats/{chat_id}/story/chapters/{chapter_id}")
+@app.delete("/api/v1/chats/{chat_id}/story/chapters/{chapter_id}", dependencies=[Depends(_story_mode_on)])
 async def delete_story_chapter(
     chat_id: str, chapter_id: int, user=Depends(current_user)
 ) -> dict:
@@ -1083,7 +1098,7 @@ def _chapter_messages(chat_id: str, start_uid: str, end_uid: str) -> list[dict]:
     return chain
 
 
-@app.post("/api/v1/chats/{chat_id}/story/chapters/{chapter_id}/resummarize")
+@app.post("/api/v1/chats/{chat_id}/story/chapters/{chapter_id}/resummarize", dependencies=[Depends(_story_mode_on)])
 async def resummarize_story_chapter(
     chat_id: str, chapter_id: int, user=Depends(current_user)
 ) -> dict:
@@ -1309,8 +1324,7 @@ async def list_chats(user=Depends(current_user)) -> list[dict]:
 
 @app.post("/api/v1/chats")
 async def create_chat(req: CreateChatRequest, user=Depends(current_user)) -> dict:
-    if req.mode not in CHAT_MODES:
-        raise HTTPException(status_code=400, detail="Unknown mode")
+    _check_mode(req.mode)
     story = req.story.model_dump(by_alias=True) if req.story else None
     return db.create_chat(user["id"], mode=req.mode, subject=req.subject, story=story)
 
@@ -1809,8 +1823,7 @@ async def _write_story_chapter(req: ChatRequest, reply: dict) -> None:
         logger.exception("story chapter summary failed")
 
 def _owned_chat_or_404(user, req: ChatRequest):
-    if req.mode not in CHAT_MODES:
-        raise HTTPException(status_code=400, detail="Unknown mode")
+    _check_mode(req.mode)
     chat = db.get_chat(user["id"], req.chat_id)
     if chat is None:
         raise HTTPException(status_code=404, detail="Chat not found")

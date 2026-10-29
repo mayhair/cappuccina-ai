@@ -98,6 +98,7 @@ cp .env.example .env
 | `TOKEN_ENC_KEY` | Yes | Key that encrypts Google tokens at rest (`openssl rand -hex 32`) |
 | `GMAIL_ENABLED` | No | Set to `1` to enable Gmail tools (`0` by default) |
 | `CALENDAR_ENABLED` | No | Set to `1` to enable Google Calendar tools (`0` by default) |
+| `STORY_MODE_ENABLED` | No | Set to `0` to turn off Story mode (`1` by default) |
 | `DATABASE_URL` | On servers | PostgreSQL URL (`postgresql:///cappuccina` on a Linux server) |
 | `APP_ORIGIN` | No | Public URL that users open in the browser (`http://localhost:5173` by default) |
 | `FMHY_MCP_URL` | No | FMHY MCP endpoint (leave empty to disable free-media tools) |

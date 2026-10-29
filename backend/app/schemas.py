@@ -110,6 +110,7 @@ class UserResponse(BaseModel):
     adult_mode_enabled: bool = Field(default=True, alias="adultModeEnabled")
     memory_enabled: bool = Field(default=True, alias="memoryEnabled")
     story_choices: bool = Field(default=True, alias="storyChoices")
+    story_mode_enabled: bool = Field(default=True, alias="storyModeEnabled")
 
     model_config = {"populate_by_name": True}
 

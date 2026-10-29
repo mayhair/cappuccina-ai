@@ -1,6 +1,18 @@
 // Chat modes, in picker order. Matches CHAT_MODES in backend/app/schemas.py.
 export const CHAT_MODES = ['chat', 'tutor', 'story']
 
+// Modes this server offers: Story mode can be switched off in its config.
+export function availableModes(user) {
+  return user?.storyModeEnabled === false ? CHAT_MODES.filter((m) => m !== 'story') : CHAT_MODES
+}
+
+// The mode a chat runs in here. A story chat on a server with Story mode off
+// carries on as an ordinary chat.
+export function effectiveMode(mode, user) {
+  const m = normalizeMode(mode)
+  return availableModes(user).includes(m) ? m : 'chat'
+}
+
 export function normalizeMode(mode) {
   return CHAT_MODES.includes(mode) ? mode : 'chat'
 }

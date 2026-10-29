@@ -604,6 +604,7 @@ export function SettingsDialog({
   const adultEnabled = user.adultModeEnabled !== false
   const gmailEnabled = user.gmailEnabled === true
   const calendarEnabled = user.calendarEnabled === true
+  const storyEnabled = user.storyModeEnabled !== false
 
   const sections = [
     {
@@ -680,18 +681,22 @@ export function SettingsDialog({
         </>
       ),
     },
-    {
-      key: 'story',
-      icon: <BookIcon />,
-      label: t('settings.nav.story'),
-      content: (
-        <>
-          <h3 className="settings-heading">{t('settings.nav.story')}</h3>
-          <StorySettings user={user} onUserUpdated={onUserUpdated} />
-          <CharacterManager />
-        </>
-      ),
-    },
+    ...(storyEnabled
+      ? [
+          {
+            key: 'story',
+            icon: <BookIcon />,
+            label: t('settings.nav.story'),
+            content: (
+              <>
+                <h3 className="settings-heading">{t('settings.nav.story')}</h3>
+                <StorySettings user={user} onUserUpdated={onUserUpdated} />
+                <CharacterManager />
+              </>
+            ),
+          },
+        ]
+      : []),
     ...(adultEnabled
       ? [
           {

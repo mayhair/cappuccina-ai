@@ -15,6 +15,7 @@ import { useChatController } from './hooks/useChatController'
 import { useMediaQuery } from './hooks/useMediaQuery'
 import tts from './lib/tts'
 import { setManifestEnabled } from './lib/pwa'
+import { availableModes, effectiveMode } from './lib/modes'
 import { useLanguage } from './i18n/LanguageProvider'
 import {
   navigate,
@@ -277,7 +278,10 @@ export default function App() {
     setManifestEnabled(Boolean(user))
   }, [user])
 
-  const chat = useChatController(Boolean(user), { onLocationChange: handleLocationChange })
+  const chat = useChatController(Boolean(user), {
+    onLocationChange: handleLocationChange,
+    storyModeEnabled: user?.storyModeEnabled !== false,
+  })
   const {
     chats,
     chatsLoaded,
@@ -530,7 +534,8 @@ export default function App() {
           inputRef={inputRef}
           effort={effort}
           onEffort={setEffort}
-          mode={activeChat.mode ?? 'chat'}
+          mode={effectiveMode(activeChat.mode, user)}
+          modes={availableModes(user)}
           onMode={(mode, subject) => setMode(activeChatId, mode, subject)}
           onSendText={sendText}
           onStory={(story) => setStory(activeChatId, story)}

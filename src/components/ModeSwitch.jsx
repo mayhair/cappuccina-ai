@@ -8,10 +8,11 @@ const MODES = CHAT_MODES.map((value) => ({ value, icon: ICONS[value] }))
 
 // A compact chip showing the chat mode; it opens an upward picker that says
 // what each mode does.
-export function ModeSwitch({ mode, onMode, disabled }) {
+// `modes` is what this server offers (see availableModes in lib/modes).
+export function ModeSwitch({ mode, onMode, disabled, modes = CHAT_MODES }) {
   const { t } = useLanguage()
   const [open, setOpen] = useState(false)
-  const current = CHAT_MODES.includes(mode) ? mode : 'chat'
+  const current = modes.includes(mode) ? mode : 'chat'
   const CurrentIcon = MODES.find((m) => m.value === current).icon
 
   useEffect(() => {
@@ -48,7 +49,7 @@ export function ModeSwitch({ mode, onMode, disabled }) {
             onClick={() => setOpen(false)}
           />
           <div className="effort-pop mode-pop" role="dialog" aria-label={t('mode.group')}>
-            {MODES.map(({ value, icon: Icon }) => (
+            {MODES.filter((m) => modes.includes(m.value)).map(({ value, icon: Icon }) => (
               <button
                 key={value}
                 type="button"
