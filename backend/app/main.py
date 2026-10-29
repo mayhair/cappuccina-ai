@@ -640,6 +640,9 @@ def _state(req: ChatRequest, user) -> dict:
         "adult": ADULT_MODE_ENABLED and bool(user["adult_mode"]),
         "gmail": _gmail_linked(user["id"]),
         "calendar": _calendar_linked(user["id"]),
+        # Off on the server: no "connect it in Settings" hint in the prompt.
+        "gmail_enabled": GMAIL_ENABLED,
+        "calendar_enabled": CALENDAR_ENABLED,
         "memory": memory,
         # The newest few ride along in the prompt; search_memories reaches the rest.
         "memories": (

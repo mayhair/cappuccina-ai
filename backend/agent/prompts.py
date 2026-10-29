@@ -63,6 +63,7 @@ _MEMORY_RULES = {"Memory", "Memory for young users"}
 # Each Google service's rules live in the boundaries file under one heading.
 # Until the user links that service its tools are not offered, so its rules are
 # swapped for a one-line hint: cheaper, and she can still say how to connect it.
+# A service switched off on the server gets no hint, since it can't be linked.
 _GMAIL_RULES = {"Email (Gmail)"}
 _CALENDAR_RULES = {"Calendar (Google Calendar)"}
 GOOGLE_NOT_LINKED = (
@@ -148,6 +149,8 @@ def build_system_prompt(
     gmail: bool = True,
     calendar: bool = True,
     memory: bool = True,
+    gmail_enabled: bool = True,
+    calendar_enabled: bool = True,
 ) -> str:
     if mode == "tutor":
         persona = _without_sections(PERSONA, _TUTOR_PERSONA_TRIM)
@@ -170,10 +173,12 @@ def build_system_prompt(
     unlinked: list[str] = []
     if not gmail:
         boundaries = _without_sections(boundaries, _GMAIL_RULES)
-        unlinked.append("Gmail")
+        if gmail_enabled:
+            unlinked.append("Gmail")
     if not calendar:
         boundaries = _without_sections(boundaries, _CALENDAR_RULES)
-        unlinked.append("Google Calendar")
+        if calendar_enabled:
+            unlinked.append("Google Calendar")
     if unlinked:
         hint = GOOGLE_NOT_LINKED.format(services=" or ".join(unlinked))
         boundaries = f"{boundaries}\n\n{hint}"
@@ -203,6 +208,8 @@ def build_messages(
     memory: bool = True,
     memories=None,
     memory_total: int | None = None,
+    gmail_enabled: bool = True,
+    calendar_enabled: bool = True,
 ):
     """One model call's full message list.
 
@@ -215,7 +222,9 @@ def build_messages(
     messages = [
         {
             "role": "system",
-            "content": build_system_prompt(mode, subject, adult, gmail, calendar, memory),
+            "content": build_system_prompt(
+                mode, subject, adult, gmail, calendar, memory, gmail_enabled, calendar_enabled
+            ),
         },
         *history,
     ]

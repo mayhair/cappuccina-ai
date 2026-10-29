@@ -23,6 +23,8 @@ class AgentState(MessagesState):
     adult: bool
     gmail: bool
     calendar: bool
+    gmail_enabled: bool
+    calendar_enabled: bool
     memory: bool
     memories: list[dict]
     memory_total: int
@@ -176,6 +178,8 @@ def build_graph(tools=None):
             memory=memory,
             memories=state.get("memories"),
             memory_total=state.get("memory_total"),
+            gmail_enabled=state.get("gmail_enabled", True),
+            calendar_enabled=state.get("calendar_enabled", True),
         )
         return {"messages": [model.invoke(messages)]}
 
