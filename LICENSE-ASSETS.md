@@ -1,6 +1,6 @@
 # Asset License
 
-The images in this repository were made for Cappuccina AI. They are licensed under the [Creative Commons Attribution 4.0 International License (CC BY 4.0)](https://creativecommons.org/licenses/by/4.0/).
+The images in this repository were made for Cappuccina AI. They are licensed under the [Creative Commons Attribution 4.0 International License (CC BY 4.0)](https://creativecommons.org/licenses/by/4.0/). The full legal text is in [LICENSE-CC-BY-4.0](LICENSE-CC-BY-4.0).
 
 This covers the image files in:
 
