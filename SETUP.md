@@ -230,18 +230,11 @@ The container command must print `blocked`.
 
 ### 6.3 Repository checkout and environment file
 
-Create an SSH deploy key for `cappuccina`. Add the public key to the GitHub repository under `Settings -> Deploy keys` as read-only. That key lets the server pull updates without a personal token:
-
-```bash
-cd / && sudo -u cappuccina sh -c 'ssh-keygen -q -t ed25519 -N "" -f ~/.ssh/id_ed25519 && ssh-keyscan -t ed25519 github.com >> ~/.ssh/known_hosts 2>/dev/null'
-sudo -u cappuccina cat /home/cappuccina/.ssh/id_ed25519.pub
-```
-
-Clone the repository into `/srv/cappuccina` and create the Python virtual environment. Install the Python dependencies, install Chromium, and copy `backend/.env.example` to `backend/.env`:
+Clone the repository into `/srv/cappuccina` and create the Python virtual environment. Install the Python dependencies, install Chromium, and copy `backend/.env.example` to `backend/.env`. The repository is public, so the clone uses HTTPS and the server needs no SSH key or token. If you deploy your own fork, put its URL in the `git clone` command:
 
 ```bash
 sudo install -d -o cappuccina -g cappuccina -m 750 /srv/cappuccina
-cd / && sudo -u cappuccina git clone git@github.com:mayhair/cappuccina-ai.git /srv/cappuccina
+cd / && sudo -u cappuccina git clone https://github.com/mayhair/cappuccina-ai.git /srv/cappuccina
 cd / && sudo -u cappuccina python3 -m venv /srv/cappuccina/backend/.venv
 cd / && sudo -u cappuccina /srv/cappuccina/backend/.venv/bin/pip install -r /srv/cappuccina/backend/requirements.txt
 cd / && sudo /srv/cappuccina/backend/.venv/bin/python -m playwright install-deps chromium
