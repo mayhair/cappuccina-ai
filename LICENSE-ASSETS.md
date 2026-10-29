@@ -4,7 +4,8 @@ The images in this repository were made for Cappuccina AI. Unless a file is list
 
 This covers the image files in:
 
-- `assets/` (plates and the social preview image)
+- `Cappuccina.jpg`
+- `assets/` (icons, plates and the social preview image)
 - `backend/agent/lore/characters/refs/`
 - `.impeccable/` (design mocks, mood boards and review screenshots)
 
@@ -14,11 +15,8 @@ The code is licensed separately under the Apache License 2.0. See [LICENSE](LICE
 
 ## Not covered
 
-These files were not made for this project, or were generated from a reference image that was not made for this project. This license does not apply to them, and they will be replaced before release:
+These design mocks were generated from a reference image that was not made for this project. This license does not apply to them, and they will be replaced or removed before release:
 
-- `Cappuccina.jpg`
-- `assets/icons/` (the favicon and app icons, which are based on `Cappuccina.jpg`)
-- `backend/agent/lore/characters/refs/tralalero-tralala.jpg`
 - `.impeccable/mocks/comp-chat-dark.png`
 - `.impeccable/mocks/comp-chat-light.png`
 - `.impeccable/mocks/decision/comp-chat-dark.png`
