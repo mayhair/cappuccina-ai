@@ -98,6 +98,12 @@ python -m pytest tests -q
 
 See [SETUP.md, section 7](SETUP.md#7-testing) for the full test setup, including the frontend Playwright checks.
 
+## License
+
+The code is licensed under the [Apache License 2.0](LICENSE).
+
+The license doesn't cover the artwork, the character reference images, or the Cappuccina AI name and logo. The Italian Brainrot characters are internet folklore, and this project doesn't own them.
+
 ---
 
 <p align="center">Made with ☕ and a little bit of ballet.</p>
