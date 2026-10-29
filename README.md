@@ -102,7 +102,7 @@ See [SETUP.md, section 7](SETUP.md#7-testing) for the full test setup, including
 
 The code is licensed under the [Apache License 2.0](LICENSE).
 
-The images are licensed under [CC BY 4.0](LICENSE-ASSETS.md) (full text in [LICENSE-CC-BY-4.0](LICENSE-CC-BY-4.0)). Neither license covers the Cappuccina AI name and logo. The Italian Brainrot characters are internet folklore, and this project doesn't own them.
+The images are licensed under [CC BY 4.0](ASSETS.md) (full text in [LICENSE-CC-BY-4.0](LICENSE-CC-BY-4.0)). Neither license covers the Cappuccina AI name and logo. The Italian Brainrot characters are internet folklore, and this project doesn't own them.
 
 ---
 
