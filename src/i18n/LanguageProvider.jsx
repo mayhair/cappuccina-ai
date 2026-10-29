@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
 import en from './en'
+import id from './id'
 import it from './it'
 import ur from './ur'
 import urLatn from './ur-Latn'
@@ -10,6 +11,7 @@ const STORAGE_KEY = 'cappuccina-lang'
 export const LANGUAGES = [
   { code: 'en', label: 'English', dir: 'ltr', dict: en },
   { code: 'it', label: 'Italiano', dir: 'ltr', dict: it },
+  { code: 'id', label: 'Bahasa Indonesia', dir: 'ltr', dict: id },
   { code: 'ur', label: 'اردو', dir: 'rtl', dict: ur },
   { code: 'ur-Latn', label: 'Urdu (Latin)', dir: 'ltr', dict: urLatn },
 ]

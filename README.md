@@ -36,7 +36,7 @@ It's made with teenagers (13+) and young adults in mind, so the tone stays kind 
 A few more nice things:
 
 - Light, dark, and system themes
-- English, Italian, Urdu, and Roman Urdu (with right-to-left layout for Urdu)
+- English, Italian, Indonesian, Urdu, and Roman Urdu (with right-to-left layout for Urdu)
 - Voice input through your browser (only Edge and Chrome work for now)
 - Installable as a Progessive Web App on your phone or computer (if your browser supports it)
 - Adjustable reasoning effort (Off, Low, High, Max)
