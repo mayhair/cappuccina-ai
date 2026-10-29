@@ -1356,7 +1356,12 @@ export function ChatWindow({ chat, user, isStreaming, draft, onDraft, onSend, on
   const [dragActive, setDragActive] = useState(false)
 
   useEffect(() => {
-    const hasFiles = (e) => Array.from(e.dataTransfer?.types || []).includes('Files')
+    // Dragging an <img> on the page also carries a file payload, but only drags
+    // that start in this document fire dragstart, so use it to ignore them.
+    let internalDrag = false
+    const onDragStart = () => { internalDrag = true }
+    const onDragEnd = () => { internalDrag = false }
+    const hasFiles = (e) => !internalDrag && Array.from(e.dataTransfer?.types || []).includes('Files')
     let hideTimer = null
     const hide = () => {
       if (hideTimer) { clearTimeout(hideTimer); hideTimer = null }
@@ -1400,19 +1405,25 @@ export function ChatWindow({ chat, user, isStreaming, draft, onDraft, onSend, on
       if (files?.length) onAttach?.(files)
     }
     const onVisibility = () => { if (document.hidden) hide() }
+    window.addEventListener('dragstart', onDragStart)
     window.addEventListener('dragenter', onDragEnter)
     window.addEventListener('dragover', onDragOver)
     window.addEventListener('dragleave', onDragLeave)
     window.addEventListener('drop', onDrop)
+    window.addEventListener('drop', onDragEnd)
+    window.addEventListener('dragend', onDragEnd)
     window.addEventListener('dragend', hide)
     window.addEventListener('blur', hide)
     document.addEventListener('visibilitychange', onVisibility)
     return () => {
       if (hideTimer) clearTimeout(hideTimer)
+      window.removeEventListener('dragstart', onDragStart)
       window.removeEventListener('dragenter', onDragEnter)
       window.removeEventListener('dragover', onDragOver)
       window.removeEventListener('dragleave', onDragLeave)
+      window.removeEventListener('drop', onDragEnd)
       window.removeEventListener('drop', onDrop)
+      window.removeEventListener('dragend', onDragEnd)
       window.removeEventListener('dragend', hide)
       window.removeEventListener('blur', hide)
       document.removeEventListener('visibilitychange', onVisibility)
