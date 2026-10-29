@@ -90,9 +90,14 @@ _STORY_BOUNDARY_TRIM = {
 }
 _LORE_RULES = {"Interaction with lore"}
 
-# Story mode narrates, so the chat-bubble rhythm and the chat-shaped samples go.
+# Story mode narrates in prose, so the chat rules of speech, the chat-bubble
+# rhythm and the chat-shaped samples go. As a narrator she never appears in
+# the scene, so how she sees herself and her ballet and café flavor go too
+# (the narrator role tells her to keep that flavor out of the narration).
 # Its own boundaries keep only the safety block that matches the user's age.
-_STORY_VOICE_TRIM = {"Chat rhythm", "Sample exchanges"}
+_STORY_VOICE_TRIM = {"Rules of speech", "Chat rhythm", "Sample exchanges"}
+_NARRATOR_PERSONA_TRIM = _TUTOR_PERSONA_TRIM | {"How she thinks about herself"}
+_NARRATOR_VOICE_TRIM = _STORY_VOICE_TRIM | {"Signature flavor"}
 _STORY_YOUNG_SAFETY = {"Story safety for young users"}
 _STORY_ADULT_SAFETY = {"Story safety (adult mode)"}
 # story.md holds one section per role and one for her own world; a story keeps
@@ -325,9 +330,11 @@ def build_system_prompt(
     elif mode == "story":
         story_text, in_scene, uses_lore = _story_sections(story)
         # As a narrator she only speaks as herself out of character, so the
-        # decorative persona sections go, as in tutor mode.
-        persona = PERSONA if in_scene else _without_sections(PERSONA, _TUTOR_PERSONA_TRIM)
-        voice = _without_sections(VOICE, _STORY_VOICE_TRIM)
+        # decorative persona sections and her flavor go.
+        persona = PERSONA if in_scene else _without_sections(PERSONA, _NARRATOR_PERSONA_TRIM)
+        voice = _without_sections(VOICE, _STORY_VOICE_TRIM if in_scene else _NARRATOR_VOICE_TRIM)
+        if "## " not in voice:
+            voice = ""  # only the file's title is left
         tutor = ""
         # The lore book only when the story is set in her world or casts it.
         lore = lorebook.prompt_section() if uses_lore else ""
@@ -363,7 +370,7 @@ def build_system_prompt(
     if story_text:
         trim = _STORY_YOUNG_SAFETY if adult else _STORY_ADULT_SAFETY
         sections.append(_without_sections(STORY_SAFETY, trim))
-    sections += [persona, voice]
+    sections += [part for part in (persona, voice) if part]
     if lore:
         sections.append(lore)
     sections.append(ATTACHMENT_NOTE)

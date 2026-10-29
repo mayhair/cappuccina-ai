@@ -125,9 +125,21 @@ def test_other_worlds_leave_her_lore_out_and_make_her_the_narrator():
     assert "## Your role: in the scene" not in prompt
     assert "science-fiction world" in prompt
     assert "## Who the user plays\n" in prompt
-    # As narrator the decorative persona goes; who she is stays for OOC.
+    # As narrator the decorative persona and her flavor go; who she is stays
+    # for OOC. Chat rules of speech never apply to a story.
     assert "## Likes and dislikes" not in prompt
+    assert "## How she thinks about herself" not in prompt
+    assert "## Signature flavor" not in prompt
+    assert "# Voice" not in prompt
+    assert "## Rules of speech" not in prompt
     assert "## Who she is" in prompt
+    assert "## Personality traits" in prompt
+
+    in_scene = build_system_prompt("story", None, story={"world": "cappuccina"})
+    assert "## How she thinks about herself" in in_scene
+    assert "## Signature flavor" in in_scene
+    assert "## Rules of speech" not in in_scene
+    assert "## Rules of speech" in build_system_prompt("chat", None)
 
 
 def test_story_prompt_leaves_out_what_a_story_never_needs():
