@@ -95,7 +95,10 @@ export default function App() {
     const root = document.documentElement
     const update = () => {
       const zoomed = vv.width < root.clientWidth - 1
-      if (window.innerWidth > 900 || zoomed) {
+      // Browser toolbars (notably Firefox for Android's) also change vv.height
+      // by a few dozen px; only a keyboard-sized gap should override 100dvh.
+      const keyboardOpen = window.innerHeight - vv.height > 150
+      if (window.innerWidth > 900 || zoomed || !keyboardOpen) {
         root.style.removeProperty('--app-height')
         return
       }
