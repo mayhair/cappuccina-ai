@@ -95,6 +95,7 @@ export default {
 
   'common.close': "Band karein",
   'sidebar.avatarAlt': "Ballerina Cappuccina, aik AI kirdar jis ka sar coffee ka cup hai",
+  'sidebar.brand': 'Cappuccina',
   'sidebar.close': "Sidebar band karein",
   'sidebar.newChat': "Nayi chat",
   'sidebar.searchPlaceholder': "Chats talash karein...",
