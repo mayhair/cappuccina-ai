@@ -62,6 +62,28 @@ def test_chat_state_hides_the_tools(signed_in):
 
     state = main._state(ChatRequest(chatId="c1", messages=[], timezone="UTC"), user)
     assert state["gmail"] is False and state["calendar"] is False
+    assert state["gmail_enabled"] is False and state["calendar_enabled"] is False
+
+
+def test_chat_prompt_has_no_connect_hint(signed_in):
+    import app.main as main
+    from agent.prompts import build_messages
+    from app.schemas import ChatRequest
+
+    user = main.db.get_user_by_id(signed_in.get("/api/v1/auth/me").json()["id"])
+    state = main._state(ChatRequest(chatId="c1", messages=[], timezone="UTC"), user)
+    system = build_messages(
+        "chat",
+        None,
+        "UTC",
+        [],
+        gmail=state["gmail"],
+        calendar=state["calendar"],
+        gmail_enabled=state["gmail_enabled"],
+        calendar_enabled=state["calendar_enabled"],
+    )[0]["content"]
+    assert "## Google services" not in system
+    assert "connect it in Settings" not in system
 
 
 def test_disconnect_still_clears_old_grants(signed_in):

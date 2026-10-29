@@ -299,6 +299,23 @@ def test_system_prompt_swaps_unlinked_google_rules_for_a_hint():
     assert "not linked their Gmail or Google Calendar," in prompt
 
 
+def test_system_prompt_skips_the_hint_for_services_off_on_the_server():
+    from agent.prompts import build_system_prompt
+
+    prompt = build_system_prompt(
+        "chat", None, gmail=False, calendar=False, gmail_enabled=False, calendar_enabled=False
+    )
+    assert "## Email (Gmail)" not in prompt
+    assert "## Calendar (Google Calendar)" not in prompt
+    assert "## Google services" not in prompt
+
+    prompt = build_system_prompt(
+        "chat", None, gmail=False, calendar=False, gmail_enabled=False, calendar_enabled=True
+    )
+    assert "not linked their Google Calendar," in prompt
+    assert "Gmail" not in prompt.split("## Google services")[1]
+
+
 def test_graph_hides_tools_for_unlinked_google_services():
     from agent.graph import _tools_for
     from agent.tools import ALL_TOOLS, CALENDAR_TOOL_NAMES, GMAIL_TOOL_NAMES

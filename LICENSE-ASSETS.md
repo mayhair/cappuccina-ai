@@ -7,7 +7,7 @@ This covers the image files in:
 - `Cappuccina.png`
 - `assets/` (icons, plates and the social preview image)
 - `backend/agent/lore/characters/refs/`
-- `.impeccable/` (design mocks, mood boards and review screenshots)
+- `.impeccable/` (design mocks and mood boards)
 
 Credit the work as **"Cappuccina AI by Mahaer Mahmud"**, link to the license, and say whether you changed it.
 

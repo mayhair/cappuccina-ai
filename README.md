@@ -30,15 +30,15 @@ It's made with teenagers (13+) and young adults in mind, so the tone stays kind 
 - **Search the web.** She can look things up and read webpages for you.
 - **Remember things.** She can save facts you share so she remembers them next time. You can see, edit, turn off, or delete any memory in Settings.
 - **Build webpages.** Every chat can have its own website project. She writes the files, runs builds, tests the page in a real browser, and shows you a live preview. You can edit the code yourself, roll back to older versions, and download the whole thing as a `.zip`.
-- **Find free media.** Ask "where can I watch or read this?" and she'll point you to free sources.
+- **Find free media.** Ask "where can I watch or read this?" and she'll point you to free sources, powered by [FreeMediaHeckYeah](https://fmhy.net).
 - **Meet her friends.** The wider cast of Italian Brainrot characters (Tralalero Tralala, Tung Tung Tung Sahur, Bombardiro Crocodilo, and more) live in her lore book.
 
 A few more nice things:
 
 - Light, dark, and system themes
 - English, Italian, Urdu, and Roman Urdu (with right-to-left layout for Urdu)
-- Voice input through your browser
-- Installable as an app on your phone or computer
+- Voice input through your browser (only Edge and Chrome work for now)
+- Installable as a Progessive Web App on your phone or computer (if your browser supports it)
 - Adjustable reasoning effort (Off, Low, High, Max)
 - An optional Adult mode for users 18 and over
 
