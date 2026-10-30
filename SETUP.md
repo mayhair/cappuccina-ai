@@ -409,7 +409,12 @@ The `SMTP_*` defaults (`127.0.0.1:25`, no login) already point at this Postfix.
 
 #### Check delivery
 
-1. Send a test email with `printf 'Subject: test\n\nhello\n' | sendmail -f no-reply@<your-domain> <your Gmail address>`, and read the mail log with `sudo journalctl -u postfix -n 30`. Look for `status=sent`.
+1. Send a test email with full headers, and read the mail log with `sudo journalctl -u postfix -n 30`. Look for `status=sent`. Without the `From:` and `To:` lines, spam filters score the message as `MISSING_HEADERS`, which the app's own emails never are:
+
+```bash
+printf 'From: Cappuccina <no-reply@<your-domain>>\nTo: <your Gmail address>\nSubject: Test from Cappuccina\n\nHello! This is a test of outgoing mail.\n' \
+  | sendmail -f no-reply@<your-domain> <your Gmail address>
+```
 2. In Gmail, open the message, choose `Show original`, and check that SPF, DKIM and DMARC all say `PASS`.
 3. Send one to the address that `https://www.mail-tester.com` shows you, and fix anything it reports.
 4. Create an account on the site with email and password, and check that the confirmation email lands in the inbox and not in spam. Mail from a new IP can go to spam at first. Marking it `Not spam` helps, and so does a few days of normal sending.
