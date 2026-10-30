@@ -163,6 +163,8 @@ npm run dev
 
 A production deployment has three parts. First, `uvicorn` listens on `127.0.0.1:8000` under a systemd unit as the unprivileged `cappuccina` user. Second, rootless Podman runs the webpage containers under the same `cappuccina` user. Third, a Cloudflare Tunnel exposes `/api/*` and a Cloudflare Worker serves the built frontend.
 
+> **Note:** The `apt` commands in this section are for Debian and Ubuntu Server. If you run a different distribution, replace them with the equivalent commands of your package manager (for example `dnf` on Fedora and RHEL). Package names and repository setup steps can also differ.
+
 ### 6.1 Host and rootless Podman setup
 
 Create the `cappuccina` user without a login shell or sudo access. Install Podman and the dependencies for rootless containers and Python virtual environments.
