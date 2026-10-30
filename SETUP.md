@@ -102,6 +102,7 @@ cp .env.example .env
 | `DATABASE_URL` | On servers | PostgreSQL URL (`postgresql:///cappuccina` on a Linux server) |
 | `APP_ORIGIN` | No | Public URL that users open in the browser (`http://localhost:5173` by default) |
 | `FMHY_MCP_URL` | No | FMHY MCP endpoint (leave empty to disable free-media tools) |
+| `GOOGLE_AUTH_ENABLED` | No | Set to `0` to turn off Google sign-in; Gmail and Calendar connections keep working (`1` by default) |
 | `PASSWORD_AUTH_ENABLED` | No | Set to `0` to turn off email + password sign-in (`1` by default) |
 | `TURNSTILE_SITE_KEY` | For email sign-in | Cloudflare Turnstile site key for the sign-up form (see section 6.6) |
 | `TURNSTILE_SECRET_KEY` | For email sign-in | Turnstile secret key; when empty, sign-up skips the check |

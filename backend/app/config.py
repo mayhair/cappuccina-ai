@@ -113,6 +113,18 @@ GOOGLE_CALENDAR_SCOPES = [
     "https://www.googleapis.com/auth/calendar.events",
 ]
 
+# ---------- Google sign-in ----------
+# Set to 0/false/no/off to hide the Google button and refuse the sign-in routes.
+# The OAuth client stays in use for the Gmail and Calendar connections; accounts
+# made with Google can then sign in only if they have a password.
+GOOGLE_AUTH_ENABLED = os.getenv("GOOGLE_AUTH_ENABLED", "1").strip().lower() not in (
+    "",
+    "0",
+    "false",
+    "no",
+    "off",
+)
+
 # ---------- Email + password sign-in ----------
 # Offered next to Google. Set to 0/false/no/off to hide the form and refuse the
 # routes; existing password accounts can then still sign in with Google.

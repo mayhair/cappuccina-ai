@@ -70,6 +70,7 @@ from app.config import (
     ADULT_MODE_ENABLED,
     APP_ORIGIN,
     AUTH_RATE_LIMIT_PER_MINUTE,
+    GOOGLE_AUTH_ENABLED,
     PASSWORD_AUTH_ENABLED,
     TURNSTILE_SITE_KEY,
     CALENDAR_ENABLED,
@@ -811,6 +812,8 @@ def _user_response(user) -> UserResponse:
 @app.get("/api/v1/auth/google/start")
 async def google_start() -> RedirectResponse:
     """Kick off sign-in: bounce the browser to Google's consent screen."""
+    if not GOOGLE_AUTH_ENABLED:
+        return RedirectResponse(f"{APP_ORIGIN}/?auth_error=access_denied")
     if not google_oauth.is_configured():
         return RedirectResponse(f"{APP_ORIGIN}/?auth_error=google_not_configured")
     state = db.create_oauth_state("login")
@@ -822,6 +825,8 @@ async def google_start() -> RedirectResponse:
 
 @app.get("/api/v1/auth/google/callback")
 async def google_callback(request: Request) -> RedirectResponse:
+    if not GOOGLE_AUTH_ENABLED:
+        return RedirectResponse(f"{APP_ORIGIN}/?auth_error=access_denied")
     error = request.query_params.get("error")
     if error:
         return RedirectResponse(f"{APP_ORIGIN}/?auth_error={error}")
@@ -930,7 +935,7 @@ _CHECK_EMAIL = {"status": "check_email"}
 async def auth_options() -> AuthOptionsResponse:
     """Which sign-in methods the landing page should offer."""
     return AuthOptionsResponse(
-        google=google_oauth.is_configured(),
+        google=GOOGLE_AUTH_ENABLED and google_oauth.is_configured(),
         password=PASSWORD_AUTH_ENABLED,
         turnstileSiteKey=TURNSTILE_SITE_KEY if PASSWORD_AUTH_ENABLED else "",
     )
