@@ -252,7 +252,6 @@ export function Sidebar({ chats, activeChatId, onSelect, onNewChat, onDelete, on
             <span className="user-name">
               <EmojiText text={user.displayName} />
             </span>
-            <span className="user-email">{user.email}</span>
           </span>
         </div>
         <div className="user-hint-wrap">

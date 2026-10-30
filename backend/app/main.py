@@ -850,7 +850,14 @@ async def google_callback(request: Request) -> RedirectResponse:
             db.link_google_account(existing["id"], sub, info.get("picture"))
             user = db.get_user_by_id(existing["id"])
         else:
-            name = (info.get("name") or email.split("@")[0]).strip() or "friend"
+            # First name only, so screenshots of the app don't expose a full name.
+            full_name = (info.get("name") or "").strip()
+            name = (
+                (info.get("given_name") or "").strip()
+                or (full_name.split()[0] if full_name else "")
+                or email.split("@")[0].strip()
+                or "friend"
+            )
             user = db.create_google_user(email, name, sub, info.get("picture"))
 
     if user is None:

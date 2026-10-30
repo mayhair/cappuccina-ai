@@ -45,6 +45,7 @@ import {
 function ProfileForm({ user, onUpdated }) {
   const { t } = useLanguage()
   const [name, setName] = useState(user.displayName)
+  const [showEmail, setShowEmail] = useState(false)
   const [error, setError] = useState('')
   const [saved, setSaved] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -69,6 +70,20 @@ function ProfileForm({ user, onUpdated }) {
 
   return (
     <form className="settings-form" onSubmit={submit}>
+      <div className="settings-row">
+        <span className="settings-label">{t('auth.email.email')}</span>
+        <span className="settings-email">
+          {showEmail && <span className="settings-email-value">{user.email}</span>}
+          <button
+            type="button"
+            className="settings-view"
+            aria-expanded={showEmail}
+            onClick={() => setShowEmail((shown) => !shown)}
+          >
+            {t(showEmail ? 'settings.profile.hideEmail' : 'settings.profile.showEmail')}
+          </button>
+        </span>
+      </div>
       <div className="settings-row">
         <label className="settings-label" htmlFor="settings-name">
           {t('settings.profile.displayName')}
@@ -716,7 +731,7 @@ export function SettingsDialog({
           <section className="settings-section">
             <h4>{t('settings.account.signin')}</h4>
             <p className="settings-hint">
-              {t(signinHintKey(user), { email: user.email })}
+              {t(signinHintKey(user))}
             </p>
           </section>
           {user.passwordAuthEnabled !== false && (

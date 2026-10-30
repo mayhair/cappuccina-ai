@@ -581,12 +581,6 @@ img.user-avatar {
   overflow-wrap: anywhere;
 }
 
-.user-email {
-  font-size: clamp(11px, 0.82vw, 12.5px);
-  color: var(--ink-faint);
-  overflow-wrap: anywhere;
-}
-
 .user-hint-wrap {
   position: relative;
   flex: 1 0 100%;
@@ -2935,6 +2929,18 @@ a.settings-save { text-decoration: none; display: inline-flex; align-items: cent
   transition: background 120ms ease, border-color 120ms ease;
 }
 .settings-view:hover { background: var(--pink-soak); border-color: var(--pink-strong); }
+button.settings-view { background: none; font-family: var(--font-body); cursor: pointer; }
+.settings-email {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-width: 0;
+}
+.settings-email-value {
+  font-size: 14px;
+  color: var(--ink-soft);
+  overflow-wrap: anywhere;
+}
 .settings-view:focus-visible { outline: 2px solid var(--pink-strong); outline-offset: 2px; }
 .settings-steps {
   margin: 0.5rem 0 0;
@@ -4208,7 +4214,8 @@ a.settings-save { text-decoration: none; display: inline-flex; align-items: cent
     max-width: none;
   }
   /* A label and a short link button fit on one line, unlike a label and a field. */
-  .settings-row:has(> .settings-view) {
+  .settings-row:has(> .settings-view),
+  .settings-row:has(> .settings-email) {
     flex-direction: row;
     align-items: center;
   }
@@ -4283,7 +4290,7 @@ html[dir='rtl'] .send svg,
 html[dir='rtl'] .sidebar-controls .ctrl-btn:first-child svg { transform: scaleX(-1); }
 
 /* Emails and other LTR strings should truncate at their own end. */
-.user-email,
+.settings-email-value,
 .chat-title,
 .canvas-file-name { unicode-bidi: plaintext; }
 
