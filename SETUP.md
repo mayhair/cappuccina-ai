@@ -418,7 +418,7 @@ printf 'From: Cappuccina <no-reply@<your-domain>>\nTo: <your Gmail address>\nSub
 2. In Gmail, open the message, choose `Show original`, and check that SPF, DKIM and DMARC all say `PASS`.
 3. Send one to the address that `https://www.mail-tester.com` shows you, and fix anything it reports.
 4. Create an account on the site with email and password, and check that the confirmation email lands in the inbox and not in spam. Mail from a new IP can go to spam at first. Marking it `Not spam` helps, and so does a few days of normal sending.
-5. Check that the rate limits see real visitor IPs, not one shared Cloudflare IP. Add a temporary log line for `client_ip(request)` in the login route in `backend/app/main.py`, sign in from two networks (for example Wi-Fi and mobile data), and read `journalctl -u cappuccina -n 50`. The Worker and the API share one Cloudflare zone, so `CF-Connecting-IP` carries the visitor's IP. If every sign-in shows the same IP, the per-IP limit acts as one global limit. The per-address limit still applies.
+The sign-in rate limits count attempts per visitor IP, which the backend reads from `CF-Connecting-IP`. This header carries the visitor's IP only while the frontend Worker and the API hostname are in the same Cloudflare zone, as in section 6.5. If you put the API on another domain, every request shows a Cloudflare IP, and the per-IP limit becomes one shared limit for all visitors. The per-address limit still applies.
 
 ### 6.7 Updating the deployment
 
