@@ -16,6 +16,8 @@ psycopg-pool>=3.2
 python-multipart>=0.0.9
 parallel-web>=0.1
 cryptography>=43
+# Argon2id password hashing for email + password sign-in (app/auth.py).
+argon2-cffi>=23.1
 pypdf>=5.0
 python-docx>=1.1
 python-pptx>=1.0

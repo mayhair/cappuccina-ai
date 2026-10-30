@@ -113,6 +113,40 @@ GOOGLE_CALENDAR_SCOPES = [
     "https://www.googleapis.com/auth/calendar.events",
 ]
 
+# ---------- Email + password sign-in ----------
+# Offered next to Google. Set to 0/false/no/off to hide the form and refuse the
+# routes; existing password accounts can then still sign in with Google.
+PASSWORD_AUTH_ENABLED = os.getenv("PASSWORD_AUTH_ENABLED", "1").strip().lower() not in (
+    "",
+    "0",
+    "false",
+    "no",
+    "off",
+)
+# Cloudflare Turnstile guards sign-up. Without a secret key the check is
+# skipped (local dev); app/main.py logs a warning at startup when that happens.
+TURNSTILE_SITE_KEY = os.getenv("TURNSTILE_SITE_KEY", "")
+TURNSTILE_SECRET_KEY = os.getenv("TURNSTILE_SECRET_KEY", "")
+
+# Outgoing mail (confirmation and reset links). The default is the send-only
+# Postfix on the same host (SETUP.md); any SMTP relay works through these.
+SMTP_HOST = os.getenv("SMTP_HOST", "127.0.0.1")
+SMTP_PORT = int(os.getenv("SMTP_PORT", "25"))
+SMTP_USER = os.getenv("SMTP_USER", "")
+SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
+SMTP_STARTTLS = os.getenv("SMTP_STARTTLS", "0").strip().lower() not in (
+    "",
+    "0",
+    "false",
+    "no",
+    "off",
+)
+MAIL_FROM = os.getenv("MAIL_FROM", "Cappuccina <no-reply@localhost>")
+
+# Sign-in attempts per minute, per client IP and per email address, on the
+# register / login / resend / forgot-password routes.
+AUTH_RATE_LIMIT_PER_MINUTE = int(os.getenv("AUTH_RATE_LIMIT_PER_MINUTE", "10"))
+
 # ---------- Containerized website workspaces ----------
 # Each chat's webpage lives in its own rootless container (see app/sitebox.py).
 # `docker` behaves identically to `podman`; every invocation is [CLI, ...].

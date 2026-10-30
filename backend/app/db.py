@@ -11,6 +11,8 @@ as plain dicts, with timestamps as ISO-8601 strings (UTC) and JSONB columns as
 Python lists/dicts.
 """
 
+import hashlib
+import secrets
 import threading
 import uuid
 from contextlib import contextmanager
@@ -264,6 +266,31 @@ def link_google_account(
     _execute(
         "UPDATE users SET google_sub = %(sub)s, avatar_url = %(avatar)s WHERE id = %(id)s",
         {"sub": google_sub, "avatar": avatar_url, "id": user_id},
+    )
+
+
+def create_password_user(email: str, display_name: str, password_hash: str) -> dict:
+    row = {
+        "id": uuid.uuid4().hex,
+        "email": email,
+        "display_name": display_name,
+        "password_hash": password_hash,
+        "created_at": _now(),
+    }
+    _execute(
+        "INSERT INTO users (id, email, display_name, password_hash, created_at)"
+        " VALUES (%(id)s, %(email)s, %(display_name)s, %(password_hash)s, %(created_at)s)",
+        row,
+    )
+    created = get_user_by_id(row["id"])
+    assert created is not None
+    return created
+
+
+def set_password_hash(user_id: str, password_hash: str) -> None:
+    _execute(
+        "UPDATE users SET password_hash = %(hash)s WHERE id = %(id)s",
+        {"hash": password_hash, "id": user_id},
     )
 
 
@@ -656,6 +683,125 @@ def consume_oauth_state(token: str, purpose: str) -> dict | None:
     return row
 
 
+# ---------- email tokens (confirm sign-up, reset password) ----------
+# The link carries a random token; only its SHA-256 lands here, and each one is
+# consumed with an atomic DELETE ... RETURNING, like the OAuth state above.
+
+CONFIRM_TTL = timedelta(hours=24)
+RESET_TTL = timedelta(hours=1)
+
+
+def _token_pair() -> tuple[str, str]:
+    token = secrets.token_urlsafe(32)
+    return token, _token_hash(token)
+
+
+def _token_hash(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def create_pending_registration(email: str, display_name: str, password_hash: str) -> str:
+    """Store a sign-up awaiting confirmation and return the link token.
+
+    A new sign-up for the same address replaces the old one, so only the
+    newest link works and its password is the one that counts.
+    """
+    token, token_hash = _token_pair()
+    now = datetime.now(timezone.utc)
+    with connection() as conn:
+        conn.execute("DELETE FROM pending_registrations WHERE expires_at < now()")
+        conn.execute("DELETE FROM pending_registrations WHERE email = %(email)s", {"email": email})
+        conn.execute(
+            "INSERT INTO pending_registrations"
+            " (token_hash, email, display_name, password_hash, created_at, expires_at)"
+            " VALUES (%(token_hash)s, %(email)s, %(display_name)s, %(password_hash)s,"
+            " %(created_at)s, %(expires_at)s)",
+            {
+                "token_hash": token_hash,
+                "email": email,
+                "display_name": display_name,
+                "password_hash": password_hash,
+                "created_at": now.isoformat(),
+                "expires_at": (now + CONFIRM_TTL).isoformat(),
+            },
+        )
+    return token
+
+
+def get_pending_registration(email: str) -> dict | None:
+    return _fetchone(
+        "SELECT * FROM pending_registrations"
+        " WHERE email = %(email)s AND expires_at > now()",
+        {"email": email},
+    )
+
+
+def refresh_pending_registration(email: str) -> str | None:
+    """Give a waiting sign-up a fresh token (for "resend"); None if there is none."""
+    token, token_hash = _token_pair()
+    row = _fetchone(
+        "UPDATE pending_registrations SET token_hash = %(token_hash)s,"
+        " expires_at = now() + %(ttl)s"
+        " WHERE email = %(email)s AND expires_at > now() RETURNING email",
+        {"token_hash": token_hash, "ttl": CONFIRM_TTL, "email": email},
+    )
+    return token if row else None
+
+
+def consume_pending_registration(token: str) -> dict | None:
+    if not token:
+        return None
+    row = _fetchone(
+        "DELETE FROM pending_registrations WHERE token_hash = %(hash)s"
+        " RETURNING *, expires_at > now() AS valid",
+        {"hash": _token_hash(token)},
+    )
+    if row is None or not row.pop("valid"):
+        return None
+    return row
+
+
+def purge_expired_email_tokens() -> None:
+    """Drop sign-ups nobody confirmed and reset links nobody used, once expired."""
+    with connection() as conn:
+        conn.execute("DELETE FROM pending_registrations WHERE expires_at < now()")
+        conn.execute("DELETE FROM password_resets WHERE expires_at < now()")
+
+
+def create_password_reset(user_id: str) -> str:
+    """Return a reset-link token; any earlier link for the user stops working."""
+    token, token_hash = _token_pair()
+    now = datetime.now(timezone.utc)
+    with connection() as conn:
+        conn.execute("DELETE FROM password_resets WHERE expires_at < now()")
+        conn.execute("DELETE FROM password_resets WHERE user_id = %(id)s", {"id": user_id})
+        conn.execute(
+            "INSERT INTO password_resets (token_hash, user_id, created_at, expires_at)"
+            " VALUES (%(token_hash)s, %(user_id)s, %(created_at)s, %(expires_at)s)",
+            {
+                "token_hash": token_hash,
+                "user_id": user_id,
+                "created_at": now.isoformat(),
+                "expires_at": (now + RESET_TTL).isoformat(),
+            },
+        )
+    return token
+
+
+def consume_password_reset(token: str) -> dict | None:
+    """Use up a reset token; returns the row (with user_id) or None if invalid."""
+    if not token:
+        return None
+    row = _fetchone(
+        "DELETE FROM password_resets WHERE token_hash = %(hash)s"
+        " RETURNING *, expires_at > now() AS valid",
+        {"hash": _token_hash(token)},
+    )
+    if row is None or not row.pop("valid"):
+        return None
+    return row
+
+
 # ---------- sessions ----------
 
 def create_session(user_id: str) -> str:
@@ -695,6 +841,14 @@ def get_user_for_session(token: str) -> dict | None:
 
 def delete_session(token: str) -> None:
     _execute("DELETE FROM sessions WHERE token = %(token)s", {"token": token})
+
+
+def delete_user_sessions(user_id: str, keep: str = "") -> None:
+    """Sign the user out everywhere, except the session token in ``keep``."""
+    _execute(
+        "DELETE FROM sessions WHERE user_id = %(id)s AND token <> %(keep)s",
+        {"id": user_id, "keep": keep},
+    )
 
 
 # ---------- chats ----------

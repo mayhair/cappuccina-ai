@@ -97,11 +97,65 @@ class UpdateProfileRequest(BaseModel):
     model_config = {"populate_by_name": True}
 
 
+# ---------- email + password sign-in ----------
+# ``lang`` is the interface language, so the emails match it (app/mailer.py).
+
+class RegisterRequest(BaseModel):
+    email: str = Field(max_length=254)
+    password: str
+    name: str = Field(default="", max_length=80)
+    turnstile_token: str = Field(default="", alias="turnstileToken")
+    lang: str = "en"
+
+    model_config = {"populate_by_name": True}
+
+
+class LoginRequest(BaseModel):
+    email: str = Field(max_length=254)
+    password: str
+
+
+class EmailRequest(BaseModel):
+    email: str = Field(max_length=254)
+    lang: str = "en"
+
+
+class TokenRequest(BaseModel):
+    token: str = Field(max_length=200)
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str = Field(max_length=200)
+    new_password: str = Field(alias="newPassword")
+    lang: str = "en"
+
+    model_config = {"populate_by_name": True}
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str = Field(default="", alias="currentPassword")
+    new_password: str = Field(alias="newPassword")
+    lang: str = "en"
+
+    model_config = {"populate_by_name": True}
+
+
+class AuthOptionsResponse(BaseModel):
+    google: bool
+    password: bool
+    turnstile_site_key: str = Field(alias="turnstileSiteKey")
+
+    model_config = {"populate_by_name": True}
+
+
 class UserResponse(BaseModel):
     id: str
     email: str
     display_name: str = Field(alias="displayName")
     avatar_url: str | None = Field(default=None, alias="avatarUrl")
+    has_password: bool = Field(default=False, alias="hasPassword")
+    google_linked: bool = Field(default=False, alias="googleLinked")
+    password_auth_enabled: bool = Field(default=True, alias="passwordAuthEnabled")
     gmail_connected: bool = Field(default=False, alias="gmailConnected")
     calendar_connected: bool = Field(default=False, alias="calendarConnected")
     gmail_enabled: bool = Field(default=False, alias="gmailEnabled")
