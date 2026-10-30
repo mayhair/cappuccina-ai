@@ -102,6 +102,12 @@ cp .env.example .env
 | `DATABASE_URL` | On servers | PostgreSQL URL (`postgresql:///cappuccina` on a Linux server) |
 | `APP_ORIGIN` | No | Public URL that users open in the browser (`http://localhost:5173` by default) |
 | `FMHY_MCP_URL` | No | FMHY MCP endpoint (leave empty to disable free-media tools) |
+| `PASSWORD_AUTH_ENABLED` | No | Set to `0` to turn off email + password sign-in (`1` by default) |
+| `TURNSTILE_SITE_KEY` | For email sign-in | Cloudflare Turnstile site key for the sign-up form (see section 6.6) |
+| `TURNSTILE_SECRET_KEY` | For email sign-in | Turnstile secret key; when empty, sign-up skips the check |
+| `MAIL_FROM` | For email sign-in | Sender of confirmation and reset emails, such as `Cappuccina <no-reply@example.com>` |
+| `SMTP_HOST`, `SMTP_PORT` | No | Mail server for outgoing email (`127.0.0.1:25`, the local Postfix, by default) |
+| `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_STARTTLS` | No | Login and STARTTLS, only for an SMTP relay |
 | `SITE_CONTAINER_CLI` | For webpages | Container CLI for webpage workspaces (`podman` by default, or `docker`) |
 | `SITE_IDLE_MINUTES` | No | Idle minutes before a webpage container stops (`10` by default) |
 | `SITE_EXEC_TIMEOUT` | No | Timeout in seconds for `webpage_shell` (`120` by default) |
@@ -111,7 +117,7 @@ Voice replies are off in code because the Fish Audio terms allow training on sub
 
 ## 4. Google Cloud OAuth setup
 
-Sign-in uses Google OAuth. The same OAuth client also handles the optional Gmail and Google Calendar connections. Set up the client in the [Google Cloud Console](https://console.cloud.google.com/):
+Users can sign in with Google OAuth, or with email and password (section 6.6 covers the email side). The same OAuth client also handles the optional Gmail and Google Calendar connections. Set up the client in the [Google Cloud Console](https://console.cloud.google.com/):
 
 1. Create a Google Cloud project.
 2. If you use Gmail or Calendar, enable the Gmail API and the Google Calendar API in `APIs & Services -> Library`.
@@ -313,7 +319,103 @@ https://cappuccina.<your-domain>/api/v1/gmail/callback
 https://cappuccina.<your-domain>/api/v1/calendar/callback
 ```
 
-### 6.6 Updating the deployment
+### 6.6 Email sign-in: Turnstile and outgoing mail
+
+Email + password sign-in needs two things on the server: Cloudflare Turnstile keys for the sign-up form, and a way to send the confirmation and password-reset emails. This guide sends them from a send-only Postfix on the VPS, so there is no mail provider to pay for. To use an SMTP relay instead, skip the Postfix steps and set `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD` and `SMTP_STARTTLS=1` in `backend/.env`.
+
+#### Turnstile
+
+1. In the Cloudflare dashboard, open `Turnstile`, add a widget in `Managed` mode, and add the hostname `cappuccina.<your-domain>`. Add `localhost` too if you want real keys in local development.
+2. Put the keys in `/srv/cappuccina/backend/.env`:
+
+```text
+TURNSTILE_SITE_KEY=<site key>
+TURNSTILE_SECRET_KEY=<secret key>
+```
+
+If `TURNSTILE_SECRET_KEY` is empty, sign-up works without the check and the backend logs a warning at startup. For local development, the Cloudflare test keys in `backend/.env.example` always pass.
+
+#### Before you install Postfix
+
+Mail from a server only reaches inboxes when the receiving servers trust the server's IP address. Check these first:
+
+1. **Outbound port 25.** Many VPS hosts block it by default. Test it with `nc -vz -w 5 gmail-smtp-in.l.google.com 25`. If the connection times out, ask your host to unblock port 25, or use a relay as described above.
+2. **Reverse DNS (PTR).** In your VPS host's panel, set the PTR record of the server's IPv4 address to `mail.<your-domain>`. Gmail and Outlook reject or flag mail from IPs without a matching PTR record. If the server also has IPv6, set its PTR as well, or make Postfix send over IPv4 only (step 2 below).
+3. **IP reputation.** Look up the IP on a blocklist checker such as `https://mxtoolbox.com/blacklists.aspx`. If it is listed, ask your host for a different IP.
+
+#### DNS records
+
+In Cloudflare DNS for `<your-domain>`, add these records. Set each one to **DNS only** (grey cloud): mail does not go through the Cloudflare proxy.
+
+| Type | Name | Content |
+|---|---|---|
+| `A` | `mail` | `<VPS IPv4 address>` |
+| `TXT` | `@` | `v=spf1 ip4:<VPS IPv4 address> -all` |
+| `TXT` | `_dmarc` | `v=DMARC1; p=quarantine; adkim=s; aspf=s; rua=mailto:<your address>` |
+
+If the domain already has an SPF record (for example `include:_spf.mx.cloudflare.net` for Cloudflare Email Routing), add `ip4:<VPS IPv4 address>` to that record. A domain must have only one SPF record. The DKIM record comes in step 4 below.
+
+#### Install and configure Postfix with DKIM
+
+1. Install Postfix and OpenDKIM. When the installer asks, choose `Internet Site` and enter `<your-domain>` as the mail name:
+
+```bash
+sudo apt install -y postfix opendkim opendkim-tools
+```
+
+2. Make Postfix accept mail only from programs on this server, and send it from `mail.<your-domain>` over TLS:
+
+```bash
+sudo postconf -e 'myhostname = mail.<your-domain>'
+sudo postconf -e 'myorigin = <your-domain>'
+sudo postconf -e 'inet_interfaces = loopback-only'
+sudo postconf -e 'inet_protocols = ipv4'
+sudo postconf -e 'mydestination = localhost'
+sudo postconf -e 'smtp_tls_security_level = may'
+sudo postconf -e 'smtp_tls_loglevel = 1'
+```
+
+Leave out the `inet_protocols = ipv4` line if your IPv6 address has a PTR record and is listed in the SPF record.
+
+3. Create a DKIM key. `cappuccina` is the selector name, and you can choose another one:
+
+```bash
+sudo install -d -o opendkim -g opendkim -m 700 /etc/opendkim/keys
+sudo -u opendkim opendkim-genkey -b 2048 -d <your-domain> -s cappuccina -D /etc/opendkim/keys
+sudo tee -a /etc/opendkim.conf >/dev/null <<'EOF'
+Domain                  <your-domain>
+Selector                cappuccina
+KeyFile                 /etc/opendkim/keys/cappuccina.private
+Socket                  inet:8891@127.0.0.1
+Canonicalization        relaxed/simple
+EOF
+sudo postconf -e 'milter_default_action = accept'
+sudo postconf -e 'smtpd_milters = inet:127.0.0.1:8891'
+sudo postconf -e 'non_smtpd_milters = inet:127.0.0.1:8891'
+sudo systemctl restart opendkim postfix
+```
+
+If `/etc/opendkim.conf` already has a `Socket` line, comment it out so that only the `inet:8891@127.0.0.1` line stays.
+
+4. Publish the public key. Print it with `sudo cat /etc/opendkim/keys/cappuccina.txt`, join the quoted parts into one string, and add it in Cloudflare DNS as a `TXT` record named `cappuccina._domainkey` (DNS only). The content starts with `v=DKIM1; h=sha256; k=rsa; p=`.
+
+5. Set the sender in `/srv/cappuccina/backend/.env`, then restart the backend:
+
+```text
+MAIL_FROM="Cappuccina <no-reply@<your-domain>>"
+```
+
+The `SMTP_*` defaults (`127.0.0.1:25`, no login) already point at this Postfix.
+
+#### Check delivery
+
+1. Send a test email with `printf 'Subject: test\n\nhello\n' | sendmail -f no-reply@<your-domain> <your Gmail address>`, and read the mail log with `sudo journalctl -u postfix -n 30`. Look for `status=sent`.
+2. In Gmail, open the message, choose `Show original`, and check that SPF, DKIM and DMARC all say `PASS`.
+3. Send one to the address that `https://www.mail-tester.com` shows you, and fix anything it reports.
+4. Create an account on the site with email and password, and check that the confirmation email lands in the inbox and not in spam. Mail from a new IP can go to spam at first. Marking it `Not spam` helps, and so does a few days of normal sending.
+5. Check that the rate limits see real visitor IPs, not one shared Cloudflare IP. Add a temporary log line for `client_ip(request)` in the login route in `backend/app/main.py`, sign in from two networks (for example Wi-Fi and mobile data), and read `journalctl -u cappuccina -n 50`. The Worker and the API share one Cloudflare zone, so `CF-Connecting-IP` carries the visitor's IP. If every sign-in shows the same IP, the per-IP limit acts as one global limit. The per-address limit still applies.
+
+### 6.7 Updating the deployment
 
 To update the backend on the VPS, pull the latest commits, update Python packages, and restart the service. At startup, the backend applies any new SQL files in `backend/app/migrations/` automatically.
 
@@ -353,7 +455,7 @@ To skip the `sudo` password prompt for that script, run `sudo visudo -f /etc/sud
 <admin-user> ALL=(root) NOPASSWD: /usr/local/bin/deploy-cappuccina
 ```
 
-### 6.7 Backups
+### 6.8 Backups
 
 User data lives in the `cappuccina` PostgreSQL database and on disk under `/srv/cappuccina/backend/data/`. Back up both every night and delete backups older than 30 days to match the retention rule in `legal/privacy-policy.md`.
 
@@ -437,6 +539,9 @@ Look up common errors and their fixes in the table below. Each row lists the sym
 | `redirect_uri_mismatch` during Google sign-in | Make sure that the redirect URIs in Google Cloud Console match `APP_ORIGIN` in `backend/.env`, including `http://` or `https://`. |
 | Sign-in finishes at Google but you stay logged out | `APP_ORIGIN` uses `https://` (so the cookie is `Secure`), but you opened `http://`. Enable Always Use HTTPS in Cloudflare. |
 | `Access blocked` during Google sign-in | Add your Google account under Test users on the OAuth consent screen. |
+| Sign-up says `We couldn't send the email` | The backend cannot reach the mail server. Run `systemctl status postfix` and check `SMTP_HOST` and `SMTP_PORT`. Locally, start a test mail server: `python -m aiosmtpd -n -l 127.0.0.1:1025` with `SMTP_PORT=1025`. |
+| Confirmation emails go to spam or never arrive | Check the PTR record, the SPF, DKIM and DMARC records, and `sudo journalctl -u postfix` (see section 6.6). |
+| The security check never shows on the sign-up form | `TURNSTILE_SITE_KEY` is wrong, or the widget's hostnames in Cloudflare don't include the site's hostname. |
 | `Testing webpages isn't set up on this server` | Run `python -m playwright install chromium` in `backend/.venv`, and on Linux run `sudo .venv/bin/python -m playwright install-deps chromium`. |
 | `podman run` fails on a fresh VPS | Make sure that `kernel.apparmor_restrict_unprivileged_userns` is `0`, `Linger=yes` is set for `cappuccina`, `/etc/subuid` and `/etc/subgid` contain the user range, and `delegate.conf` is loaded. |
 | `wrangler deploy` succeeds but the site returns `404` | Attach your custom domain under `Workers -> cappuccina-frontend -> Settings -> Domains & Routes` in Cloudflare. |

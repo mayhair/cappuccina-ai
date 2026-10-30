@@ -1,7 +1,9 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { ThemeToggle } from './ThemeToggle'
 import { SparkleIcon, ChatIcon, CapIcon, BulbIcon, GlobeIcon } from './Icons'
 import { GoogleButton } from './GoogleButton'
+import { EmailAuthForm } from './EmailAuthForm'
+import { getAuthOptions } from '../api/authClient'
 import { LanguageGate } from './LanguageGate'
 import { useLanguage } from '../i18n/LanguageProvider'
 
@@ -25,9 +27,26 @@ export function Sky({ theme }) {
   )
 }
 
-export function LandingPage({ theme, onTheme, error }) {
+export function LandingPage({ theme, onTheme, error, onSignedIn }) {
   const { t } = useLanguage()
   const [pickerOpen, setPickerOpen] = useState(false)
+  // Google shows until the server says otherwise; email sign-in once it says so.
+  const [options, setOptions] = useState({ google: true, password: false, turnstileSiteKey: '' })
+  const [emailOpen, setEmailOpen] = useState(false)
+
+  useEffect(() => {
+    let canceled = false
+    getAuthOptions()
+      .then((opts) => {
+        if (!canceled) setOptions(opts)
+      })
+      .catch(() => {
+        // Older backend or offline: keep the Google-only default.
+      })
+    return () => {
+      canceled = true
+    }
+  }, [])
 
   return (
     <>
@@ -56,7 +75,28 @@ export function LandingPage({ theme, onTheme, error }) {
           <p className="landing-sub">{t('landing.sub')}</p>
 
           <div className="landing-actions">
-            <GoogleButton label={t('landing.google')} />
+            {options.google && <GoogleButton label={t('landing.google')} />}
+            {options.password && options.google && (
+              <div className="landing-or" aria-hidden="true">
+                <span>{t('landing.or')}</span>
+              </div>
+            )}
+            {options.password &&
+              (emailOpen || !options.google ? (
+                <EmailAuthForm
+                  theme={theme}
+                  turnstileSiteKey={options.turnstileSiteKey}
+                  onSignedIn={onSignedIn}
+                />
+              ) : (
+                <button
+                  type="button"
+                  className="landing-secondary"
+                  onClick={() => setEmailOpen(true)}
+                >
+                  {t('landing.email')}
+                </button>
+              ))}
             <p className="landing-legal">
               {t('landing.legal.before')}
               <a href="/terms" target="_blank" rel="noopener">{t('landing.legal.terms')}</a>

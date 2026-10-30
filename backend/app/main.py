@@ -40,16 +40,38 @@ from agent.tools import (
     _webpage_path,
     validate_webpage_write,
 )
-from app import calendar, config, db, documents, gmail, google_oauth, sitebox, tts, webpage_git
+from app import (
+    calendar,
+    config,
+    db,
+    documents,
+    gmail,
+    google_oauth,
+    mailer,
+    ratelimit,
+    sitebox,
+    tts,
+    turnstile,
+    webpage_git,
+)
 from app.auth import (
+    PASSWORD_MAX_LENGTH,
+    PASSWORD_MIN_LENGTH,
     clear_session_cookie,
+    client_ip,
     current_user,
+    hash_password,
+    needs_rehash,
     session_token,
     set_session_cookie,
+    verify_password,
 )
 from app.config import (
     ADULT_MODE_ENABLED,
     APP_ORIGIN,
+    AUTH_RATE_LIMIT_PER_MINUTE,
+    PASSWORD_AUTH_ENABLED,
+    TURNSTILE_SITE_KEY,
     CALENDAR_ENABLED,
     FISH_API_KEY,
     GMAIL_ENABLED,
@@ -79,19 +101,26 @@ from app.webpage_preview import (
 )
 from app.schemas import (
     CHAT_MODES,
+    AuthOptionsResponse,
     CalendarStatusResponse,
+    ChangePasswordRequest,
     ChatRequest,
     ChatResponse,
     CreateChatRequest,
+    EmailRequest,
     GmailStatusResponse,
+    LoginRequest,
     MemoryRequest,
+    RegisterRequest,
     RenameChatRequest,
+    ResetPasswordRequest,
     SaveWebpageFileRequest,
     SetActiveBranchRequest,
     SetWebpageVersionRequest,
     StoryChapterRequest,
     StoryCharacterRequest,
     StorySetup,
+    TokenRequest,
     TtsJobResponse,
     TtsRequest,
     ToolCall,
@@ -99,6 +128,9 @@ from app.schemas import (
     UpdateProfileRequest,
     UserResponse,
 )
+
+
+logger = logging.getLogger(__name__)
 
 
 async def _stop_idle_sites() -> None:
@@ -110,6 +142,17 @@ async def _stop_idle_sites() -> None:
     while True:
         await asyncio.sleep(60)
         await asyncio.to_thread(sitebox.stop_idle)
+
+
+async def _purge_email_tokens() -> None:
+    """Hourly: unconfirmed sign-ups and unused reset links go once they expire
+    (the privacy policy promises 24 hours and 1 hour)."""
+    while True:
+        try:
+            await asyncio.to_thread(db.purge_expired_email_tokens)
+        except Exception:
+            logger.exception("purging expired email tokens failed")
+        await asyncio.sleep(3600)
 
 
 @asynccontextmanager
@@ -124,15 +167,23 @@ async def lifespan(app: FastAPI):
     # A switched-off integration keeps no tokens: delete (and revoke) them.
     off = [s for s, on in (("gmail", GMAIL_ENABLED), ("calendar", CALENDAR_ENABLED)) if not on]
     await asyncio.to_thread(google_oauth.purge_grants, off)
+    if PASSWORD_AUTH_ENABLED and not turnstile.is_configured():
+        logger.warning(
+            "TURNSTILE_SECRET_KEY is unset: email sign-up runs without a bot check"
+        )
     fmhy_tools = await load_fmhy_tools()
     GRAPH = build_graph([*ALL_TOOLS, *fmhy_tools])
-    idle_task = asyncio.create_task(_stop_idle_sites())
+    tasks = [
+        asyncio.create_task(_stop_idle_sites()),
+        asyncio.create_task(_purge_email_tokens()),
+    ]
     try:
         yield
     finally:
-        idle_task.cancel()
-        # Drain it so shutdown never leaves a canceled task complaining.
-        await asyncio.gather(idle_task, return_exceptions=True)
+        for task in tasks:
+            task.cancel()
+        # Drain them so shutdown never leaves a canceled task complaining.
+        await asyncio.gather(*tasks, return_exceptions=True)
         await asyncio.to_thread(db.close_pool)
 
 
@@ -742,6 +793,9 @@ def _user_response(user) -> UserResponse:
         email=user["email"],
         displayName=user["display_name"],
         avatarUrl=user["avatar_url"] if "avatar_url" in user.keys() else None,
+        hasPassword=bool(user.get("password_hash")),
+        googleLinked=bool(user.get("google_sub")),
+        passwordAuthEnabled=PASSWORD_AUTH_ENABLED,
         gmailConnected=_gmail_linked(user["id"]),
         calendarConnected=_calendar_linked(user["id"]),
         gmailEnabled=GMAIL_ENABLED,
@@ -805,6 +859,215 @@ async def google_callback(request: Request) -> RedirectResponse:
     response = RedirectResponse(f"{APP_ORIGIN}/")
     set_session_cookie(response, db.create_session(user["id"]))
     return response
+
+
+# ---------- email + password sign-in ----------
+# Errors carry a stable ``code`` the frontend translates, plus an English
+# ``message``. Register, resend and forgot-password answer the same way whether
+# or not the address has an account, so they can't be used to look one up; the
+# email that goes out is what differs.
+
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
+def _auth_error(status: int, code: str, message: str) -> HTTPException:
+    return HTTPException(status_code=status, detail={"code": code, "message": message})
+
+
+def _require_password_auth() -> None:
+    if not PASSWORD_AUTH_ENABLED:
+        raise _auth_error(404, "password_auth_off", "Email sign-in is turned off")
+
+
+def _normalize_email(raw: str) -> str:
+    email = raw.strip().lower()
+    if not _EMAIL_RE.match(email):
+        raise _auth_error(400, "invalid_email", "That doesn't look like an email address")
+    return email
+
+
+def _check_new_password(password: str) -> None:
+    if len(password) < PASSWORD_MIN_LENGTH:
+        raise _auth_error(
+            400, "password_too_short",
+            f"Password must be at least {PASSWORD_MIN_LENGTH} characters",
+        )
+    if len(password) > PASSWORD_MAX_LENGTH:
+        raise _auth_error(
+            400, "password_too_long",
+            f"Password must be at most {PASSWORD_MAX_LENGTH} characters",
+        )
+
+
+def _auth_rate_limit(request: Request, email: str = "") -> None:
+    """Count one attempt against the client IP and, if given, the address."""
+    ratelimit.check(f"auth-ip:{client_ip(request)}", AUTH_RATE_LIMIT_PER_MINUTE)
+    if email:
+        ratelimit.check(f"auth-email:{email}", AUTH_RATE_LIMIT_PER_MINUTE)
+
+
+async def _send_mail(kind: str, to: str, lang: str, name: str, link: str = "") -> None:
+    try:
+        await asyncio.to_thread(mailer.send_kind, kind, to, lang, name, link)
+    except mailer.MailError:
+        logger.exception("sending %s email failed", kind)
+        raise _auth_error(
+            503, "mail_failed", "We couldn't send the email. Please try again later."
+        ) from None
+
+
+_CHECK_EMAIL = {"status": "check_email"}
+
+
+@app.get("/api/v1/auth/options")
+async def auth_options() -> AuthOptionsResponse:
+    """Which sign-in methods the landing page should offer."""
+    return AuthOptionsResponse(
+        google=google_oauth.is_configured(),
+        password=PASSWORD_AUTH_ENABLED,
+        turnstileSiteKey=TURNSTILE_SITE_KEY if PASSWORD_AUTH_ENABLED else "",
+    )
+
+
+@app.post("/api/v1/auth/register", status_code=202)
+async def register(req: RegisterRequest, request: Request) -> dict:
+    _require_password_auth()
+    email = _normalize_email(req.email)
+    _auth_rate_limit(request, email)
+    ok = await asyncio.to_thread(turnstile.verify, req.turnstile_token, client_ip(request))
+    if not ok:
+        raise _auth_error(400, "turnstile_failed", "Please complete the security check")
+    _check_new_password(req.password)
+    # Hash on every path, so the reply takes as long whether or not the
+    # address already has an account.
+    password_hash = await asyncio.to_thread(hash_password, req.password)
+
+    existing = db.get_user_by_email(email)
+    if existing is not None:
+        kind = "exists_password" if existing["password_hash"] else "exists_google"
+        await _send_mail(kind, email, req.lang, existing["display_name"])
+        return _CHECK_EMAIL
+
+    name = req.name.strip() or email.split("@")[0]
+    token = db.create_pending_registration(email, name, password_hash)
+    await _send_mail("confirm", email, req.lang, name, f"{APP_ORIGIN}/confirm-email?token={token}")
+    return _CHECK_EMAIL
+
+
+@app.post("/api/v1/auth/resend-confirmation", status_code=202)
+async def resend_confirmation(req: EmailRequest, request: Request) -> dict:
+    _require_password_auth()
+    email = _normalize_email(req.email)
+    _auth_rate_limit(request, email)
+    pending = db.get_pending_registration(email)
+    token = db.refresh_pending_registration(email) if pending else None
+    if pending and token:
+        await _send_mail(
+            "confirm", email, req.lang, pending["display_name"],
+            f"{APP_ORIGIN}/confirm-email?token={token}",
+        )
+    return _CHECK_EMAIL
+
+
+@app.post("/api/v1/auth/confirm")
+async def confirm_email(req: TokenRequest, response: Response) -> UserResponse:
+    """Turn a confirmed sign-up into an account and sign it in.
+
+    The page at /confirm-email POSTs the token, so a mail scanner that merely
+    opens the link can't use it up.
+    """
+    _require_password_auth()
+    pending = db.consume_pending_registration(req.token)
+    if pending is None:
+        raise _auth_error(400, "link_invalid", "That link has expired or was already used")
+    email = pending["email"]
+    user = db.get_user_by_email(email)
+    if user is None:
+        user = db.create_password_user(email, pending["display_name"], pending["password_hash"])
+    elif not user["password_hash"]:
+        # A Google account appeared for this address after the sign-up. The
+        # link proves the same person owns the inbox, so add the password.
+        db.set_password_hash(user["id"], pending["password_hash"])
+        user = db.get_user_by_id(user["id"])
+    set_session_cookie(response, db.create_session(user["id"]))
+    return _user_response(user)
+
+
+@app.post("/api/v1/auth/login")
+async def password_login(req: LoginRequest, request: Request, response: Response) -> UserResponse:
+    _require_password_auth()
+    email = req.email.strip().lower()
+    _auth_rate_limit(request, email)
+    password = req.password[: PASSWORD_MAX_LENGTH + 1]
+    user = db.get_user_by_email(email)
+    if user is not None and await asyncio.to_thread(
+        verify_password, password, user["password_hash"]
+    ):
+        if needs_rehash(user["password_hash"]):
+            db.set_password_hash(user["id"], await asyncio.to_thread(hash_password, password))
+        set_session_cookie(response, db.create_session(user["id"]))
+        return _user_response(user)
+
+    # Only someone who knows the sign-up's password learns it is unconfirmed.
+    pending = db.get_pending_registration(email) if user is None else None
+    if pending is not None and await asyncio.to_thread(
+        verify_password, password, pending["password_hash"]
+    ):
+        raise _auth_error(403, "email_unconfirmed", "Please confirm your email first")
+    raise _auth_error(401, "bad_credentials", "Email or password doesn't match")
+
+
+@app.post("/api/v1/auth/forgot-password", status_code=202)
+async def forgot_password(req: EmailRequest, request: Request) -> dict:
+    _require_password_auth()
+    email = _normalize_email(req.email)
+    _auth_rate_limit(request, email)
+    user = db.get_user_by_email(email)
+    if user is not None:
+        token = db.create_password_reset(user["id"])
+        await _send_mail(
+            "reset", email, req.lang, user["display_name"],
+            f"{APP_ORIGIN}/reset-password?token={token}",
+        )
+    return _CHECK_EMAIL
+
+
+@app.post("/api/v1/auth/reset-password")
+async def reset_password(req: ResetPasswordRequest, response: Response) -> UserResponse:
+    _require_password_auth()
+    _check_new_password(req.new_password)
+    reset = db.consume_password_reset(req.token)
+    if reset is None:
+        raise _auth_error(400, "link_invalid", "That link has expired or was already used")
+    user_id = reset["user_id"]
+    db.set_password_hash(user_id, await asyncio.to_thread(hash_password, req.new_password))
+    db.delete_user_sessions(user_id)
+    set_session_cookie(response, db.create_session(user_id))
+    return _user_response(db.get_user_by_id(user_id))
+
+
+@app.post("/api/v1/auth/change-password")
+async def change_password(
+    req: ChangePasswordRequest, request: Request, user=Depends(current_user)
+) -> UserResponse:
+    """Change the password, or set a first one on a Google-only account."""
+    _require_password_auth()
+    ratelimit.check(f"auth-user:{user['id']}", AUTH_RATE_LIMIT_PER_MINUTE)
+    if user["password_hash"] and not await asyncio.to_thread(
+        verify_password, req.current_password, user["password_hash"]
+    ):
+        raise _auth_error(401, "wrong_password", "Current password doesn't match")
+    _check_new_password(req.new_password)
+    db.set_password_hash(user["id"], await asyncio.to_thread(hash_password, req.new_password))
+    db.delete_user_sessions(user["id"], keep=session_token(request))
+    try:
+        await asyncio.to_thread(
+            mailer.send_kind, "password_changed", user["email"], req.lang, user["display_name"]
+        )
+    except mailer.MailError:
+        # Only a notice: the change itself already happened.
+        logger.exception("sending password_changed email failed")
+    return _user_response(db.get_user_by_id(user["id"]))
 
 
 @app.post("/api/v1/auth/logout")
@@ -1785,7 +2048,6 @@ async def delete_attachment_file(attachment_id: str, user=Depends(current_user))
 
 # ---------- chat completion ----------
 
-logger = logging.getLogger(__name__)
 
 # Fire-and-forget work that outlives a stream (story chapter summaries). The
 # set holds a reference so a running task is not garbage-collected.

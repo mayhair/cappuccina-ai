@@ -1,13 +1,13 @@
 # Cappuccina Privacy Policy
 
 Effective date: 20 October 2026  
-Last updated: 28 October 2026
+Last updated: 30 October 2026
 
 This Privacy Policy explains what information Cappuccina collects, why we collect it, who we share it with, and the choices you have. Cappuccina is the AI chatbot at [cappuccina.mayhair.net](https://cappuccina.mayhair.net). It is run by Mahaer Mahmud, an individual based in Pakistan ("we", "us" or "our"). We are responsible for your information.
 
 ## The short version
 
-- We collect what we need to run Cappuccina: your Google sign-in details, your chats, and anything you choose to add.
+- We collect what we need to run Cappuccina: your sign-in details, your chats, and anything you choose to add.
 - We **don't sell** your information, we **don't show ads**, and we **don't use tracking or analytics tools**.
 - To answer you, Cappuccina sends parts of your information to AI and other service providers. They are listed in section 4.
 - We only look at your chats when we need to: to fix a problem, to investigate abuse or a safety report, or when the law requires it.
@@ -17,7 +17,11 @@ This Privacy Policy explains what information Cappuccina collects, why we collec
 
 ### When you sign in
 
-You sign in with Google. Google gives us your **name**, **email address**, **profile picture** and a **Google account ID**. We never see your Google password.
+You sign in with Google, or with your email address and a password.
+
+- **With Google:** Google gives us your **name**, **email address**, **profile picture** and a **Google account ID**. We never see your Google password.
+- **With email and password:** you give us your **name**, **email address** and a **password**. We store only a scrambled form of the password (an Argon2id hash), never the password itself. Before the account opens, we send a link to your email address to check that it is yours.
+- **Security check:** when you create an account with email and password, Cloudflare Turnstile checks that you are a person and not a bot. Turnstile receives your IP address and some technical information from your browser.
 
 ### When you use Cappuccina
 
@@ -85,10 +89,11 @@ We share information only with the service providers below, and only what they n
 | **AI model providers** chosen by OpenRouter | Run the AI model (currently DeepSeek V4.1 Flash) that writes Cappuccina's replies and chat titles. OpenRouter picks one of the [providers for this model](https://openrouter.ai/deepseek/deepseek-v4.1-flash-1017/providers) that offer zero data retention, mostly in the United States. | The same as OpenRouter |
 | **OpenAI** | Creates and edits images. OpenAI doesn't train on this data. It [keeps it for up to 30 days](https://developers.openai.com/api/docs/guides/your-data) to check for misuse, unless the law or safety needs require keeping it longer. | Your image request, and any image you ask her to edit |
 | **Parallel Web Systems** | Web search and reading webpages | The search words Cappuccina uses for your question, the addresses (URLs) of webpages she reads, and what she is looking for on those pages |
-| **Google** | Sign-in | What's needed to sign you in |
+| **Google** | Sign-in | What's needed to sign you in, if you sign in with Google |
+| **Cloudflare Turnstile** | Checks that a new email sign-up is not a bot | Your IP address and technical information from your browser, when you create an account with email and password |
 | **FMHY guide server** (fmhy-mcp.ken.tools) | Looks up free-media sites | The search words Cappuccina uses |
 | **Cloudflare** | Delivers the website and protects it | Your requests to Cappuccina, including your IP address |
-| **One.com / Dogado.de** | Hosts our server and stores your data | All the data we store |
+| **One.com / Dogado.de** | Hosts our server and stores your data. We send account emails (confirmation and password reset) from our own mail server there. | All the data we store |
 
 When Cappuccina reads a webpage for you, Parallel Web Systems visits that page for us. When a webpage Cappuccina builds for you downloads code or files, our server visits those websites. In both cases, the website can see that a server visited, but not who you are.
 
@@ -107,6 +112,8 @@ Each webpage Cappuccina builds has a preview link. **Anyone who has the link can
 - **Chats, files, images and webpages:** until you delete them. Deleting a chat also deletes its messages, attached files, images and webpage.
 - **Memories:** until you delete them. Memories are not deleted when you delete a chat. You can delete them one by one or all at once in **Settings → Memory**.
 - **Gmail and Calendar tokens:** we deleted these when we turned the connections off, and asked Google to remove Cappuccina's access. You can check this at any time in your [Google Account permissions](https://myaccount.google.com/permissions).
+- **Email sign-ups that are not confirmed:** 24 hours. If you don't open the confirmation link, we delete your sign-up details.
+- **Password reset links:** 1 hour, or until used.
 - **Sign-in sessions:** until 30 days pass without use, 90 days pass since you signed in, or you sign out, whichever comes first.
 - **Your account:** until you delete it in **Settings → Account → Danger Zone**. When you do, we delete your account and everything linked to it right away. Copies in our backups are deleted within 30 days. Information we already sent to the providers in section 4 is kept for as long as their own policies say, such as up to 30 days at OpenAI.
 
@@ -141,7 +148,7 @@ Our server is located in Germany. Our service providers may process your informa
 
 ## 9. How we protect your information
 
-We use security measures to protect your information. For example, we encrypt Google tokens, keep each webpage in its own isolated container, and limit who can access our server. No system is perfectly secure, so we can't promise that your information will never be accessed without permission. If a security problem affects your information, we'll tell you when the law requires it.
+We use security measures to protect your information. For example, we store passwords only as Argon2id hashes, encrypt Google tokens, keep each webpage in its own isolated container, and limit who can access our server. No system is perfectly secure, so we can't promise that your information will never be accessed without permission. If a security problem affects your information, we'll tell you when the law requires it.
 
 ## 10. Young users
 

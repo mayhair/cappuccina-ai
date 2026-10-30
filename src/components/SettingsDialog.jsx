@@ -24,7 +24,8 @@ import { StorySettings } from './StorySettings'
 import { CharacterManager } from './CharacterManager'
 import { useLanguage } from '../i18n/LanguageProvider'
 import { useMediaQuery } from '../hooks/useMediaQuery'
-import { updateProfile, setAdultMode, deleteAccount } from '../api/authClient'
+import { updateProfile, setAdultMode, deleteAccount, changePassword } from '../api/authClient'
+import { authErrorText } from './EmailAuthForm'
 import { isAdultBirthday } from '../lib/adultMode'
 import {
   subscribe as subscribeInstall,
@@ -98,6 +99,100 @@ function ProfileForm({ user, onUpdated }) {
       </div>
     </form>
   )
+}
+
+// Change the password, or add a first one to an account that signs in with
+// Google only. Other devices get signed out; this one stays signed in.
+function PasswordForm({ user, onUpdated }) {
+  const { t, lang } = useLanguage()
+  const hasPassword = user.hasPassword === true
+  const [current, setCurrent] = useState('')
+  const [next, setNext] = useState('')
+  const [error, setError] = useState('')
+  const [saved, setSaved] = useState(false)
+  const [busy, setBusy] = useState(false)
+
+  const submit = async (e) => {
+    e.preventDefault()
+    if (busy) return
+    setBusy(true)
+    setError('')
+    setSaved(false)
+    try {
+      const updated = await changePassword({ currentPassword: current, newPassword: next, lang })
+      onUpdated(updated)
+      setCurrent('')
+      setNext('')
+      setSaved(true)
+    } catch (err) {
+      setError(authErrorText(t, err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <form className="settings-form" onSubmit={submit}>
+      {/* Lets password managers pair the new password with the account. */}
+      <input type="email" value={user.email} autoComplete="username" readOnly hidden />
+      {hasPassword && (
+        <div className="settings-row">
+          <label className="settings-label" htmlFor="settings-current-password">
+            {t('settings.password.current')}
+          </label>
+          <input
+            id="settings-current-password"
+            className="settings-input"
+            type="password"
+            value={current}
+            onChange={(e) => setCurrent(e.target.value)}
+            autoComplete="current-password"
+            maxLength={256}
+            required
+          />
+        </div>
+      )}
+      <div className="settings-row">
+        <label className="settings-label" htmlFor="settings-new-password">
+          {t('settings.password.new')}
+        </label>
+        <input
+          id="settings-new-password"
+          className="settings-input"
+          type="password"
+          value={next}
+          onChange={(e) => {
+            setNext(e.target.value)
+            setSaved(false)
+          }}
+          autoComplete="new-password"
+          minLength={8}
+          maxLength={256}
+          required
+        />
+      </div>
+      {!hasPassword && <p className="settings-hint">{t('settings.password.addHint')}</p>}
+      {error && (
+        <p className="settings-msg error" role="alert">
+          {error}
+        </p>
+      )}
+      {saved && !error && <p className="settings-msg ok">{t('settings.password.saved')}</p>}
+      <div className="settings-actions">
+        <button type="submit" className="settings-save" disabled={busy || !next}>
+          {busy
+            ? t('settings.profile.saving')
+            : t(hasPassword ? 'settings.password.change' : 'settings.password.add')}
+        </button>
+      </div>
+    </form>
+  )
+}
+
+function signinHintKey(user) {
+  if (user.googleLinked && user.hasPassword) return 'settings.account.signinHintBoth'
+  if (user.hasPassword) return 'settings.account.signinHintPassword'
+  return 'settings.account.signinHint'
 }
 
 function AdultModeForm({ user, onUpdated }) {
@@ -621,9 +716,15 @@ export function SettingsDialog({
           <section className="settings-section">
             <h4>{t('settings.account.signin')}</h4>
             <p className="settings-hint">
-              {t('settings.account.signinHint', { email: user.email })}
+              {t(signinHintKey(user), { email: user.email })}
             </p>
           </section>
+          {user.passwordAuthEnabled !== false && (
+            <section className="settings-section">
+              <h4>{t('settings.password.section')}</h4>
+              <PasswordForm user={user} onUpdated={onUserUpdated} />
+            </section>
+          )}
           <section className="settings-section">
             <DeleteAccountForm email={user.email} onDeleted={onAccountDeleted} />
           </section>

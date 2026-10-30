@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Sidebar } from './components/Sidebar'
 import { SidebarControls } from './components/SidebarControls'
 import { TopBarTitle } from './components/TopBarTitle'
@@ -7,6 +7,7 @@ import { WebpageCanvas } from './components/WebpageCanvas'
 import { TopBarMenu } from './components/TopBarMenu'
 import { WindowIcon } from './components/Icons'
 import { Sky, LandingPage } from './components/LandingPage'
+import { AuthLinkPage, AUTH_LINK_PATHS } from './components/AuthLinkPage'
 import { AlphaGate } from './components/AlphaGate'
 import { LanguageGate } from './components/LanguageGate'
 import { SettingsDialog } from './components/SettingsDialog'
@@ -39,7 +40,10 @@ const TITLE_SUFFIX = 'Ballerina Cappuccina'
 export default function App() {
   const { t } = useLanguage()
   // The URL decides the chat, the canvas and the Settings section.
-  const route = parseRoute(useLocation())
+  const location = useLocation()
+  const route = parseRoute(location)
+  // Links from confirmation and reset emails get their own page, signed in or not.
+  const authLinkPath = AUTH_LINK_PATHS.includes(location.pathname) ? location.pathname : null
   const settingsOpen = route.settings != null
   // The stored preference: 'light', 'dark' or 'system' (follow the OS).
   const [themePref, setThemePref] = useState(() => {
@@ -266,12 +270,22 @@ export default function App() {
   // The landing page lives at "/" only. Keep a deep link so signing in lands
   // on it, rather than on a new chat.
   useEffect(() => {
-    if (user || authPhase !== 'landing') return
+    if (user || authPhase !== 'landing' || authLinkPath) return
     const { pathname, search } = window.location
     if (pathname === '/' && !search) return
     saveReturnTo(pathname + search)
     navigate('/', { replace: true })
-  }, [user, authPhase])
+  }, [user, authPhase, authLinkPath])
+
+  // Email sign-in, a confirmed sign-up or a password reset: the server set the
+  // session cookie and sent back the user.
+  const handleSignedIn = useCallback((me) => {
+    setUser(me)
+    setAuthError('')
+    navigate(takeReturnTo() ?? '/', { replace: true })
+  }, [])
+
+  const leaveAuthLink = useCallback(() => navigate('/', { replace: true }), [])
 
   // The app is installable only for signed-in users, so the manifest link follows the session.
   useEffect(() => {
@@ -403,6 +417,15 @@ export default function App() {
     setAuthPhase('landing')
   }
 
+  if (authLinkPath) {
+    return (
+      <div className="landing">
+        <Sky theme={theme} />
+        <AuthLinkPage path={authLinkPath} onSignedIn={handleSignedIn} onLeave={leaveAuthLink} />
+      </div>
+    )
+  }
+
   if (!user) {
     if (authPhase === 'checking') {
       return (
@@ -414,7 +437,12 @@ export default function App() {
     return (
       <div className="landing">
         <Sky theme={theme} />
-        <LandingPage theme={theme} onTheme={setThemePref} error={authError} />
+        <LandingPage
+          theme={theme}
+          onTheme={setThemePref}
+          error={authError}
+          onSignedIn={handleSignedIn}
+        />
         <LanguageGate />
         <AlphaGate />
       </div>
