@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { ThemeToggle } from './ThemeToggle'
 import { SparkleIcon, ChatIcon, CapIcon, BulbIcon, GlobeIcon } from './Icons'
 import { GoogleButton } from './GoogleButton'
@@ -33,6 +33,39 @@ export function LandingPage({ theme, onTheme, error, onSignedIn }) {
   // Google shows until the server says otherwise; email sign-in once it says so.
   const [options, setOptions] = useState({ google: true, password: false, turnstileSiteKey: '' })
   const [emailOpen, setEmailOpen] = useState(false)
+  // The hero column stretches to the grid row and stands Cappuccina at its
+  // bottom. The email form makes the row taller, so before it opens the column
+  // is fixed at its current height and only the page below her grows.
+  const heroRef = useRef(null)
+  const [heroHeight, setHeroHeight] = useState(null)
+  const pinned = heroHeight != null
+
+  const openEmail = () => {
+    setHeroHeight(heroRef.current?.offsetHeight ?? null)
+    setEmailOpen(true)
+  }
+
+  // On resize, refit the column to the height the grid would have without the
+  // form: the page minus the top bar, the folklore card and the grid padding.
+  useEffect(() => {
+    if (!pinned) return
+    const refit = () => {
+      const hero = heroRef.current
+      const grid = hero?.parentElement
+      const page = grid?.parentElement
+      if (!page) return
+      const style = getComputedStyle(grid)
+      const available =
+        page.clientHeight -
+        (page.querySelector('.landing-top')?.offsetHeight ?? 0) -
+        (page.querySelector('.landing-folklore')?.offsetHeight ?? 0) -
+        parseFloat(style.paddingTop) -
+        parseFloat(style.paddingBottom)
+      setHeroHeight(Math.max(available, hero.querySelector('img')?.offsetHeight ?? 0))
+    }
+    window.addEventListener('resize', refit)
+    return () => window.removeEventListener('resize', refit)
+  }, [pinned])
 
   useEffect(() => {
     let canceled = false
@@ -66,7 +99,11 @@ export function LandingPage({ theme, onTheme, error, onSignedIn }) {
       {pickerOpen && <LanguageGate forceOpen onClose={() => setPickerOpen(false)} />}
 
       <main className="landing-grid">
-        <div className="landing-hero">
+        <div
+          ref={heroRef}
+          className={`landing-hero${pinned ? ' is-pinned' : ''}`}
+          style={pinned ? { '--hero-height': `${heroHeight}px` } : undefined}
+        >
           <img src="/plates/ballerina-hero.webp" alt={t('landing.heroAlt')} />
         </div>
 
@@ -92,7 +129,7 @@ export function LandingPage({ theme, onTheme, error, onSignedIn }) {
                 <button
                   type="button"
                   className="landing-secondary"
-                  onClick={() => setEmailOpen(true)}
+                  onClick={openEmail}
                 >
                   {t('landing.email')}
                 </button>

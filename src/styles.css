@@ -2501,6 +2501,14 @@ html[dir='rtl'] .modal-danger-list { padding: 0.8rem 2.2rem 0.8rem 1rem; }
   align-items: flex-end;
   height: 100%;
 }
+/* Fixed by LandingPage while the email form is open (desktop only; on narrow
+   screens the hero sits above the text and nothing moves). */
+@media (min-width: 901px) {
+  .landing-hero.is-pinned {
+    align-self: start;
+    height: var(--hero-height);
+  }
+}
 .landing-hero img {
   max-height: 82vh;
   max-width: 100%;
