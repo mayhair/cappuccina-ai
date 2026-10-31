@@ -40,12 +40,6 @@ def _registered(client, mail, email="kid@example.com"):
     return res.json()
 
 
-def test_options_report_methods(client):
-    res = client.get("/api/v1/auth/options")
-    assert res.json()["google"] is True
-    assert res.json()["password"] is True
-
-
 def test_register_waits_for_confirmation(client, mail):
     res = _register(client, "Kid@Example.com", lang="it")
     assert res.status_code == 202

@@ -19,9 +19,6 @@ export const deleteAccount = () => request('/api/v1/auth/me', { method: 'DELETE'
 // Sign-in is a full-page redirect (cookie is set by the OAuth callback).
 export const googleSignInUrl = '/api/v1/auth/google/start'
 
-// Which sign-in methods the server offers, and the Turnstile site key.
-export const getAuthOptions = () => request('/api/v1/auth/options')
-
 // Email + password. `lang` picks the language of the emails the server sends.
 // Register, resend and forgot answer {status: 'check_email'} whether or not the
 // address has an account; confirm, login and reset set the session cookie and

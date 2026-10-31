@@ -72,7 +72,6 @@ from app.config import (
     AUTH_RATE_LIMIT_PER_MINUTE,
     GOOGLE_AUTH_ENABLED,
     PASSWORD_AUTH_ENABLED,
-    TURNSTILE_SITE_KEY,
     CALENDAR_ENABLED,
     FISH_API_KEY,
     GMAIL_ENABLED,
@@ -102,7 +101,6 @@ from app.webpage_preview import (
 )
 from app.schemas import (
     CHAT_MODES,
-    AuthOptionsResponse,
     CalendarStatusResponse,
     ChangePasswordRequest,
     ChatRequest,
@@ -929,16 +927,6 @@ async def _send_mail(kind: str, to: str, lang: str, name: str, link: str = "") -
 
 
 _CHECK_EMAIL = {"status": "check_email"}
-
-
-@app.get("/api/v1/auth/options")
-async def auth_options() -> AuthOptionsResponse:
-    """Which sign-in methods the landing page should offer."""
-    return AuthOptionsResponse(
-        google=GOOGLE_AUTH_ENABLED and google_oauth.is_configured(),
-        password=PASSWORD_AUTH_ENABLED,
-        turnstileSiteKey=TURNSTILE_SITE_KEY if PASSWORD_AUTH_ENABLED else "",
-    )
 
 
 @app.post("/api/v1/auth/register", status_code=202)

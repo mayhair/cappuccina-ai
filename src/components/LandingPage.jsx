@@ -3,8 +3,7 @@ import { ThemeToggle } from './ThemeToggle'
 import { SparkleIcon, ChatIcon, CapIcon, BulbIcon, GlobeIcon } from './Icons'
 import { GoogleButton } from './GoogleButton'
 import { EmailAuthForm } from './EmailAuthForm'
-import { getAuthOptions } from '../api/authClient'
-import { AUTH_DEFAULTS } from '../config'
+import { AUTH_OPTIONS as options } from '../config'
 import { LanguageGate } from './LanguageGate'
 import { useLanguage } from '../i18n/LanguageProvider'
 
@@ -31,8 +30,6 @@ export function Sky({ theme }) {
 export function LandingPage({ theme, onTheme, error, onSignedIn }) {
   const { t } = useLanguage()
   const [pickerOpen, setPickerOpen] = useState(false)
-  // Buttons start from the frontend config; the server's answer replaces it.
-  const [options, setOptions] = useState(AUTH_DEFAULTS)
   const [emailOpen, setEmailOpen] = useState(false)
   // The hero column stretches to the grid row and stands Cappuccina at its
   // bottom. The email form makes the row taller, so before it opens the column
@@ -67,20 +64,6 @@ export function LandingPage({ theme, onTheme, error, onSignedIn }) {
     window.addEventListener('resize', refit)
     return () => window.removeEventListener('resize', refit)
   }, [pinned])
-
-  useEffect(() => {
-    let canceled = false
-    getAuthOptions()
-      .then((opts) => {
-        if (!canceled) setOptions(opts)
-      })
-      .catch(() => {
-        // Older backend or offline: keep the defaults.
-      })
-    return () => {
-      canceled = true
-    }
-  }, [])
 
   return (
     <>

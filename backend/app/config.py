@@ -137,7 +137,6 @@ PASSWORD_AUTH_ENABLED = os.getenv("PASSWORD_AUTH_ENABLED", "1").strip().lower() 
 )
 # Cloudflare Turnstile guards sign-up. Without a secret key the check is
 # skipped (local dev); app/main.py logs a warning at startup when that happens.
-TURNSTILE_SITE_KEY = os.getenv("TURNSTILE_SITE_KEY", "")
 TURNSTILE_SECRET_KEY = os.getenv("TURNSTILE_SECRET_KEY", "")
 
 # Outgoing mail (confirmation and reset links). The default is the send-only

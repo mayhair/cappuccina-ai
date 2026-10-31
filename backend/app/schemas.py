@@ -140,14 +140,6 @@ class ChangePasswordRequest(BaseModel):
     model_config = {"populate_by_name": True}
 
 
-class AuthOptionsResponse(BaseModel):
-    google: bool
-    password: bool
-    turnstile_site_key: str = Field(alias="turnstileSiteKey")
-
-    model_config = {"populate_by_name": True}
-
-
 class UserResponse(BaseModel):
     id: str
     email: str

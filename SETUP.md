@@ -102,10 +102,9 @@ cp .env.example .env
 | `DATABASE_URL` | On servers | PostgreSQL URL (`postgresql:///cappuccina` on a Linux server) |
 | `APP_ORIGIN` | No | Public URL that users open in the browser (`http://localhost:5173` by default) |
 | `FMHY_MCP_URL` | No | FMHY MCP endpoint (leave empty to disable free-media tools) |
-| `GOOGLE_AUTH_ENABLED` | No | Set to `0` to turn off Google sign-in; Gmail and Calendar connections keep working (`1` by default) |
-| `PASSWORD_AUTH_ENABLED` | No | Set to `0` to turn off email + password sign-in (`1` by default) |
-| `TURNSTILE_SITE_KEY` | For email sign-in | Cloudflare Turnstile site key for the sign-up form (see section 6.6) |
-| `TURNSTILE_SECRET_KEY` | For email sign-in | Turnstile secret key; when empty, sign-up skips the check |
+| `GOOGLE_AUTH_ENABLED` | No | Set to `0` to turn off Google sign-in; Gmail and Calendar connections keep working (`1` by default). Also set `VITE_AUTH_GOOGLE=false` in the root `.env` to hide the button |
+| `PASSWORD_AUTH_ENABLED` | No | Set to `0` to turn off email + password sign-in (`1` by default). Also set `VITE_AUTH_PASSWORD=false` in the root `.env` to hide the form |
+| `TURNSTILE_SECRET_KEY` | For email sign-in | Turnstile secret key; when empty, sign-up skips the check. When set, the frontend needs `VITE_TURNSTILE_SITE_KEY` (see section 6.6) |
 | `MAIL_FROM` | For email sign-in | Sender of confirmation and reset emails, such as `Cappuccina <no-reply@example.com>` |
 | `SMTP_HOST`, `SMTP_PORT` | No | Mail server for outgoing email (`127.0.0.1:25`, the local Postfix, by default) |
 | `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_STARTTLS` | No | Login and STARTTLS, only for an SMTP relay |
@@ -329,14 +328,21 @@ Email + password sign-in needs two things on the server: Cloudflare Turnstile ke
 #### Turnstile
 
 1. In the Cloudflare dashboard, open `Turnstile`, add a widget in `Managed` mode, and add the hostname `cappuccina.<your-domain>`. Add `localhost` too if you want real keys in local development.
-2. Put the keys in `/srv/cappuccina/backend/.env`:
+2. Put the secret key in `/srv/cappuccina/backend/.env`:
 
 ```text
-TURNSTILE_SITE_KEY=<site key>
 TURNSTILE_SECRET_KEY=<secret key>
 ```
 
-If `TURNSTILE_SECRET_KEY` is empty, sign-up works without the check and the backend logs a warning at startup. For local development, the Cloudflare test keys in `backend/.env.example` always pass.
+3. On your local machine, put the site key in a `.env` file in the repository root, then build and deploy the frontend again (see section 6.5):
+
+```text
+VITE_TURNSTILE_SITE_KEY=<site key>
+```
+
+If `TURNSTILE_SECRET_KEY` is empty, sign-up works without the check and the backend logs a warning at startup. If it is set and the frontend was built without the site key, the form shows no security check and every sign-up fails. For local development, the Cloudflare test keys in `backend/.env.example` always pass.
+
+The frontend does not ask the backend which sign-in methods are on. To turn one off, change both `backend/.env` and the root `.env` (see `.env.example`), restart the backend, and build and deploy the frontend again.
 
 #### Before you install Postfix
 
@@ -549,7 +555,7 @@ Look up common errors and their fixes in the table below. Each row lists the sym
 | `Access blocked` during Google sign-in | Add your Google account under Test users on the OAuth consent screen. |
 | Sign-up says `We couldn't send the email` | The backend cannot reach the mail server. Run `systemctl status postfix` and check `SMTP_HOST` and `SMTP_PORT`. Locally, start a test mail server: `python -m aiosmtpd -n -l 127.0.0.1:1025` with `SMTP_PORT=1025`. |
 | Confirmation emails go to spam or never arrive | Check the PTR record, the SPF, DKIM and DMARC records, and `sudo journalctl -u postfix` (see section 6.6). |
-| The security check never shows on the sign-up form | `TURNSTILE_SITE_KEY` is wrong, or the widget's hostnames in Cloudflare don't include the site's hostname. |
+| The security check never shows on the sign-up form | The frontend was built without `VITE_TURNSTILE_SITE_KEY`, the key is wrong, or the widget's hostnames in Cloudflare don't include the site's hostname. |
 | `Testing webpages isn't set up on this server` | Run `python -m playwright install chromium` in `backend/.venv`, and on Linux run `sudo .venv/bin/python -m playwright install-deps chromium`. |
 | `podman run` fails on a fresh VPS | Make sure that `kernel.apparmor_restrict_unprivileged_userns` is `0`, `Linger=yes` is set for `cappuccina`, `/etc/subuid` and `/etc/subgid` contain the user range, and `delegate.conf` is loaded. |
 | `wrangler deploy` succeeds but the site returns `404` | Attach your custom domain under `Workers -> cappuccina-frontend -> Settings -> Domains & Routes` in Cloudflare. |
