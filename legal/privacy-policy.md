@@ -1,9 +1,9 @@
 # Cappuccina Privacy Policy
 
 Effective date: 20 October 2026  
-Last updated: 30 October 2026
+Last updated: 1 November 2026
 
-This Privacy Policy explains what information Cappuccina collects, why we collect it, who we share it with, and the choices you have. Cappuccina is the AI chatbot at [cappuccina.mayhair.net](https://cappuccina.mayhair.net). It is run by Mahaer Mahmud, an individual based in Pakistan ("we", "us" or "our"). We are responsible for your information.
+This Privacy Policy explains what information Cappuccina collects, why we collect it, who we share it with, and the choices you have. Cappuccina is the AI chatbot at [cappuccina.app](https://cappuccina.app). It is run by Mahaer Mahmud, an individual based in Pakistan ("we", "us" or "our"). We are responsible for your information.
 
 ## The short version
 
