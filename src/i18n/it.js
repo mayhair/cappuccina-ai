@@ -24,11 +24,11 @@ export default {
   'landing.heroAlt':
     'Ballerina Cappuccina, una ballerina dei cartoni animati con una tazza di cappuccino al posto della testa, che saluta',
   'landing.title': 'Ciao! Sono Ballerina Cappuccina',
-  'landing.sub': 'La tua amica AI per chiacchierare: chiedimi qualsiasi cosa, oppure impariamo insieme',
+  'landing.sub': 'La tua amica IA per chiacchierare: chiedimi qualsiasi cosa, oppure impariamo insieme',
   'landing.google': 'Continua con Google',
   'landing.or': 'oppure',
   'landing.email': 'Continua con l’email',
-  'landing.note': 'Sono un chatbot AI, non una persona',
+  'landing.note': 'Sono un chatbot IA, non una persona',
   'landing.legal.before': 'Accedendo, confermo di accettare i ',
   'landing.legal.terms': 'Termini di servizio',
   'landing.legal.and': ' e l’',
@@ -144,7 +144,7 @@ export default {
   'settings.adult.section': 'Contenuti 18+',
 
   'common.close': 'Chiudi',
-  'sidebar.avatarAlt': 'Ballerina Cappuccina, un personaggio AI con una tazza di caffè al posto della testa',
+  'sidebar.avatarAlt': 'Ballerina Cappuccina, un personaggio IA con una tazza di caffè al posto della testa',
   'sidebar.brand': 'Cappuccina',
   'sidebar.close': 'Chiudi la barra laterale',
   'sidebar.newChat': 'Nuova chat',
@@ -529,5 +529,5 @@ export default {
   'settings.story.choices': 'Suggerisci le prossime mosse',
   'settings.story.choicesHint': 'In modalità storia, Cappuccina propone 2–3 idee su cosa potresti fare dopo, come pulsanti sotto la sua risposta. Puoi sempre scrivere la tua.',
 
-  'app.title': 'Ballerina Cappuccina — la tua amica AI per chiacchierare',
+  'app.title': 'Ballerina Cappuccina — la tua amica IA per chiacchierare',
 }
