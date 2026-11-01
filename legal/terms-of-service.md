@@ -1,13 +1,13 @@
 # Cappuccina Terms of Service
 
 Effective date: 20 October 2026  
-Last updated: 22 October 2026
+Last updated: 1 November 2026
 
-Welcome to Cappuccina! These Terms of Service ("Terms") are the rules for using Cappuccina, the AI chatbot at [cappuccina.mayhair.net](https://cappuccina.mayhair.net) (the "Service"). Cappuccina is run by Mahaer Mahmud, an individual based in Pakistan ("we", "us" or "our").
+Welcome to Cappuccina! These Terms of Service ("Terms") are the rules for using Cappuccina, the AI chatbot at [cappuccina.app](https://cappuccina.app) (the "Service"). Cappuccina is run by Mahaer Mahmud, an individual based in Pakistan ("we", "us" or "our").
 
 Please read these Terms carefully. By signing in or using Cappuccina, you agree to them. If you don't agree, please don't use the Service.
 
-Our [Privacy Policy](https://cappuccina.mayhair.net/privacy) explains what information we collect and how we use it. It is part of these Terms.
+Our [Privacy Policy](https://cappuccina.app/privacy) explains what information we collect and how we use it. It is part of these Terms.
 
 ## 1. Who can use Cappuccina
 

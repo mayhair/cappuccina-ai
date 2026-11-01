@@ -18,7 +18,7 @@ Primary users are teenagers aged 13 and older and young adults. They use Cappucc
 
 Adults aged 18 and over can opt into Adult mode from Settings.
 
-The app is live at `cappuccina.mayhair.net` and is run by one operator. Sign-in is open to any Google account.
+The app is live at `cappuccina.app` and is run by one operator. Sign-in is open to any Google account.
 
 ## Product Purpose
 
@@ -89,7 +89,7 @@ Product constraints:
 - Character reference images and lore entries in `backend/agent/lore/` and `backend/agent/lore/characters/refs/`.
 - Product art, icons, manifest and offline page in `assets/`.
 - Terms of Service and Privacy Policy in `legal/`.
-- A running deployment at `cappuccina.mayhair.net`.
+- A running deployment at `cappuccina.app`.
 - No testimonials, benchmarks, prices or third-party case studies exist. Future work must not invent them.
 
 ## Product Principles

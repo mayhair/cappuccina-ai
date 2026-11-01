@@ -27,7 +27,7 @@ function render(slug) {
   const body = marked
     .parse(md)
     // Links between the documents stay on whichever host serves them (dev or live).
-    .replace(/href="https:\/\/cappuccina\.mayhair\.net\/(terms|privacy)"/g, 'href="/$1"')
+    .replace(/href="https:\/\/cappuccina\.app\/(terms|privacy)"/g, 'href="/$1"')
     // Every other link leaves the site, so open it in a new tab.
     .replace(/<a href="(https?:[^"]+)"/g, '<a href="$1" target="_blank" rel="noopener noreferrer"')
   const other = slug === 'terms' ? 'privacy' : 'terms'

@@ -6,7 +6,7 @@
 
 <p align="center">
   A friendly AI chatbot with a personality, a tutor mode, and a built-in webpage workshop.<br>
-  <a href="https://cappuccina.mayhair.net">Try it live</a> · <a href="SETUP.md">Run it yourself</a>
+  <a href="https://cappuccina.app">Try it live</a> · <a href="SETUP.md">Run it yourself</a>
 </p>
 
 ---
@@ -47,7 +47,7 @@ A few more nice things:
 - You sign in with your Google account. There are no separate passwords.
 - No ads, no tracking scripts, no analytics.
 - Deleting your account removes everything: chats, files, images, webpages, and memories.
-- The full details are in the [Privacy Policy](legal/privacy-policy.md) and [Terms of Service](legal/terms-of-service.md). These apply only to the hosted deployment at [cappuccina.mayhair.net](https://cappuccina.mayhair.net). They don't limit what you can do with the source code (see [License](#license)).
+- The full details are in the [Privacy Policy](legal/privacy-policy.md) and [Terms of Service](legal/terms-of-service.md). These apply only to the hosted deployment at [cappuccina.app](https://cappuccina.app). They don't limit what you can do with the source code (see [License](#license)).
 
 ---
 
@@ -104,7 +104,7 @@ The code is licensed under the [Apache License 2.0](LICENSE).
 
 The images are licensed under [CC BY 4.0](ASSETS.md) (full text in [LICENSE-CC-BY-4.0](LICENSE-CC-BY-4.0)). Neither license covers the Cappuccina AI name and logo. The Italian Brainrot characters are internet folklore, and this project doesn't own them.
 
-The [Terms of Service](legal/terms-of-service.md) and [Privacy Policy](legal/privacy-policy.md) govern only the hosted service at [cappuccina.mayhair.net](https://cappuccina.mayhair.net). They are not license terms and don't override or restrict the open source licenses above. If you host your own copy, you can run it under whatever terms and policies you like, as long as you follow the Apache 2.0 and CC BY 4.0 requirements (and the name and logo exclusion above).
+The [Terms of Service](legal/terms-of-service.md) and [Privacy Policy](legal/privacy-policy.md) govern only the hosted service at [cappuccina.app](https://cappuccina.app). They are not license terms and don't override or restrict the open source licenses above. If you host your own copy, you can run it under whatever terms and policies you like, as long as you follow the Apache 2.0 and CC BY 4.0 requirements (and the name and logo exclusion above).
 
 ---
 

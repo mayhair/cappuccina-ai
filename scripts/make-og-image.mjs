@@ -123,7 +123,7 @@ const html = `<!doctype html>
     </div>
   </div>
 
-  <div class="url"><b>cappuccina</b>.mayhair.net</div>
+  <div class="url"><b>cappuccina</b>.app</div>
 </body></html>`
 
 const browser = await chromium.launch()
