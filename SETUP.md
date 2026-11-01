@@ -352,6 +352,17 @@ Mail from a server only reaches inboxes when the receiving servers trust the ser
 2. **Reverse DNS (PTR).** In your VPS host's panel, set the PTR record of the server's IPv4 address to `mail.<your-domain>`. Gmail and Outlook reject or flag mail from IPs without a matching PTR record. If the server also has IPv6, set its PTR as well, or make Postfix send over IPv4 only (step 2 below).
 3. **IP reputation.** Look up the IP on a blocklist checker such as `https://mxtoolbox.com/blacklists.aspx`. If it is listed, ask your host for a different IP.
 
+#### Using different domains for the mail server and the sender
+
+The commands below use `<your-domain>` for everything, but the mail server's name and the address in `MAIL_FROM` can be on different domains. An IPv4 address has only one PTR record, so a neutral server name is useful if the VPS also sends mail for apps other than Cappuccina. For example, the PTR can stay at `mail.example.net` while Cappuccina sends from `no-reply@example.app`. The PTR does not have to match the sender's domain. It only has to name a host whose `A` record points back to the same IP address.
+
+If the domains differ, use them like this:
+
+- **Mail server domain:** the PTR record, the `A` record for `mail`, and Postfix's `myhostname`.
+- **Sender domain:** the SPF, DKIM and DMARC records, Postfix's `myorigin`, the OpenDKIM `-d` and `Domain` values, and `MAIL_FROM`.
+
+To sign mail for several sender domains, list them in OpenDKIM as `Domain example.net,example.app`, and publish the same DKIM public key on each one. Each sender domain also needs its own SPF and DMARC records.
+
 #### DNS records
 
 In Cloudflare DNS for `<your-domain>`, add these records. Set each one to **DNS only** (grey cloud): mail does not go through the Cloudflare proxy.
