@@ -397,15 +397,15 @@ sudo postconf -e 'smtp_tls_loglevel = 1'
 
 Leave out the `inet_protocols = ipv4` line if your IPv6 address has a PTR record and is listed in the SPF record.
 
-3. Create a DKIM key. `cappuccina` is the selector name, and you can choose another one:
+3. Create a DKIM key. `mail` is the selector name, and you can choose another one:
 
 ```bash
 sudo install -d -o opendkim -g opendkim -m 700 /etc/opendkim/keys
-sudo -u opendkim opendkim-genkey -b 2048 -d <your-domain> -s cappuccina -D /etc/opendkim/keys
+sudo -u opendkim opendkim-genkey -b 2048 -d <your-domain> -s mail -D /etc/opendkim/keys
 sudo tee -a /etc/opendkim.conf >/dev/null <<'EOF'
 Domain                  <your-domain>
-Selector                cappuccina
-KeyFile                 /etc/opendkim/keys/cappuccina.private
+Selector                mail
+KeyFile                 /etc/opendkim/keys/mail.private
 Socket                  inet:8891@127.0.0.1
 Canonicalization        relaxed/simple
 EOF
@@ -417,7 +417,7 @@ sudo systemctl restart opendkim postfix
 
 If `/etc/opendkim.conf` already has a `Socket` line, comment it out so that only the `inet:8891@127.0.0.1` line stays.
 
-4. Publish the public key. Print it with `sudo cat /etc/opendkim/keys/cappuccina.txt`, join the quoted parts into one string, and add it in Cloudflare DNS as a `TXT` record named `cappuccina._domainkey` (DNS only). The content starts with `v=DKIM1; h=sha256; k=rsa; p=`.
+4. Publish the public key. Print it with `sudo cat /etc/opendkim/keys/mail.txt`, join the quoted parts into one string, and add it in Cloudflare DNS as a `TXT` record named `mail._domainkey` (DNS only). The content starts with `v=DKIM1; h=sha256; k=rsa; p=`.
 
 5. Set the sender in `/srv/cappuccina/backend/.env`, then restart the backend:
 
