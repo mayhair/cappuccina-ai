@@ -288,7 +288,7 @@ Expose the backend through an outbound Cloudflare Tunnel so no public HTTP port 
 
 1. In the Cloudflare dashboard, open `Zero Trust -> Networks -> Tunnels`, create a `cloudflared` tunnel, and copy the tunnel token.
 2. Add a public hostname on the tunnel for `cappuccina-api.<your-domain>` pointing to `HTTP` at `127.0.0.1:8000`.
-3. Install `cloudflared` on the VPS and register the service with your token:
+3. Install `cloudflared` on the VPS:
 
 ```bash
 sudo mkdir -p --mode=0755 /usr/share/keyrings
@@ -297,8 +297,50 @@ curl -fsSL https://pkg.cloudflare.com/cloudflare-main.gpg \
 echo "deb [signed-by=/usr/share/keyrings/cloudflare-main.gpg] https://pkg.cloudflare.com/cloudflared any main" \
   | sudo tee /etc/apt/sources.list.d/cloudflared.list
 sudo apt update && sudo apt install -y cloudflared
-sudo cloudflared service install <TOKEN-FROM-THE-DASHBOARD>
 ```
+
+4. Run the tunnel as its own systemd unit, `cappuccina-tunnel.service`. Do not use `cloudflared service install`. That command creates one shared `cloudflared.service` per machine, so it fails or replaces the existing unit when the VPS already runs another tunnel. A separate unit lets each tunnel start, stop and restart on its own.
+
+Put the token in a root-only environment file. `cloudflared tunnel run` reads it from `TUNNEL_TOKEN`, so the token does not appear in the process list:
+
+```bash
+sudo install -d -m 755 /etc/cappuccina
+sudo install -m 600 /dev/null /etc/cappuccina/tunnel.env
+sudo nano /etc/cappuccina/tunnel.env   # add one line: TUNNEL_TOKEN=<TOKEN-FROM-THE-DASHBOARD>
+```
+
+Create and start the unit. `DynamicUser=yes` runs `cloudflared` as a temporary unprivileged user, because the tunnel needs no root access:
+
+```bash
+sudo tee /etc/systemd/system/cappuccina-tunnel.service >/dev/null <<'UNIT'
+[Unit]
+Description=Cloudflare Tunnel for Cappuccina
+After=network-online.target cappuccina.service
+Wants=network-online.target
+
+[Service]
+Type=notify
+DynamicUser=yes
+EnvironmentFile=/etc/cappuccina/tunnel.env
+ExecStart=/usr/bin/cloudflared --no-autoupdate tunnel run
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+sudo systemctl daemon-reload
+sudo systemctl enable --now cappuccina-tunnel.service
+journalctl -u cappuccina-tunnel -n 50
+```
+
+The log must show `Registered tunnel connection`, and the tunnel must show as `HEALTHY` in the Cloudflare dashboard.
+
+> **Note:** If you set up an older version of this guide, the Cappuccina tunnel runs as `cloudflared.service`. After `cappuccina-tunnel.service` is healthy, run `sudo cloudflared service uninstall` to remove the old unit. Do this only if `cloudflared.service` runs the Cappuccina token and no other tunnel.
 
 Deploy the frontend from your local machine as a Cloudflare Worker that serves `./dist` and proxies `/api/*` to the tunnel hostname:
 
